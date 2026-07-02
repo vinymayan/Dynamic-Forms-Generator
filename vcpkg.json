@@ -11,7 +11,8 @@
     "clib-util",
     "clib-utils-qtr",
     "directxtk",
-    "skse-mcp"
+    "skse-mcp",
+    "rapidjson"
   ],
   "overrides": [
     {
