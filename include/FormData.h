@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -17,7 +18,8 @@ namespace DynamicForms {
         SoundDescriptor,
         Light,
         Explosion,
-        Activator
+        Activator,
+        NPC
     };
 
     enum class GlobalType
@@ -60,10 +62,17 @@ namespace DynamicForms {
     {
         PerkConditionKind kind{ PerkConditionKind::Raw };
         std::uint32_t functionId{ 0 };
+        std::string functionName;
         std::uint32_t opCode{ 0 };
         float comparisonValue{ 1.0F };
         bool isOr{ false };
+        bool useAliases{ false };
         bool useGlobalComparison{ false };
+        bool usePackData{ false };
+        bool swapTarget{ false };
+        std::uint32_t runOn{ 0 };
+        std::uint32_t dataId{ 0 };
+        std::string runOnRef;
         std::string comparisonGlobal;
         std::string param1;
         std::string param2;
@@ -105,6 +114,23 @@ namespace DynamicForms {
         {
             return lhs.editorID == rhs.editorID && lhs.formID == rhs.formID;
         }
+    };
+
+    struct RankedFormRef
+    {
+        FormRef form;
+        std::int32_t rank{ 0 };
+    };
+
+    struct TintLayer
+    {
+        std::uint16_t index{ 0 };
+        std::uint16_t preset{ 0 };
+        float interpolation{ 0.0F };
+        std::uint8_t red{ 0 };
+        std::uint8_t green{ 0 };
+        std::uint8_t blue{ 0 };
+        std::uint8_t alpha{ 255 };
     };
 
     struct DynamicForm
@@ -188,6 +214,57 @@ namespace DynamicForms {
         FormRef soundLoop;
         FormRef soundActivate;
         FormRef waterType;
+        FormRef race;
+        FormRef skin;
+        FormRef defaultOutfit;
+        FormRef sleepOutfit;
+        FormRef voice;
+        FormRef hairColor;
+        FormRef faceTexture;
+        FormRef npcClass;
+        FormRef combatStyle;
+        FormRef giftFilter;
+        FormRef deathItem;
+        FormRef defaultPackageList;
+        FormRef crimeFaction;
+        bool femaleNpc{ false };
+        bool oppositeGenderAnim{ false };
+        bool essential{ false };
+        bool protectedNpc{ false };
+        bool unique{ false };
+        bool calcStats{ false };
+        bool respawn{ false };
+        bool doesntAffectStealthMeter{ false };
+        bool doesntBleed{ false };
+        bool bleedoutOverrideFlag{ false };
+        bool simpleActor{ false };
+        bool noActivation{ false };
+        bool ghost{ false };
+        bool invulnerable{ false };
+        float height{ 1.0F };
+        float weight{ 50.0F };
+        std::uint16_t health{ 100 };
+        std::uint16_t magicka{ 50 };
+        std::uint16_t stamina{ 50 };
+        std::int16_t healthOffset{ 0 };
+        std::int16_t magickaOffset{ 0 };
+        std::int16_t staminaOffset{ 0 };
+        std::uint16_t calcMinLevel{ 1 };
+        std::uint16_t calcMaxLevel{ 1 };
+        std::uint16_t npcLevel{ 1 };
+        std::uint16_t speedMult{ 100 };
+        std::uint16_t dispositionBase{ 35 };
+        std::int16_t bleedoutOverride{ 0 };
+        std::array<std::uint8_t, 18> skills{};
+        std::array<std::uint8_t, 18> skillOffsets{};
+        std::array<float, 19> faceMorphs{};
+        std::array<std::int32_t, 4> faceParts{};
+        std::vector<FormRef> headParts;
+        std::vector<TintLayer> tintLayers;
+        std::vector<RankedFormRef> npcFactions;
+        std::vector<RankedFormRef> npcPerks;
+        std::vector<FormRef> spells;
         std::uint32_t localId{ 0 };
+        bool dirty{ false };
     };
 }

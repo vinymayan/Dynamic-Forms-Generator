@@ -1,5 +1,6 @@
 #include "Manager.h"
 
+#include "ConditionCatalog.h"
 #include "DPFAPI.h"
 #include "ListManager.h"
 #include "logger.h"
@@ -8,8 +9,10 @@
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/ostreamwrapper.h>
@@ -18,6 +21,8 @@
 
 namespace {
     std::vector<DynamicForms::DynamicForm> forms;
+    constexpr const char* UPDATED_EVENT = "DynamicFormsGeneratorUpdated";
+    constexpr const char* LOADED_EVENT = "DynamicFormsGeneratorLoaded";
     constexpr std::array CONDITION_KIND_NAMES{
         "Raw",
         "GetGlobalValue",
@@ -27,6 +32,24 @@ namespace {
         "GetQuestCompleted",
         "HasSpell"
     };
+
+    void DispatchEvent(const char* eventName, const std::string_view strArg = {}, const float numArg = 0.0F) {
+        auto* dispatcher = SKSE::GetModCallbackEventSource();
+        if (!dispatcher) {
+            logger::warn("Could not dispatch {}: event source unavailable.", eventName);
+            return;
+        }
+
+        const std::string strArgString(strArg);
+        SKSE::ModCallbackEvent event{
+            RE::BSFixedString(eventName),
+            RE::BSFixedString(strArgString.c_str()),
+            numArg,
+            nullptr
+        };
+        dispatcher->SendEvent(&event);
+        logger::info("Dispatched {} strArg '{}' numArg {}.", eventName, strArg, numArg);
+    }
 
     std::string ToString(const DynamicForms::FormKind kind) {
         switch (kind) {
@@ -50,6 +73,8 @@ namespace {
             return "Explosion";
         case DynamicForms::FormKind::Activator:
             return "Activator";
+        case DynamicForms::FormKind::NPC:
+            return "NPC";
         case DynamicForms::FormKind::Global:
         default:
             return "Global";
@@ -86,6 +111,9 @@ namespace {
         }
         if (value == "Activator") {
             return DynamicForms::FormKind::Activator;
+        }
+        if (value == "NPC") {
+            return DynamicForms::FormKind::NPC;
         }
         return DynamicForms::FormKind::Global;
     }
@@ -149,6 +177,15 @@ namespace {
             }
         }
         return DynamicForms::PerkConditionKind::Raw;
+    }
+
+    std::uint32_t FunctionIdByCatalogName(const std::string_view name, const std::uint32_t fallback) {
+        for (const auto& function : ConditionCatalog::GetFunctions()) {
+            if (std::string_view(function.name) == name) {
+                return function.id;
+            }
+        }
+        return fallback;
     }
 
     std::string ToString(const DynamicForms::HeadPartType type) {
@@ -221,6 +258,24 @@ namespace {
         });
     }
 
+    DynamicForms::FormRef ParseConfigFormRefString(const std::string& value) {
+        DynamicForms::FormRef ref;
+        const auto open = value.rfind(" (");
+        if (open != std::string::npos && value.ends_with(')')) {
+            ref.editorID = value.substr(0, open);
+            ref.formID = value.substr(open + 2, value.size() - open - 3);
+            return ref;
+        }
+
+        if (LooksLikeFormIDString(value)) {
+            ref.formID = value;
+        } else {
+            ref.editorID = value;
+            ref.formID = value;
+        }
+        return ref;
+    }
+
     DynamicForms::FormRef ReadFormRefValue(const rapidjson::Value& value) {
         DynamicForms::FormRef ref;
         if (value.IsObject()) {
@@ -243,12 +298,7 @@ namespace {
         }
 
         if (value.IsString()) {
-            const std::string raw = value.GetString();
-            if (LooksLikeFormIDString(raw)) {
-                ref.formID = raw;
-            } else {
-                ref.editorID = raw;
-            }
+            ref = ParseConfigFormRefString(value.GetString());
         } else if (value.IsUint()) {
             ref.formID = std::format("{:08X}", value.GetUint());
         }
@@ -291,6 +341,73 @@ namespace {
         array.PushBack(value, allocator);
     }
 
+    void ReadFormRefArray(const rapidjson::Value& doc, const char* key, std::vector<DynamicForms::FormRef>& target) {
+        if (!doc.HasMember(key) || !doc[key].IsArray()) {
+            return;
+        }
+
+        target.clear();
+        for (const auto& item : doc[key].GetArray()) {
+            auto ref = ReadFormRefValue(item);
+            if (!ref.empty()) {
+                target.push_back(std::move(ref));
+            }
+        }
+    }
+
+    void AddFormRefArray(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::vector<DynamicForms::FormRef>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& value : values) {
+            PushFormRef(array, allocator, value);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    void ReadRankedFormRefArray(const rapidjson::Value& doc, const char* key, std::vector<DynamicForms::RankedFormRef>& target) {
+        if (!doc.HasMember(key) || !doc[key].IsArray()) {
+            return;
+        }
+
+        target.clear();
+        for (const auto& item : doc[key].GetArray()) {
+            if (!item.IsObject()) {
+                continue;
+            }
+
+            DynamicForms::RankedFormRef ranked;
+            if (item.HasMember("form")) {
+                ranked.form = ReadFormRefValue(item["form"]);
+            }
+            if (item.HasMember("rank") && item["rank"].IsInt()) {
+                ranked.rank = item["rank"].GetInt();
+            }
+            if (!ranked.form.empty()) {
+                target.push_back(std::move(ranked));
+            }
+        }
+    }
+
+    void AddRankedFormRefArray(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::vector<DynamicForms::RankedFormRef>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& value : values) {
+            if (value.form.empty()) {
+                continue;
+            }
+            rapidjson::Value item(rapidjson::kObjectType);
+            rapidjson::Value formRef(rapidjson::kObjectType);
+            if (!value.form.editorID.empty()) {
+                formRef.AddMember("editorID", rapidjson::Value(value.form.editorID.c_str(), allocator), allocator);
+            }
+            if (!value.form.formID.empty()) {
+                formRef.AddMember("formID", rapidjson::Value(value.form.formID.c_str(), allocator), allocator);
+            }
+            item.AddMember("form", formRef, allocator);
+            item.AddMember("rank", value.rank, allocator);
+            array.PushBack(item, allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
     std::uint32_t FormTypeForKind(const DynamicForms::FormKind kind) {
         switch (kind) {
         case DynamicForms::FormKind::Keyword:
@@ -313,6 +430,8 @@ namespace {
             return static_cast<std::uint32_t>(RE::FormType::Explosion);
         case DynamicForms::FormKind::Activator:
             return static_cast<std::uint32_t>(RE::FormType::Activator);
+        case DynamicForms::FormKind::NPC:
+            return static_cast<std::uint32_t>(RE::FormType::NPC);
         case DynamicForms::FormKind::Global:
         default:
             return static_cast<std::uint32_t>(RE::FormType::Global);
@@ -384,14 +503,7 @@ namespace {
     }
 
     RE::TESForm* ResolveConfigForm(const std::string& value) {
-        DynamicForms::FormRef ref;
-        if (LooksLikeFormIDString(value)) {
-            ref.formID = value;
-        } else {
-            ref.editorID = value;
-            ref.formID = value;
-        }
-        return ResolveConfigForm(ref);
+        return ResolveConfigForm(ParseConfigFormRefString(value));
     }
 
     bool ConfigureOutfit(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
@@ -455,20 +567,24 @@ namespace {
     }
 
     std::uint32_t FunctionIdForCondition(const DynamicForms::PerkCondition& condition) {
+        if (condition.functionId != 0 || condition.kind == DynamicForms::PerkConditionKind::Raw) {
+            return condition.functionId;
+        }
+
         using FunctionID = RE::FUNCTION_DATA::FunctionID;
         switch (condition.kind) {
         case DynamicForms::PerkConditionKind::GetGlobalValue:
-            return static_cast<std::uint32_t>(FunctionID::kGetGlobalValue);
+            return FunctionIdByCatalogName("GetGlobalValue", static_cast<std::uint32_t>(FunctionID::kGetGlobalValue));
         case DynamicForms::PerkConditionKind::GetActorValue:
-            return static_cast<std::uint32_t>(FunctionID::kGetActorValue);
+            return FunctionIdByCatalogName("GetActorValue", static_cast<std::uint32_t>(FunctionID::kGetActorValue));
         case DynamicForms::PerkConditionKind::GetBaseActorValue:
-            return static_cast<std::uint32_t>(FunctionID::kGetBaseActorValue);
+            return FunctionIdByCatalogName("GetBaseActorValue", static_cast<std::uint32_t>(FunctionID::kGetBaseActorValue));
         case DynamicForms::PerkConditionKind::HasPerk:
-            return static_cast<std::uint32_t>(FunctionID::kHasPerk);
+            return FunctionIdByCatalogName("HasPerk", static_cast<std::uint32_t>(FunctionID::kHasPerk));
         case DynamicForms::PerkConditionKind::GetQuestCompleted:
-            return static_cast<std::uint32_t>(FunctionID::kGetQuestCompleted);
+            return FunctionIdByCatalogName("GetQuestCompleted", static_cast<std::uint32_t>(FunctionID::kGetQuestCompleted));
         case DynamicForms::PerkConditionKind::HasSpell:
-            return static_cast<std::uint32_t>(FunctionID::kHasSpell);
+            return FunctionIdByCatalogName("HasSpell", static_cast<std::uint32_t>(FunctionID::kHasSpell));
         case DynamicForms::PerkConditionKind::Raw:
         default:
             return condition.functionId;
@@ -485,6 +601,26 @@ namespace {
         condition.head = nullptr;
     }
 
+    std::uintptr_t ParseIntegerParam(const std::string& value) {
+        return value.empty() ? 0 : static_cast<std::uintptr_t>(std::stoll(value, nullptr, 0));
+    }
+
+    std::uintptr_t ParseFloatParam(const std::string& value) {
+        const auto floatValue = value.empty() ? 0.0F : std::stof(value);
+        std::uint32_t bits = 0;
+        static_assert(sizeof(bits) == sizeof(floatValue));
+        std::memcpy(&bits, &floatValue, sizeof(bits));
+        return bits;
+    }
+
+    void* StoreConditionStringParam(const std::string& value) {
+        static std::vector<std::unique_ptr<std::string>> storedStrings;
+        auto stored = std::make_unique<std::string>(value);
+        auto* result = stored->data();
+        storedStrings.push_back(std::move(stored));
+        return result;
+    }
+
     void SetConditionParam(RE::TESConditionItem* item, const DynamicForms::PerkCondition& condition, const std::size_t index, const std::string& value) {
         if (!item || index >= 2 || value.empty()) {
             return;
@@ -492,17 +628,37 @@ namespace {
 
         try {
             const auto functionId = FunctionIdForCondition(condition);
-            if (functionId == static_cast<std::uint32_t>(RE::FUNCTION_DATA::FunctionID::kGetActorValue) ||
-                functionId == static_cast<std::uint32_t>(RE::FUNCTION_DATA::FunctionID::kGetBaseActorValue)) {
-                const auto actorValue = static_cast<std::uintptr_t>(std::stoul(value, nullptr, 0));
-                item->data.functionData.params[index] = reinterpret_cast<void*>(actorValue);
+            const auto* functionInfo = ConditionCatalog::FindFunction(functionId);
+            const std::string_view rawType = functionInfo ? (index == 0 ? functionInfo->rawParam1 : functionInfo->rawParam2) : "";
+
+            if (ConditionCatalog::IsIntegerParam(rawType)) {
+                item->data.functionData.params[index] = reinterpret_cast<void*>(ParseIntegerParam(value));
                 return;
             }
 
-            const auto formId = FormUtil::FormIDFromString(value);
-            item->data.functionData.params[index] = formId != 0 ? RE::TESForm::LookupByID(formId) : nullptr;
+            if (ConditionCatalog::IsFloatParam(rawType)) {
+                item->data.functionData.params[index] = reinterpret_cast<void*>(ParseFloatParam(value));
+                return;
+            }
+
+            if (ConditionCatalog::IsStringParam(rawType)) {
+                item->data.functionData.params[index] = StoreConditionStringParam(value);
+                return;
+            }
+
+            if (ConditionCatalog::IsFormParam(rawType)) {
+                item->data.functionData.params[index] = ResolveConfigForm(value);
+                return;
+            }
+
+            if (auto* form = ResolveConfigForm(value)) {
+                item->data.functionData.params[index] = form;
+                return;
+            }
+
+            item->data.functionData.params[index] = reinterpret_cast<void*>(ParseIntegerParam(value));
         } catch (...) {
-            logger::warn("Invalid perk condition param '{}'", value);
+            logger::warn("Invalid condition param '{}' for function {} param {}", value, FunctionIdForCondition(condition), index + 1);
         }
     }
 
@@ -511,9 +667,20 @@ namespace {
         const auto functionId = FunctionIdForCondition(condition);
         item->data.functionData.function = static_cast<RE::FUNCTION_DATA::FunctionID>(functionId);
         item->data.flags.isOR = condition.isOr;
+        item->data.flags.usesAliases = condition.useAliases;
         item->data.flags.opCode = static_cast<RE::CONDITION_ITEM_DATA::OpCode>(std::min(condition.opCode, 5U));
         item->data.flags.global = condition.useGlobalComparison;
+        item->data.flags.usePackData = condition.usePackData;
+        item->data.flags.swapTarget = condition.swapTarget;
+        item->data.object = static_cast<RE::CONDITIONITEMOBJECT>(std::min(condition.runOn, 8U));
+        item->data.dataID = condition.dataId;
         item->data.comparisonValue.f = condition.comparisonValue;
+
+        if (!condition.runOnRef.empty()) {
+            if (auto* runOnForm = ResolveConfigForm(condition.runOnRef); runOnForm && runOnForm->Is(RE::FormType::Reference)) {
+                item->data.runOnRef = runOnForm->As<RE::TESObjectREFR>()->CreateRefHandle();
+            }
+        }
 
         if (condition.useGlobalComparison && !condition.comparisonGlobal.empty()) {
             if (auto* global = ResolveConfigForm(condition.comparisonGlobal); global && global->Is(RE::FormType::Global)) {
@@ -799,6 +966,15 @@ namespace {
         soundDef->lengthCharacteristics.looping = static_cast<RE::BGSStandardSoundDef::LengthCharacteristics::Looping>(form.looping);
         soundDef->lengthCharacteristics.rumbleSendValue = form.rumbleSendValue;
 
+        if (!form.conditions.empty()) {
+            if (!soundDef->conditions) {
+                soundDef->conditions = new RE::TESCondition();
+            }
+            ApplyConditions(*soundDef->conditions, form.conditions);
+        } else if (soundDef->conditions) {
+            ClearCondition(*soundDef->conditions);
+        }
+
         logger::info("Configured sound descriptor '{}' with {} sound files.", form.editorId, soundDef->soundFiles.size());
         return true;
     }
@@ -939,6 +1115,205 @@ namespace {
         return true;
     }
 
+    void SetActorBaseFlag(RE::TESNPC& npc, const RE::ACTOR_BASE_DATA::Flag flag, const bool enabled) {
+        if (enabled) {
+            npc.actorData.actorBaseFlags.set(flag);
+        } else {
+            npc.actorData.actorBaseFlags.reset(flag);
+        }
+    }
+
+    template <class T>
+    T* ResolveAs(const DynamicForms::FormRef& ref) {
+        auto* form = ResolveConfigForm(ref);
+        return form ? form->As<T>() : nullptr;
+    }
+
+    bool ConfigureNPC(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* npc = tesForm ? tesForm->As<RE::TESNPC>() : nullptr;
+        if (!npc) {
+            logger::warn("Dynamic form '{}' is not a TESNPC", form.editorId);
+            return false;
+        }
+
+        npc->SetFormEditorID(form.editorId.c_str());
+        npc->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        npc->height = form.height;
+        npc->weight = form.weight;
+        npc->bodyTintColor = RE::Color(form.red, form.green, form.blue, form.alpha);
+
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kFemale, form.femaleNpc);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kOppositeGenderAnims, form.oppositeGenderAnim);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kEssential, form.essential);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kProtected, form.protectedNpc);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kUnique, form.unique);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kPCLevelMult, form.calcStats);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kRespawn, form.respawn);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kDoesntAffectStealthMeter, form.doesntAffectStealthMeter);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kDoesntBleed, form.doesntBleed);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kBleedoutOverride, form.bleedoutOverrideFlag);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kSimpleActor, form.simpleActor);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kNoActivation, form.noActivation);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kIsGhost, form.ghost);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kInvulnerable, form.invulnerable);
+
+        npc->playerSkills.health = form.health;
+        npc->playerSkills.magicka = form.magicka;
+        npc->playerSkills.stamina = form.stamina;
+        npc->actorData.healthOffset = form.healthOffset;
+        npc->actorData.magickaOffset = form.magickaOffset;
+        npc->actorData.staminaOffset = form.staminaOffset;
+        npc->actorData.calcLevelMin = form.calcMinLevel;
+        npc->actorData.calcLevelMax = form.calcMaxLevel;
+        npc->actorData.level = form.npcLevel;
+        npc->actorData.speedMult = form.speedMult;
+        npc->actorData.baseDisposition = form.dispositionBase;
+        npc->actorData.bleedoutOverride = form.bleedoutOverride;
+        for (std::size_t i = 0; i < form.skills.size(); ++i) {
+            npc->playerSkills.values[i] = form.skills[i];
+            npc->playerSkills.offsets[i] = form.skillOffsets[i];
+        }
+
+        npc->race = ResolveAs<RE::TESRace>(form.race);
+        npc->farSkin = ResolveAs<RE::TESObjectARMO>(form.skin);
+        npc->defaultOutfit = ResolveAs<RE::BGSOutfit>(form.defaultOutfit);
+        npc->sleepOutfit = ResolveAs<RE::BGSOutfit>(form.sleepOutfit);
+        npc->voiceType = ResolveAs<RE::BGSVoiceType>(form.voice);
+        npc->npcClass = ResolveAs<RE::TESClass>(form.npcClass);
+        npc->combatStyle = ResolveAs<RE::TESCombatStyle>(form.combatStyle);
+        npc->giftFilter = ResolveAs<RE::BGSListForm>(form.giftFilter);
+        npc->deathItem = ResolveAs<RE::TESLevItem>(form.deathItem);
+        npc->defaultPackList = ResolveAs<RE::BGSListForm>(form.defaultPackageList);
+        npc->crimeFaction = ResolveAs<RE::TESFaction>(form.crimeFaction);
+        npc->soundLevel = static_cast<RE::SOUND_LEVEL>(form.soundLevel);
+
+        if (npc->headRelatedData || !form.hairColor.empty() || !form.faceTexture.empty()) {
+            if (!npc->headRelatedData) {
+                npc->headRelatedData = new RE::TESNPC::HeadRelatedData();
+            }
+            npc->headRelatedData->hairColor = ResolveAs<RE::BGSColorForm>(form.hairColor);
+            npc->headRelatedData->faceDetails = ResolveAs<RE::BGSTextureSet>(form.faceTexture);
+        }
+
+        npc->factions.clear();
+        for (const auto& source : form.npcFactions) {
+            auto* faction = ResolveAs<RE::TESFaction>(source.form);
+            if (!faction) {
+                logger::warn("NPC '{}' faction '{}' could not be resolved.", form.editorId, source.form.Display());
+                continue;
+            }
+            RE::FACTION_RANK rank;
+            rank.faction = faction;
+            rank.rank = static_cast<std::int8_t>(std::clamp(source.rank, -128, 127));
+            npc->factions.push_back(rank);
+        }
+
+        std::vector<RE::BGSPerk*> oldPerks;
+        for (std::uint32_t i = 0; i < npc->perkCount; ++i) {
+            if (npc->perks && npc->perks[i].perk) {
+                oldPerks.push_back(npc->perks[i].perk);
+            }
+        }
+        if (!oldPerks.empty()) {
+            npc->RemovePerks(oldPerks);
+        }
+        for (const auto& source : form.npcPerks) {
+            auto* perk = ResolveAs<RE::BGSPerk>(source.form);
+            if (!perk) {
+                logger::warn("NPC '{}' perk '{}' could not be resolved.", form.editorId, source.form.Display());
+                continue;
+            }
+            npc->AddPerk(perk, static_cast<std::int8_t>(std::clamp(source.rank, -128, 127)));
+        }
+
+        auto* spellList = static_cast<RE::TESSpellList*>(npc);
+        if (spellList->actorEffects) {
+            std::vector<RE::SpellItem*> oldSpells;
+            for (std::uint32_t i = 0; i < spellList->actorEffects->numSpells; ++i) {
+                if (spellList->actorEffects->spells && spellList->actorEffects->spells[i]) {
+                    oldSpells.push_back(spellList->actorEffects->spells[i]);
+                }
+            }
+            for (auto* spell : oldSpells) {
+                spellList->actorEffects->RemoveSpell(spell);
+            }
+        }
+        if (!form.spells.empty() && !spellList->actorEffects) {
+            spellList->actorEffects = new RE::TESSpellList::SpellData();
+        }
+        if (spellList->actorEffects) {
+            for (const auto& spellRef : form.spells) {
+                auto* spell = ResolveAs<RE::SpellItem>(spellRef);
+                if (!spell) {
+                    logger::warn("NPC '{}' spell '{}' could not be resolved.", form.editorId, spellRef.Display());
+                    continue;
+                }
+                spellList->actorEffects->AddSpell(spell);
+            }
+        }
+
+        if (npc->headParts) {
+            RE::free(npc->headParts);
+            npc->headParts = nullptr;
+            npc->numHeadParts = 0;
+        }
+        std::vector<RE::BGSHeadPart*> parts;
+        for (const auto& headPartRef : form.headParts) {
+            auto* headPart = ResolveAs<RE::BGSHeadPart>(headPartRef);
+            if (!headPart) {
+                logger::warn("NPC '{}' headpart '{}' could not be resolved.", form.editorId, headPartRef.Display());
+                continue;
+            }
+            parts.push_back(headPart);
+        }
+        if (!parts.empty()) {
+            const auto partCount = std::min<std::size_t>(parts.size(), 127);
+            auto* headParts = RE::calloc<RE::BGSHeadPart*>(partCount);
+            for (std::size_t i = 0; i < partCount; ++i) {
+                headParts[i] = parts[i];
+            }
+            npc->headParts = headParts;
+            npc->numHeadParts = static_cast<std::int8_t>(partCount);
+        }
+
+        if (!form.tintLayers.empty()) {
+            if (!npc->tintLayers) {
+                npc->tintLayers = new RE::BSTArray<RE::TESNPC::Layer*>();
+            } else {
+                npc->tintLayers->clear();
+            }
+            for (const auto& source : form.tintLayers) {
+                auto* layer = new RE::TESNPC::Layer();
+                layer->tintIndex = source.index;
+                layer->preset = source.preset;
+                layer->interpolationValue = static_cast<std::uint16_t>(std::clamp(source.interpolation * 100.0F, 0.0F, 65535.0F));
+                layer->tintColor = RE::Color(source.red, source.green, source.blue, source.alpha);
+                npc->tintLayers->push_back(layer);
+            }
+        } else if (npc->tintLayers) {
+            npc->tintLayers->clear();
+        }
+
+        if (!npc->faceData) {
+            npc->faceData = new RE::TESNPC::FaceData();
+        }
+        for (std::size_t i = 0; i < form.faceMorphs.size(); ++i) {
+            npc->faceData->morphs[i] = form.faceMorphs[i];
+        }
+        for (std::size_t i = 0; i < form.faceParts.size(); ++i) {
+            npc->faceData->parts[i] = form.faceParts[i];
+        }
+
+        logger::info("Configured NPC '{}' headParts={} tintLayers={} factions={} perks={} spells={}.",
+            form.editorId,
+            parts.size(),
+            form.tintLayers.size(),
+            form.npcFactions.size(),
+            form.npcPerks.size(),
+            form.spells.size());
+        return true;
+    }
+
     bool ConfigureForm(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
         if (!tesForm) {
             return false;
@@ -974,6 +1349,9 @@ namespace {
         }
         if (form.kind == DynamicForms::FormKind::Activator) {
             return ConfigureActivator(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::NPC) {
+            return ConfigureNPC(tesForm, form);
         }
 
         return true;
@@ -1045,6 +1423,13 @@ namespace {
         return doc[key].GetUint();
     }
 
+    std::uint16_t ReadUInt16(const rapidjson::Value& doc, const char* key, const std::uint16_t fallback) {
+        if (!doc.HasMember(key) || !doc[key].IsUint()) {
+            return fallback;
+        }
+        return static_cast<std::uint16_t>(std::min(doc[key].GetUint(), 65535U));
+    }
+
     float ReadFloat(const rapidjson::Value& doc, const char* key, const float fallback) {
         if (!doc.HasMember(key) || !doc[key].IsNumber()) {
             return fallback;
@@ -1078,6 +1463,107 @@ namespace {
         object.AddMember(rapidjson::Value(key, allocator), array, allocator);
     }
 
+    void ReadUInt8Array18(const rapidjson::Value& doc, const char* key, std::array<std::uint8_t, 18>& target) {
+        if (!doc.HasMember(key) || !doc[key].IsArray()) {
+            return;
+        }
+        const auto array = doc[key].GetArray();
+        for (rapidjson::SizeType i = 0; i < array.Size() && i < target.size(); ++i) {
+            if (array[i].IsUint()) {
+                target[i] = static_cast<std::uint8_t>(std::min(array[i].GetUint(), 255U));
+            }
+        }
+    }
+
+    void AddUInt8Array18(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::array<std::uint8_t, 18>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto value : values) {
+            array.PushBack(static_cast<unsigned>(value), allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    void ReadFloatArray19(const rapidjson::Value& doc, const char* key, std::array<float, 19>& target) {
+        if (!doc.HasMember(key) || !doc[key].IsArray()) {
+            return;
+        }
+        const auto array = doc[key].GetArray();
+        for (rapidjson::SizeType i = 0; i < array.Size() && i < target.size(); ++i) {
+            if (array[i].IsNumber()) {
+                target[i] = array[i].GetFloat();
+            }
+        }
+    }
+
+    void AddFloatArray19(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::array<float, 19>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto value : values) {
+            array.PushBack(value, allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    void ReadIntArray4(const rapidjson::Value& doc, const char* key, std::array<std::int32_t, 4>& target) {
+        if (!doc.HasMember(key) || !doc[key].IsArray()) {
+            return;
+        }
+        const auto array = doc[key].GetArray();
+        for (rapidjson::SizeType i = 0; i < array.Size() && i < target.size(); ++i) {
+            if (array[i].IsInt()) {
+                target[i] = array[i].GetInt();
+            }
+        }
+    }
+
+    void AddIntArray4(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::array<std::int32_t, 4>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto value : values) {
+            array.PushBack(value, allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    void ReadTintLayers(const rapidjson::Value& doc, std::vector<DynamicForms::TintLayer>& target) {
+        if (!doc.HasMember("tintLayers") || !doc["tintLayers"].IsArray()) {
+            return;
+        }
+        target.clear();
+        for (const auto& item : doc["tintLayers"].GetArray()) {
+            if (!item.IsObject()) {
+                continue;
+            }
+            DynamicForms::TintLayer layer;
+            if (item.HasMember("index") && item["index"].IsUint()) {
+                layer.index = static_cast<std::uint16_t>(std::min(item["index"].GetUint(), 65535U));
+            }
+            if (item.HasMember("preset") && item["preset"].IsUint()) {
+                layer.preset = static_cast<std::uint16_t>(std::min(item["preset"].GetUint(), 65535U));
+            }
+            layer.interpolation = ReadFloat(item, "interpolation", layer.interpolation);
+            layer.red = ReadUInt8(item, "red", layer.red);
+            layer.green = ReadUInt8(item, "green", layer.green);
+            layer.blue = ReadUInt8(item, "blue", layer.blue);
+            layer.alpha = ReadUInt8(item, "alpha", layer.alpha);
+            target.push_back(layer);
+        }
+    }
+
+    void AddTintLayers(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const std::vector<DynamicForms::TintLayer>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& layer : values) {
+            rapidjson::Value item(rapidjson::kObjectType);
+            item.AddMember("index", static_cast<unsigned>(layer.index), allocator);
+            item.AddMember("preset", static_cast<unsigned>(layer.preset), allocator);
+            item.AddMember("interpolation", layer.interpolation, allocator);
+            item.AddMember("red", static_cast<unsigned>(layer.red), allocator);
+            item.AddMember("green", static_cast<unsigned>(layer.green), allocator);
+            item.AddMember("blue", static_cast<unsigned>(layer.blue), allocator);
+            item.AddMember("alpha", static_cast<unsigned>(layer.alpha), allocator);
+            array.PushBack(item, allocator);
+        }
+        object.AddMember("tintLayers", array, allocator);
+    }
+
     DynamicForms::PerkCondition ReadCondition(const rapidjson::Value& value) {
         DynamicForms::PerkCondition condition;
         if (!value.IsObject()) {
@@ -1089,6 +1575,9 @@ namespace {
         if (value.HasMember("functionId") && value["functionId"].IsUint()) {
             condition.functionId = value["functionId"].GetUint();
         }
+        if (value.HasMember("functionName") && value["functionName"].IsString()) {
+            condition.functionName = value["functionName"].GetString();
+        }
         if (value.HasMember("opCode") && value["opCode"].IsUint()) {
             condition.opCode = value["opCode"].GetUint();
         }
@@ -1098,8 +1587,26 @@ namespace {
         if (value.HasMember("isOr") && value["isOr"].IsBool()) {
             condition.isOr = value["isOr"].GetBool();
         }
+        if (value.HasMember("useAliases") && value["useAliases"].IsBool()) {
+            condition.useAliases = value["useAliases"].GetBool();
+        }
         if (value.HasMember("useGlobalComparison") && value["useGlobalComparison"].IsBool()) {
             condition.useGlobalComparison = value["useGlobalComparison"].GetBool();
+        }
+        if (value.HasMember("usePackData") && value["usePackData"].IsBool()) {
+            condition.usePackData = value["usePackData"].GetBool();
+        }
+        if (value.HasMember("swapTarget") && value["swapTarget"].IsBool()) {
+            condition.swapTarget = value["swapTarget"].GetBool();
+        }
+        if (value.HasMember("runOn") && value["runOn"].IsUint()) {
+            condition.runOn = value["runOn"].GetUint();
+        }
+        if (value.HasMember("dataId") && value["dataId"].IsUint()) {
+            condition.dataId = value["dataId"].GetUint();
+        }
+        if (value.HasMember("runOnRef") && value["runOnRef"].IsString()) {
+            condition.runOnRef = value["runOnRef"].GetString();
         }
         if (value.HasMember("comparisonGlobal") && value["comparisonGlobal"].IsString()) {
             condition.comparisonGlobal = value["comparisonGlobal"].GetString();
@@ -1110,17 +1617,28 @@ namespace {
         if (value.HasMember("param2") && value["param2"].IsString()) {
             condition.param2 = value["param2"].GetString();
         }
+        if (condition.functionName.empty()) {
+            condition.functionName = ConditionCatalog::GetFunctionName(FunctionIdForCondition(condition));
+        }
         return condition;
     }
 
     void WriteCondition(rapidjson::Value& array, rapidjson::Document::AllocatorType& allocator, const DynamicForms::PerkCondition& condition) {
         rapidjson::Value item(rapidjson::kObjectType);
+        const auto functionId = FunctionIdForCondition(condition);
         AddString(item, allocator, "kind", ToString(condition.kind));
-        item.AddMember("functionId", condition.functionId, allocator);
+        AddString(item, allocator, "functionName", condition.functionName.empty() ? ConditionCatalog::GetFunctionName(functionId) : condition.functionName);
+        item.AddMember("functionId", functionId, allocator);
         item.AddMember("opCode", condition.opCode, allocator);
         item.AddMember("comparisonValue", condition.comparisonValue, allocator);
         item.AddMember("isOr", condition.isOr, allocator);
+        item.AddMember("useAliases", condition.useAliases, allocator);
         item.AddMember("useGlobalComparison", condition.useGlobalComparison, allocator);
+        item.AddMember("usePackData", condition.usePackData, allocator);
+        item.AddMember("swapTarget", condition.swapTarget, allocator);
+        item.AddMember("runOn", condition.runOn, allocator);
+        item.AddMember("dataId", condition.dataId, allocator);
+        AddString(item, allocator, "runOnRef", condition.runOnRef);
         AddString(item, allocator, "comparisonGlobal", condition.comparisonGlobal);
         AddString(item, allocator, "param1", condition.param1);
         AddString(item, allocator, "param2", condition.param2);
@@ -1346,6 +1864,84 @@ namespace {
         ReadFormRef(doc, "soundLoop", out.soundLoop);
         ReadFormRef(doc, "soundActivate", out.soundActivate);
         ReadFormRef(doc, "waterType", out.waterType);
+        ReadFormRef(doc, "race", out.race);
+        ReadFormRef(doc, "skin", out.skin);
+        ReadFormRef(doc, "defaultOutfit", out.defaultOutfit);
+        ReadFormRef(doc, "sleepOutfit", out.sleepOutfit);
+        ReadFormRef(doc, "voice", out.voice);
+        ReadFormRef(doc, "hairColor", out.hairColor);
+        ReadFormRef(doc, "faceTexture", out.faceTexture);
+        ReadFormRef(doc, "class", out.npcClass);
+        ReadFormRef(doc, "combatStyle", out.combatStyle);
+        ReadFormRef(doc, "giftFilter", out.giftFilter);
+        ReadFormRef(doc, "deathItem", out.deathItem);
+        ReadFormRef(doc, "defaultPackageList", out.defaultPackageList);
+        ReadFormRef(doc, "crimeFaction", out.crimeFaction);
+        if (doc.HasMember("female") && doc["female"].IsBool()) {
+            out.femaleNpc = doc["female"].GetBool();
+        }
+        if (doc.HasMember("oppositeGenderAnim") && doc["oppositeGenderAnim"].IsBool()) {
+            out.oppositeGenderAnim = doc["oppositeGenderAnim"].GetBool();
+        }
+        if (doc.HasMember("essential") && doc["essential"].IsBool()) {
+            out.essential = doc["essential"].GetBool();
+        }
+        if (doc.HasMember("protected") && doc["protected"].IsBool()) {
+            out.protectedNpc = doc["protected"].GetBool();
+        }
+        if (doc.HasMember("unique") && doc["unique"].IsBool()) {
+            out.unique = doc["unique"].GetBool();
+        }
+        if (doc.HasMember("calcStats") && doc["calcStats"].IsBool()) {
+            out.calcStats = doc["calcStats"].GetBool();
+        }
+        if (doc.HasMember("respawn") && doc["respawn"].IsBool()) {
+            out.respawn = doc["respawn"].GetBool();
+        }
+        if (doc.HasMember("doesntAffectStealthMeter") && doc["doesntAffectStealthMeter"].IsBool()) {
+            out.doesntAffectStealthMeter = doc["doesntAffectStealthMeter"].GetBool();
+        }
+        if (doc.HasMember("doesntBleed") && doc["doesntBleed"].IsBool()) {
+            out.doesntBleed = doc["doesntBleed"].GetBool();
+        }
+        if (doc.HasMember("bleedoutOverrideFlag") && doc["bleedoutOverrideFlag"].IsBool()) {
+            out.bleedoutOverrideFlag = doc["bleedoutOverrideFlag"].GetBool();
+        }
+        if (doc.HasMember("simpleActor") && doc["simpleActor"].IsBool()) {
+            out.simpleActor = doc["simpleActor"].GetBool();
+        }
+        if (doc.HasMember("noActivation") && doc["noActivation"].IsBool()) {
+            out.noActivation = doc["noActivation"].GetBool();
+        }
+        if (doc.HasMember("ghost") && doc["ghost"].IsBool()) {
+            out.ghost = doc["ghost"].GetBool();
+        }
+        if (doc.HasMember("invulnerable") && doc["invulnerable"].IsBool()) {
+            out.invulnerable = doc["invulnerable"].GetBool();
+        }
+        out.height = ReadFloat(doc, "height", out.height);
+        out.weight = ReadFloat(doc, "weight", out.weight);
+        out.health = ReadUInt16(doc, "health", out.health);
+        out.magicka = ReadUInt16(doc, "magicka", out.magicka);
+        out.stamina = ReadUInt16(doc, "stamina", out.stamina);
+        out.healthOffset = ReadInt16(doc, "healthOffset", out.healthOffset);
+        out.magickaOffset = ReadInt16(doc, "magickaOffset", out.magickaOffset);
+        out.staminaOffset = ReadInt16(doc, "staminaOffset", out.staminaOffset);
+        out.calcMinLevel = ReadUInt16(doc, "calcMinLevel", out.calcMinLevel);
+        out.calcMaxLevel = ReadUInt16(doc, "calcMaxLevel", out.calcMaxLevel);
+        out.npcLevel = ReadUInt16(doc, "npcLevel", out.npcLevel);
+        out.speedMult = ReadUInt16(doc, "speedMult", out.speedMult);
+        out.dispositionBase = ReadUInt16(doc, "dispositionBase", out.dispositionBase);
+        out.bleedoutOverride = ReadInt16(doc, "bleedoutOverride", out.bleedoutOverride);
+        ReadUInt8Array18(doc, "skills", out.skills);
+        ReadUInt8Array18(doc, "skillOffsets", out.skillOffsets);
+        ReadFloatArray19(doc, "faceMorphs", out.faceMorphs);
+        ReadIntArray4(doc, "faceParts", out.faceParts);
+        ReadFormRefArray(doc, "headParts", out.headParts);
+        ReadTintLayers(doc, out.tintLayers);
+        ReadRankedFormRefArray(doc, "factions", out.npcFactions);
+        ReadRankedFormRefArray(doc, "perks", out.npcPerks);
+        ReadFormRefArray(doc, "spells", out.spells);
 
         return true;
     }
@@ -1483,6 +2079,12 @@ namespace Manager {
             doc.AddMember("staticAttenuation", form.staticAttenuation, allocator);
             doc.AddMember("looping", static_cast<unsigned>(form.looping), allocator);
             doc.AddMember("rumbleSendValue", static_cast<unsigned>(form.rumbleSendValue), allocator);
+
+            rapidjson::Value conditions(rapidjson::kArrayType);
+            for (const auto& condition : form.conditions) {
+                WriteCondition(conditions, allocator, condition);
+            }
+            doc.AddMember("conditions", conditions, allocator);
         }
         if (form.kind == DynamicForms::FormKind::Light) {
             AddString(doc, allocator, "fullName", form.fullName);
@@ -1531,6 +2133,64 @@ namespace Manager {
             AddFormRef(doc, allocator, "waterType", form.waterType);
             doc.AddMember("flags", form.flags, allocator);
         }
+        if (form.kind == DynamicForms::FormKind::NPC) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddFormRef(doc, allocator, "race", form.race);
+            AddFormRef(doc, allocator, "skin", form.skin);
+            AddFormRef(doc, allocator, "defaultOutfit", form.defaultOutfit);
+            AddFormRef(doc, allocator, "sleepOutfit", form.sleepOutfit);
+            AddFormRef(doc, allocator, "voice", form.voice);
+            AddFormRef(doc, allocator, "hairColor", form.hairColor);
+            AddFormRef(doc, allocator, "faceTexture", form.faceTexture);
+            AddFormRef(doc, allocator, "class", form.npcClass);
+            AddFormRef(doc, allocator, "combatStyle", form.combatStyle);
+            AddFormRef(doc, allocator, "giftFilter", form.giftFilter);
+            AddFormRef(doc, allocator, "deathItem", form.deathItem);
+            AddFormRef(doc, allocator, "defaultPackageList", form.defaultPackageList);
+            AddFormRef(doc, allocator, "crimeFaction", form.crimeFaction);
+            doc.AddMember("female", form.femaleNpc, allocator);
+            doc.AddMember("oppositeGenderAnim", form.oppositeGenderAnim, allocator);
+            doc.AddMember("essential", form.essential, allocator);
+            doc.AddMember("protected", form.protectedNpc, allocator);
+            doc.AddMember("unique", form.unique, allocator);
+            doc.AddMember("calcStats", form.calcStats, allocator);
+            doc.AddMember("respawn", form.respawn, allocator);
+            doc.AddMember("doesntAffectStealthMeter", form.doesntAffectStealthMeter, allocator);
+            doc.AddMember("doesntBleed", form.doesntBleed, allocator);
+            doc.AddMember("bleedoutOverrideFlag", form.bleedoutOverrideFlag, allocator);
+            doc.AddMember("simpleActor", form.simpleActor, allocator);
+            doc.AddMember("noActivation", form.noActivation, allocator);
+            doc.AddMember("ghost", form.ghost, allocator);
+            doc.AddMember("invulnerable", form.invulnerable, allocator);
+            doc.AddMember("height", form.height, allocator);
+            doc.AddMember("weight", form.weight, allocator);
+            doc.AddMember("red", static_cast<unsigned>(form.red), allocator);
+            doc.AddMember("green", static_cast<unsigned>(form.green), allocator);
+            doc.AddMember("blue", static_cast<unsigned>(form.blue), allocator);
+            doc.AddMember("alpha", static_cast<unsigned>(form.alpha), allocator);
+            doc.AddMember("health", static_cast<unsigned>(form.health), allocator);
+            doc.AddMember("magicka", static_cast<unsigned>(form.magicka), allocator);
+            doc.AddMember("stamina", static_cast<unsigned>(form.stamina), allocator);
+            doc.AddMember("healthOffset", static_cast<int>(form.healthOffset), allocator);
+            doc.AddMember("magickaOffset", static_cast<int>(form.magickaOffset), allocator);
+            doc.AddMember("staminaOffset", static_cast<int>(form.staminaOffset), allocator);
+            doc.AddMember("calcMinLevel", static_cast<unsigned>(form.calcMinLevel), allocator);
+            doc.AddMember("calcMaxLevel", static_cast<unsigned>(form.calcMaxLevel), allocator);
+            doc.AddMember("npcLevel", static_cast<unsigned>(form.npcLevel), allocator);
+            doc.AddMember("speedMult", static_cast<unsigned>(form.speedMult), allocator);
+            doc.AddMember("dispositionBase", static_cast<unsigned>(form.dispositionBase), allocator);
+            doc.AddMember("bleedoutOverride", static_cast<int>(form.bleedoutOverride), allocator);
+            doc.AddMember("soundLevel", form.soundLevel, allocator);
+            AddUInt8Array18(doc, allocator, "skills", form.skills);
+            AddUInt8Array18(doc, allocator, "skillOffsets", form.skillOffsets);
+            AddFloatArray19(doc, allocator, "faceMorphs", form.faceMorphs);
+            AddIntArray4(doc, allocator, "faceParts", form.faceParts);
+            AddFormRefArray(doc, allocator, "headParts", form.headParts);
+            AddTintLayers(doc, allocator, form.tintLayers);
+            AddRankedFormRefArray(doc, allocator, "factions", form.npcFactions);
+            AddRankedFormRefArray(doc, allocator, "perks", form.npcPerks);
+            AddFormRefArray(doc, allocator, "spells", form.spells);
+        }
         if (form.localId != 0) {
             doc.AddMember("localId", form.localId, allocator);
         }
@@ -1547,10 +2207,41 @@ namespace Manager {
         return true;
     }
 
-    bool SaveAllForms() {
+    bool SaveForm(const std::size_t index, const bool dispatchUpdate) {
+        if (index >= forms.size()) {
+            return false;
+        }
+
+        if (!ResolveDPFForm(forms[index])) {
+            return false;
+        }
+
+        const bool saved = SaveForm(forms[index]);
+        if (saved) {
+            forms[index].dirty = false;
+            ListManager::GetSingleton()->PopulateAllLists(true);
+            if (dispatchUpdate) {
+                DispatchEvent(UPDATED_EVENT, forms[index].editorId, static_cast<float>(forms[index].localId));
+            }
+        }
+        return saved;
+    }
+
+    bool SaveAllForms(const bool dispatchUpdate) {
         bool saved = true;
-        for (const auto& form : forms) {
-            saved = SaveForm(form) && saved;
+        for (std::size_t i = 0; i < forms.size(); ++i) {
+            const bool wasDirty = forms[i].dirty;
+            if (ResolveDPFForm(forms[i]) && SaveForm(forms[i])) {
+                forms[i].dirty = dispatchUpdate ? false : wasDirty;
+            } else {
+                saved = false;
+            }
+        }
+        if (saved) {
+            ListManager::GetSingleton()->PopulateAllLists(true);
+            if (dispatchUpdate) {
+                DispatchEvent(UPDATED_EVENT, "All", static_cast<float>(forms.size()));
+            }
         }
         return saved;
     }
@@ -1568,7 +2259,9 @@ namespace Manager {
         forms.push_back(std::move(createdForm));
         const bool saved = SaveForm(forms.back());
         if (saved) {
+            forms.back().dirty = false;
             ListManager::GetSingleton()->PopulateAllLists(true);
+            DispatchEvent(UPDATED_EVENT, forms.back().editorId, static_cast<float>(forms.back().localId));
         }
         return saved;
     }
@@ -1583,12 +2276,9 @@ namespace Manager {
             return false;
         }
 
+        updatedForm.dirty = true;
         forms[index] = std::move(updatedForm);
-        const bool saved = SaveForm(forms[index]);
-        if (saved) {
-            ListManager::GetSingleton()->PopulateAllLists(true);
-        }
-        return saved;
+        return true;
     }
 
     bool DeleteForm(const std::size_t index) {
@@ -1624,6 +2314,7 @@ namespace Manager {
 
         forms.erase(forms.begin() + static_cast<std::ptrdiff_t>(index));
         ListManager::GetSingleton()->PopulateAllLists(true);
+        DispatchEvent(UPDATED_EVENT, form.editorId, static_cast<float>(form.localId));
         logger::info("Deleted dynamic form '{}' localId {:06X}.", form.editorId, form.localId);
         return true;
     }
@@ -1631,6 +2322,16 @@ namespace Manager {
     bool HasEditorId(const std::string_view editorId) {
         return std::ranges::any_of(forms, [editorId](const DynamicForms::DynamicForm& form) {
             return form.editorId == editorId;
+        });
+    }
+
+    bool IsDirty(const std::size_t index) {
+        return index < forms.size() && forms[index].dirty;
+    }
+
+    bool HasDirtyForms() {
+        return std::ranges::any_of(forms, [](const DynamicForms::DynamicForm& form) {
+            return form.dirty;
         });
     }
 
@@ -1646,7 +2347,8 @@ namespace Manager {
         }
 
         if (changed) {
-            SaveAllForms();
+            SaveAllForms(false);
         }
+        DispatchEvent(LOADED_EVENT, "All", static_cast<float>(forms.size()));
     }
 }

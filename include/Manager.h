@@ -15,10 +15,13 @@ namespace Manager {
     std::vector<DynamicForms::DynamicForm>& GetForms();
     void LoadForms();
     bool SaveForm(const DynamicForms::DynamicForm& form);
-    bool SaveAllForms();
+    bool SaveForm(std::size_t index, bool dispatchUpdate = true);
+    bool SaveAllForms(bool dispatchUpdate = true);
     bool AddForm(const DynamicForms::DynamicForm& form);
     bool UpdateForm(std::size_t index, const DynamicForms::DynamicForm& form);
     bool DeleteForm(std::size_t index);
     bool HasEditorId(std::string_view editorId);
+    bool IsDirty(std::size_t index);
+    bool HasDirtyForms();
     void ApplyAllForms();
 }

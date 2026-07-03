@@ -78,6 +78,95 @@ namespace {
         return true;
     }
 
+    std::uint32_t GetLocalFormID(const RE::FormID formID) {
+        if ((formID & 0xFF000000) == 0xFE000000) {
+            return formID & 0xFFF;
+        }
+        return formID & 0x00FFFFFF;
+    }
+
+    void LogConditionList(const char* label, RE::TESCondition& conditions) {
+        std::uint32_t index = 0;
+        for (auto* item = conditions.head; item; item = item->next) {
+            const auto functionID = static_cast<std::uint32_t>(item->data.functionData.function.get());
+            const auto opCode = static_cast<std::uint32_t>(item->data.flags.opCode);
+            const bool isOr = item->data.flags.isOR;
+            const auto param1 = reinterpret_cast<std::uintptr_t>(item->data.functionData.params[0]);
+            const auto param2 = reinterpret_cast<std::uintptr_t>(item->data.functionData.params[1]);
+
+            if (item->data.flags.global && item->data.comparisonValue.g) {
+                logger::info("[NPC Senses perk FE000809] {} condition[{}]: functionID={} opCode={} OR={} compareGlobal={:08X} param1={:X} param2={:X}",
+                    label,
+                    index,
+                    functionID,
+                    opCode,
+                    isOr,
+                    item->data.comparisonValue.g->GetFormID(),
+                    param1,
+                    param2);
+            } else {
+                logger::info("[NPC Senses perk FE000809] {} condition[{}]: functionID={} opCode={} OR={} compareValue={} param1={:X} param2={:X}",
+                    label,
+                    index,
+                    functionID,
+                    opCode,
+                    isOr,
+                    item->data.comparisonValue.f,
+                    param1,
+                    param2);
+            }
+            ++index;
+        }
+
+        if (index == 0) {
+            logger::info("[NPC Senses perk FE000809] {} has no conditions.", label);
+        }
+    }
+
+    void LogNpcSensesPerkConditions(RE::BGSPerk* perk, const std::string& pluginName) {
+        if (!perk || pluginName != "NPC Senses.esp" || GetLocalFormID(perk->GetFormID()) != 0x809) {
+            return;
+        }
+
+        const auto editorID = clib_util::editorID::get_editorID(perk);
+        logger::info("[NPC Senses perk FE000809] Found perk. EditorID='{}' FormID={:08X} entries={}",
+            editorID,
+            perk->GetFormID(),
+            perk->perkEntries.size());
+
+        LogConditionList("perk", perk->perkConditions);
+
+        for (std::uint32_t entryIndex = 0; entryIndex < perk->perkEntries.size(); ++entryIndex) {
+            auto* entry = perk->perkEntries[entryIndex];
+            if (!entry) {
+                logger::info("[NPC Senses perk FE000809] entry[{}] is null.", entryIndex);
+                continue;
+            }
+
+            logger::info("[NPC Senses perk FE000809] entry[{}]: type={} rank={} priority={}",
+                entryIndex,
+                static_cast<std::uint32_t>(entry->GetType()),
+                entry->header.rank,
+                entry->header.priority);
+
+            if (entry->GetType() != RE::PERK_ENTRY_TYPE::kEntryPoint) {
+                continue;
+            }
+
+            auto* entryPoint = static_cast<RE::BGSEntryPointPerkEntry*>(entry);
+            logger::info("[NPC Senses perk FE000809] entry[{}] entryPoint={} function={} numArgs={} conditionLists={}",
+                entryIndex,
+                static_cast<std::uint32_t>(entryPoint->entryData.entryPoint.get()),
+                static_cast<std::uint32_t>(entryPoint->entryData.function.get()),
+                entryPoint->entryData.numArgs,
+                entryPoint->conditions.size());
+
+            for (std::size_t conditionIndex = 0; conditionIndex < entryPoint->conditions.size(); ++conditionIndex) {
+                const auto label = std::format("entry[{}].conditions[{}]", entryIndex, conditionIndex);
+                LogConditionList(label.c_str(), entryPoint->conditions[conditionIndex]);
+            }
+        }
+    }
 }
 
 bool ListManager::PopulateAllLists(const bool forceRefresh) {
@@ -146,6 +235,34 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
         return headPart != nullptr;
     });
 
+    PopulateList<RE::BGSHeadPart>("Hair", [](RE::BGSHeadPart* headPart) -> bool {
+        return headPart && headPart->type == RE::BGSHeadPart::HeadPartType::kHair;
+    });
+
+    PopulateList<RE::BGSHeadPart>("Facial Hair", [](RE::BGSHeadPart* headPart) -> bool {
+        return headPart && headPart->type == RE::BGSHeadPart::HeadPartType::kFacialHair;
+    });
+
+    PopulateList<RE::BGSHeadPart>("Eye Brows", [](RE::BGSHeadPart* headPart) -> bool {
+        return headPart && headPart->type == RE::BGSHeadPart::HeadPartType::kEyebrows;
+    });
+
+    PopulateList<RE::BGSHeadPart>("Eye", [](RE::BGSHeadPart* headPart) -> bool {
+        return headPart && headPart->type == RE::BGSHeadPart::HeadPartType::kEyes;
+    });
+
+    PopulateList<RE::BGSHeadPart>("Face", [](RE::BGSHeadPart* headPart) -> bool {
+        return headPart && headPart->type == RE::BGSHeadPart::HeadPartType::kFace;
+    });
+
+    PopulateList<RE::BGSHeadPart>("Misc", [](RE::BGSHeadPart* headPart) -> bool {
+        return headPart && headPart->type == RE::BGSHeadPart::HeadPartType::kMisc;
+    });
+
+    PopulateList<RE::BGSHeadPart>("Scar", [](RE::BGSHeadPart* headPart) -> bool {
+        return headPart && headPart->type == RE::BGSHeadPart::HeadPartType::kScar;
+    });
+
     PopulateList<RE::BGSTextureSet>("TextureSet", [](RE::BGSTextureSet* textureSet) -> bool {
         return textureSet != nullptr;
     });
@@ -200,6 +317,30 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
 
     PopulateList<RE::EnchantmentItem>("Enchantment", [](RE::EnchantmentItem* enchantment) -> bool {
         return enchantment != nullptr;
+    });
+
+    PopulateList<RE::TESNPC>("NPC", [](RE::TESNPC* npc) -> bool {
+        return npc != nullptr;
+    });
+
+    PopulateList<RE::TESRace>("Race", [](RE::TESRace* race) -> bool {
+        return race != nullptr;
+    });
+
+    PopulateList<RE::BGSVoiceType>("Voice", [](RE::BGSVoiceType* voice) -> bool {
+        return voice != nullptr;
+    });
+
+    PopulateList<RE::TESClass>("Class", [](RE::TESClass* npcClass) -> bool {
+        return npcClass != nullptr;
+    });
+
+    PopulateList<RE::TESCombatStyle>("CombatStyle", [](RE::TESCombatStyle* combatStyle) -> bool {
+        return combatStyle != nullptr;
+    });
+
+    PopulateList<RE::TESFaction>("Faction", [](RE::TESFaction* faction) -> bool {
+        return faction != nullptr;
     });
 
     _isPopulated = true;
@@ -302,11 +443,11 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
         try {
             currentID = form->GetFormID();
 
-            if (auto file = form->GetFile(0)) {
-                currentPlugin = std::string(file->GetFilename());
+            if (auto primaryFile = form->GetFile(0)) {
+                currentPlugin = std::string(primaryFile->GetFilename());
             }
-            else if (auto file = FormUtil::GetMasterFile(form)) {
-                currentPlugin = std::string(file->GetFilename());
+            else if (auto masterFile = FormUtil::GetMasterFile(form)) {
+                currentPlugin = std::string(masterFile->GetFilename());
             }
             else {
                 currentPlugin = "Dynamic";
@@ -347,6 +488,8 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
                         (perk->nextPerk->GetFormID() & 0xFFFFFF);
                     info.nextPerkId = fmt::format("{}|{:X}", npPlugin, npLocalID);
                 }
+
+                LogNpcSensesPerkConditions(perk, info.pluginName);
             }
 
             list.push_back(info);
