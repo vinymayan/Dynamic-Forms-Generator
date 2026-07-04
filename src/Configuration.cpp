@@ -11,13 +11,17 @@
 #include <cctype>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <fstream>
-#include <vector>
+#include <miniz.h>
+#include <optional>
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
     namespace ImGui = ImGuiMCP;
@@ -47,18 +51,29 @@ namespace {
     std::unordered_map<std::string, std::string> outfitPieceFilters;
     std::unordered_map<std::string, std::string> formPickerFilters;
     std::string conditionFunctionFilter;
+    std::array<char, 128> exportFilterEditorIdBuffer{};
+    int selectedExportFilterKind = 0;
     std::string createError;
     std::string deleteError;
     std::string saveMessage;
     bool lastSaveSucceeded = true;
     bool requestDeletePopup = false;
+    bool deleteSelectionMode = false;
+    bool requestBatchDeletePopup = false;
+    std::set<std::string> selectedDeleteForms;
+    std::set<std::string> selectedExportForms;
+    std::array<char, 128> exportPackageName{ 'D', 'F', 'G', '_', 'E', 'x', 'p', 'o', 'r', 't', '\0' };
+    std::string exportMessage;
+    bool lastExportSucceeded = true;
 
     constexpr auto DELETE_POPUP_ID = "Delete Form##dynamic_forms_delete_popup";
+    constexpr auto BATCH_DELETE_POPUP_ID = "Delete Selected Forms##dynamic_forms_batch_delete_popup";
+    constexpr auto EXPORT_DIR = "Data/Viny Mods/Dynamic Forms Generator/Export";
     const ImGui::ImVec4 DIRTY_COLOR{ 1.0F, 0.72F, 0.2F, 1.0F };
     const ImGui::ImVec4 SUCCESS_COLOR{ 0.45F, 0.9F, 0.55F, 1.0F };
     const ImGui::ImVec4 ERROR_COLOR{ 1.0F, 0.35F, 0.35F, 1.0F };
-    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Outfit", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "NPC" };
-    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Outfit", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "NPC" };
+    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Outfit", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Outfit", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
     constexpr std::array GLOBAL_TYPE_ITEMS{ "short", "long", "float" };
     constexpr std::array ART_TYPE_ITEMS{ "MagicCasting", "MagicHitEffect", "MagicEnchantEffect" };
     constexpr std::array HEAD_PART_TYPE_ITEMS{ "Misc", "Face", "Eyes", "Hair", "FacialHair", "Scar", "Eyebrows" };
@@ -143,6 +158,8 @@ namespace {
         case 10:
             return DynamicForms::FormKind::Activator;
         case 11:
+            return DynamicForms::FormKind::EffectShader;
+        case 12:
             return DynamicForms::FormKind::NPC;
         case 0:
         default:
@@ -235,12 +252,94 @@ namespace {
             return "Explosion";
         case DynamicForms::FormKind::Activator:
             return "Activator";
+        case DynamicForms::FormKind::EffectShader:
+            return "Effect Shader";
         case DynamicForms::FormKind::NPC:
             return "NPC";
         case DynamicForms::FormKind::Global:
         default:
             return "Global";
         }
+    }
+
+    std::string SanitizeFilename(std::string name) {
+        constexpr std::string_view invalid = "<>:/\\|?*\"";
+        for (char& ch : name) {
+            if (invalid.find(ch) != std::string_view::npos || static_cast<unsigned char>(ch) < 32) {
+                ch = '_';
+            }
+        }
+        return name.empty() ? "DFG_Export" : name;
+    }
+
+    std::filesystem::path FormJsonPath(const std::string& editorId) {
+        return std::filesystem::path(Manager::FORMS_DIR) / std::format("{}.json", editorId);
+    }
+
+    bool AddFileToZipOnce(
+        mz_zip_archive& zip,
+        std::set<std::string>& addedPaths,
+        const std::filesystem::path& source,
+        const std::string& internalPath)
+    {
+        if (!std::filesystem::exists(source)) {
+            logger::warn("Export: missing source file '{}'.", source.string());
+            return false;
+        }
+        if (!addedPaths.insert(internalPath).second) {
+            return true;
+        }
+        if (!mz_zip_writer_add_file(&zip, internalPath.c_str(), source.string().c_str(), nullptr, 0, MZ_BEST_COMPRESSION)) {
+            logger::error("Export: failed to add '{}' as '{}'.", source.string(), internalPath);
+            return false;
+        }
+        return true;
+    }
+
+    std::optional<std::filesystem::path> ExportSelectedFormsAsZip(const std::string& packageName, const std::set<std::string>& editorIds) {
+        if (editorIds.empty()) {
+            logger::warn("Export: no forms selected.");
+            return std::nullopt;
+        }
+
+        auto& forms = Manager::GetForms();
+        for (std::size_t i = 0; i < forms.size(); ++i) {
+            if (editorIds.contains(forms[i].editorId) && Manager::IsDirty(i) && !Manager::SaveForm(i)) {
+                logger::warn("Export: could not save dirty form '{}' before exporting.", forms[i].editorId);
+                return std::nullopt;
+            }
+        }
+
+        namespace fs = std::filesystem;
+        fs::create_directories(EXPORT_DIR);
+        const auto zipPath = fs::path(EXPORT_DIR) / (SanitizeFilename(packageName.empty() ? "DFG_Export" : packageName) + ".zip");
+
+        mz_zip_archive zip{};
+        if (!mz_zip_writer_init_file(&zip, zipPath.string().c_str(), 0)) {
+            logger::error("Export: failed to initialize ZIP file at '{}'.", zipPath.string());
+            return std::nullopt;
+        }
+
+        bool ok = true;
+        std::set<std::string> addedPaths;
+        for (const auto& editorId : editorIds) {
+            const auto source = FormJsonPath(editorId);
+            const auto internalPath = std::format("Viny Mods/Dynamic Forms Generator/Forms/{}.json", editorId);
+            ok = AddFileToZipOnce(zip, addedPaths, source, internalPath) && ok;
+        }
+
+        if (!mz_zip_writer_finalize_archive(&zip)) {
+            logger::error("Export: failed to finalize ZIP '{}'.", zipPath.string());
+            ok = false;
+        }
+        mz_zip_writer_end(&zip);
+
+        if (!ok) {
+            return std::nullopt;
+        }
+
+        logger::info("Export package successfully written to '{}'.", zipPath.string());
+        return zipPath;
     }
 
     int ArtTypeIndex(const DynamicForms::ArtObjectType type) {
@@ -366,50 +465,61 @@ namespace {
         ImGui::SetNextItemWidth(std::max(minWidth, std::min(available, maxWidth)));
     }
 
-    bool MatchesFilters(const DynamicForms::DynamicForm& form) {
-        if (selectedFilterKind == 1 && form.kind != DynamicForms::FormKind::Global) {
+    bool MatchesFilterValues(const DynamicForms::DynamicForm& form, const int kindFilter, const std::string_view editorIdFilter) {
+        if (kindFilter == 1 && form.kind != DynamicForms::FormKind::Global) {
             return false;
         }
-        if (selectedFilterKind == 2 && form.kind != DynamicForms::FormKind::Keyword) {
+        if (kindFilter == 2 && form.kind != DynamicForms::FormKind::Keyword) {
             return false;
         }
-        if (selectedFilterKind == 3 && form.kind != DynamicForms::FormKind::Outfit) {
+        if (kindFilter == 3 && form.kind != DynamicForms::FormKind::Outfit) {
             return false;
         }
-        if (selectedFilterKind == 4 && form.kind != DynamicForms::FormKind::Color) {
+        if (kindFilter == 4 && form.kind != DynamicForms::FormKind::Color) {
             return false;
         }
-        if (selectedFilterKind == 5 && form.kind != DynamicForms::FormKind::ArtObject) {
+        if (kindFilter == 5 && form.kind != DynamicForms::FormKind::ArtObject) {
             return false;
         }
-        if (selectedFilterKind == 6 && form.kind != DynamicForms::FormKind::Perk) {
+        if (kindFilter == 6 && form.kind != DynamicForms::FormKind::Perk) {
             return false;
         }
-        if (selectedFilterKind == 7 && form.kind != DynamicForms::FormKind::HeadPart) {
+        if (kindFilter == 7 && form.kind != DynamicForms::FormKind::HeadPart) {
             return false;
         }
-        if (selectedFilterKind == 8 && form.kind != DynamicForms::FormKind::SoundDescriptor) {
+        if (kindFilter == 8 && form.kind != DynamicForms::FormKind::SoundDescriptor) {
             return false;
         }
-        if (selectedFilterKind == 9 && form.kind != DynamicForms::FormKind::Light) {
+        if (kindFilter == 9 && form.kind != DynamicForms::FormKind::Light) {
             return false;
         }
-        if (selectedFilterKind == 10 && form.kind != DynamicForms::FormKind::Explosion) {
+        if (kindFilter == 10 && form.kind != DynamicForms::FormKind::Explosion) {
             return false;
         }
-        if (selectedFilterKind == 11 && form.kind != DynamicForms::FormKind::Activator) {
+        if (kindFilter == 11 && form.kind != DynamicForms::FormKind::Activator) {
             return false;
         }
-        if (selectedFilterKind == 12 && form.kind != DynamicForms::FormKind::NPC) {
+        if (kindFilter == 12 && form.kind != DynamicForms::FormKind::EffectShader) {
+            return false;
+        }
+        if (kindFilter == 13 && form.kind != DynamicForms::FormKind::NPC) {
             return false;
         }
 
-        const std::string filter = filterEditorIdBuffer.data();
+        const std::string filter(editorIdFilter);
         if (filter.empty()) {
             return true;
         }
 
         return ToLower(form.editorId).find(ToLower(filter)) != std::string::npos;
+    }
+
+    bool MatchesFilters(const DynamicForms::DynamicForm& form) {
+        return MatchesFilterValues(form, selectedFilterKind, filterEditorIdBuffer.data());
+    }
+
+    bool MatchesExportFilters(const DynamicForms::DynamicForm& form) {
+        return MatchesFilterValues(form, selectedExportFilterKind, exportFilterEditorIdBuffer.data());
     }
 
     void ResetCreateState() {
@@ -546,33 +656,38 @@ namespace {
             ImGui::SetNextItemWidth(360.0F);
             ImGui::InputText(Configuration::GetLoc("menu.model_path", "Model path"), createModelBuffer.data(), createModelBuffer.size());
             SetStableComboWidth(HEAD_PART_TYPE_ITEMS, 220.0F);
-            ImGui::Combo("Head part type", &selectedHeadPartType, HEAD_PART_TYPE_ITEMS.data(), static_cast<int>(HEAD_PART_TYPE_ITEMS.size()));
+            ImGui::Combo(Configuration::GetLoc("menu.head_part_type", "Head part type"), &selectedHeadPartType, HEAD_PART_TYPE_ITEMS.data(), static_cast<int>(HEAD_PART_TYPE_ITEMS.size()));
             ImGui::Checkbox(Configuration::GetLoc("menu.playable", "Playable"), &createPlayable);
             ImGui::SameLine();
-            ImGui::Checkbox("Male", &createHeadPartMale);
+            ImGui::Checkbox(Configuration::GetLoc("menu.male", "Male"), &createHeadPartMale);
             ImGui::SameLine();
-            ImGui::Checkbox("Female", &createHeadPartFemale);
-            ImGui::Checkbox("Is extra part", &createHeadPartIsExtraPart);
+            ImGui::Checkbox(Configuration::GetLoc("menu.female", "Female"), &createHeadPartFemale);
+            ImGui::Checkbox(Configuration::GetLoc("menu.is_extra_part", "Is extra part"), &createHeadPartIsExtraPart);
             ImGui::SameLine();
-            ImGui::Checkbox("Use solid tint", &createHeadPartUseSolidTint);
+            ImGui::Checkbox(Configuration::GetLoc("menu.use_solid_tint", "Use solid tint"), &createHeadPartUseSolidTint);
             ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText("Race Morph", createRaceMorphBuffer.data(), createRaceMorphBuffer.size());
+            ImGui::InputText(Configuration::GetLoc("menu.race_morph", "Race Morph"), createRaceMorphBuffer.data(), createRaceMorphBuffer.size());
             ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText("Tri", createDefaultMorphBuffer.data(), createDefaultMorphBuffer.size());
+            ImGui::InputText(Configuration::GetLoc("menu.tri", "Tri"), createDefaultMorphBuffer.data(), createDefaultMorphBuffer.size());
             ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText("Chargen Morph", createChargenMorphBuffer.data(), createChargenMorphBuffer.size());
-            ImGui::TextDisabled("%s", "Meshes paths are relative to Data/Meshes.");
+            ImGui::InputText(Configuration::GetLoc("menu.chargen_morph", "Chargen Morph"), createChargenMorphBuffer.data(), createChargenMorphBuffer.size());
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.meshes_path_hint", "Meshes paths are relative to Data/Meshes."));
         }
         if (SelectedFormKind() == DynamicForms::FormKind::SoundDescriptor) {
             ImGui::Separator();
-            ImGui::Text("%s", "Sound Description settings");
-            ImGui::TextDisabled("%s", "Add sound files after creation.");
+            ImGui::Text("%s", Configuration::GetLoc("menu.sound_description_settings", "Sound Description settings"));
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.sound_files_hint", "Add sound files after creation."));
+        }
+        if (SelectedFormKind() == DynamicForms::FormKind::EffectShader) {
+            ImGui::Separator();
+            ImGui::Text("%s", Configuration::GetLoc("menu.effect_shader_settings", "Effect Shader settings"));
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.texture_paths_hint", "Texture paths are relative to Data/Textures and can be edited after creation."));
         }
         if (SelectedFormKind() == DynamicForms::FormKind::Light ||
             SelectedFormKind() == DynamicForms::FormKind::Explosion ||
             SelectedFormKind() == DynamicForms::FormKind::Activator) {
             ImGui::Separator();
-            ImGui::Text("%s", "Base settings");
+            ImGui::Text("%s", Configuration::GetLoc("menu.base_settings", "Base settings"));
             ImGui::SetNextItemWidth(260.0F);
             ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
             ImGui::SetNextItemWidth(360.0F);
@@ -581,7 +696,7 @@ namespace {
                 auto red = static_cast<std::uint8_t>(std::clamp(createColor[0], 0, 255));
                 auto green = static_cast<std::uint8_t>(std::clamp(createColor[1], 0, 255));
                 auto blue = static_cast<std::uint8_t>(std::clamp(createColor[2], 0, 255));
-                if (DrawRGBColorEditor("RGB", red, green, blue)) {
+                if (DrawRGBColorEditor(Configuration::GetLoc("menu.rgb", "RGB"), red, green, blue)) {
                     createColor[0] = red;
                     createColor[1] = green;
                     createColor[2] = blue;
@@ -590,14 +705,14 @@ namespace {
         }
         if (SelectedFormKind() == DynamicForms::FormKind::NPC) {
             ImGui::Separator();
-            ImGui::Text("%s", "NPC settings");
+            ImGui::Text("%s", Configuration::GetLoc("menu.npc_settings", "NPC settings"));
             ImGui::SetNextItemWidth(260.0F);
             ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
             auto red = static_cast<std::uint8_t>(std::clamp(createColor[0], 0, 255));
             auto green = static_cast<std::uint8_t>(std::clamp(createColor[1], 0, 255));
             auto blue = static_cast<std::uint8_t>(std::clamp(createColor[2], 0, 255));
             auto alpha = static_cast<std::uint8_t>(std::clamp(createColor[3], 0, 255));
-            if (DrawRGBAColorEditor("Body tint", red, green, blue, alpha)) {
+            if (DrawRGBAColorEditor(Configuration::GetLoc("menu.body_tint", "Body tint"), red, green, blue, alpha)) {
                 createColor[0] = red;
                 createColor[1] = green;
                 createColor[2] = blue;
@@ -1009,14 +1124,14 @@ namespace {
         int minBounds[3]{ edited.boundX1, edited.boundY1, edited.boundZ1 };
         int maxBounds[3]{ edited.boundX2, edited.boundY2, edited.boundZ2 };
         ImGui::SetNextItemWidth(260.0F);
-        if (ImGui::InputInt3("Min bounds", minBounds)) {
+        if (ImGui::InputInt3(Configuration::GetLoc("menu.min_bounds", "Min bounds"), minBounds)) {
             edited.boundX1 = static_cast<std::int16_t>(std::clamp(minBounds[0], -32768, 32767));
             edited.boundY1 = static_cast<std::int16_t>(std::clamp(minBounds[1], -32768, 32767));
             edited.boundZ1 = static_cast<std::int16_t>(std::clamp(minBounds[2], -32768, 32767));
             changed = true;
         }
         ImGui::SetNextItemWidth(260.0F);
-        if (ImGui::InputInt3("Max bounds", maxBounds)) {
+        if (ImGui::InputInt3(Configuration::GetLoc("menu.max_bounds", "Max bounds"), maxBounds)) {
             edited.boundX2 = static_cast<std::int16_t>(std::clamp(maxBounds[0], -32768, 32767));
             edited.boundY2 = static_cast<std::int16_t>(std::clamp(maxBounds[1], -32768, 32767));
             edited.boundZ2 = static_cast<std::int16_t>(std::clamp(maxBounds[2], -32768, 32767));
@@ -1072,7 +1187,7 @@ namespace {
         auto edited = form;
 
         if (ImGui::BeginTabBar("##soundDescriptorTabs")) {
-            if (ImGui::BeginTabItem("Data")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
                 changed |= DrawStringListEditor("Sound files", edited.soundFiles, "Add sound file", "File");
                 changed |= DrawFormReferencePicker("Category", "SoundCategory", edited.category);
                 changed |= DrawFormReferencePicker("Alternate sound", "SoundDescriptor", edited.alternateSound);
@@ -1085,42 +1200,42 @@ namespace {
                 int looping = edited.looping;
                 int rumble = edited.rumbleSendValue;
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("% Frequency Shift", &frequencyShift)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.frequency_shift", "% Frequency Shift"), &frequencyShift)) {
                     edited.frequencyShift = static_cast<std::uint8_t>(std::clamp(frequencyShift, 0, 255));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("% Frequency Variance", &frequencyVariance)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.frequency_variance", "% Frequency Variance"), &frequencyVariance)) {
                     edited.frequencyVariance = static_cast<std::uint8_t>(std::clamp(frequencyVariance, 0, 255));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Priority", &priority)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.priority", "Priority"), &priority)) {
                     edited.priority = static_cast<std::uint8_t>(std::clamp(priority, 0, 255));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("db Variance", &dbVariance)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.db_variance", "db Variance"), &dbVariance)) {
                     edited.dbVariance = static_cast<std::uint8_t>(std::clamp(dbVariance, 0, 255));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputFloat("Static Attenuation (db)", &edited.staticAttenuation)) {
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.static_attenuation_db", "Static Attenuation (db)"), &edited.staticAttenuation)) {
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Looping raw", &looping)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.looping_raw", "Looping raw"), &looping)) {
                     edited.looping = static_cast<std::uint8_t>(std::clamp(looping, 0, 255));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Rumble Send Value", &rumble)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.rumble_send_value", "Rumble Send Value"), &rumble)) {
                     edited.rumbleSendValue = static_cast<std::uint8_t>(std::clamp(rumble, 0, 255));
                     changed = true;
                 }
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Conditions")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.conditions", "Conditions"))) {
                 changed |= DrawPerkConditions(edited.conditions);
                 ImGui::EndTabItem();
             }
@@ -1143,21 +1258,21 @@ namespace {
         int time = edited.lightTime;
         int radius = static_cast<int>(edited.lightRadius);
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputInt("Time", &time)) {
+        if (ImGui::InputInt(Configuration::GetLoc("menu.time", "Time"), &time)) {
             edited.lightTime = time;
             changed = true;
         }
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputInt("Radius", &radius)) {
+        if (ImGui::InputInt(Configuration::GetLoc("menu.radius", "Radius"), &radius)) {
             edited.lightRadius = static_cast<std::uint32_t>(std::max(radius, 0));
             changed = true;
         }
-        changed |= DrawRGBColorEditor("RGB", edited.red, edited.green, edited.blue);
-        ImGui::TextDisabled("%s", "Light DATA flags");
-        changed |= FlagCheckbox("Dynamic", edited.flags, 1u << 0);
-        changed |= FlagCheckbox("Can Carry", edited.flags, 1u << 1);
-        changed |= FlagCheckbox("Negative", edited.flags, 1u << 2);
-        changed |= FlagCheckbox("Flicker", edited.flags, 1u << 3);
+        changed |= DrawRGBColorEditor(Configuration::GetLoc("menu.rgb", "RGB"), edited.red, edited.green, edited.blue);
+        ImGui::TextDisabled("%s", Configuration::GetLoc("menu.light_data_flags", "Light DATA flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_dynamic", "Dynamic"), edited.flags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_can_carry", "Can Carry"), edited.flags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_negative", "Negative"), edited.flags, 1u << 2);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_flicker", "Flicker"), edited.flags, 1u << 3);
         changed |= FlagCheckbox("Deep Copy", edited.flags, 1u << 4);
         changed |= FlagCheckbox("Off By Default", edited.flags, 1u << 5);
         changed |= FlagCheckbox("Flicker Slow", edited.flags, 1u << 6);
@@ -1169,19 +1284,19 @@ namespace {
         changed |= FlagCheckbox("Omni Shadow", edited.flags, 1u << 12);
         changed |= FlagCheckbox("Portal-strict", edited.flags, 1u << 13);
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Falloff Exponent", &edited.falloffExponent)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.falloff_exponent", "Falloff Exponent"), &edited.falloffExponent)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("FOV", &edited.fov)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.fov", "FOV"), &edited.fov)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Near Clip", &edited.nearClip)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.near_clip", "Near Clip"), &edited.nearClip)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Flicker Period", &edited.flickerPeriod)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.flicker_period", "Flicker Period"), &edited.flickerPeriod)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Intensity Amplitude", &edited.flickerIntensityAmplitude)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.intensity_amplitude", "Intensity Amplitude"), &edited.flickerIntensityAmplitude)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Movement Amplitude", &edited.flickerMovementAmplitude)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.movement_amplitude", "Movement Amplitude"), &edited.flickerMovementAmplitude)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Fade", &edited.fade)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.fade", "Fade"), &edited.fade)) changed = true;
         changed |= DrawFormReferencePicker("Sound", "SoundDescriptor", edited.sound);
         changed |= DrawFormReferencePicker("Lens", "LensFlare", edited.lensFlare);
 
@@ -1205,27 +1320,27 @@ namespace {
         changed |= DrawFormReferencePicker("Object Effect", "Enchantment", edited.objectEffect);
         changed |= DrawFormReferencePicker("Image Space Modifier", "ImageSpaceModifier", edited.imageSpaceModifier);
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Force", &edited.force)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.force", "Force"), &edited.force)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Damage", &edited.damage)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.damage", "Damage"), &edited.damage)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Radius", &edited.radius)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.radius", "Radius"), &edited.radius)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("IS Radius", &edited.imageSpaceRadius)) changed = true;
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.is_radius", "IS Radius"), &edited.imageSpaceRadius)) changed = true;
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Vertical Offset Mult", &edited.verticalOffsetMult)) changed = true;
-        ImGui::TextDisabled("%s", "Explosion DATA flags");
-        changed |= FlagCheckbox("Always Uses World Orientation", edited.flags, 1u << 1);
-        changed |= FlagCheckbox("Knock Down - Always", edited.flags, 1u << 2);
-        changed |= FlagCheckbox("Knock Down - By Formula", edited.flags, 1u << 3);
-        changed |= FlagCheckbox("Ignore LOS Check", edited.flags, 1u << 4);
-        changed |= FlagCheckbox("Push Explosion Source Ref Only", edited.flags, 1u << 5);
-        changed |= FlagCheckbox("Ignore Image Space Swap", edited.flags, 1u << 6);
-        changed |= FlagCheckbox("Chain", edited.flags, 1u << 7);
-        changed |= FlagCheckbox("No Controller Vibration", edited.flags, 1u << 8);
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.vertical_offset_mult", "Vertical Offset Mult"), &edited.verticalOffsetMult)) changed = true;
+        ImGui::TextDisabled("%s", Configuration::GetLoc("menu.explosion_data_flags", "Explosion DATA flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_always_uses_world_orientation", "Always Uses World Orientation"), edited.flags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_knock_down_always", "Knock Down - Always"), edited.flags, 1u << 2);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_knock_down_by_formula", "Knock Down - By Formula"), edited.flags, 1u << 3);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_los_check", "Ignore LOS Check"), edited.flags, 1u << 4);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_push_explosion_source_ref_only", "Push Explosion Source Ref Only"), edited.flags, 1u << 5);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_image_space_swap", "Ignore Image Space Swap"), edited.flags, 1u << 6);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_chain", "Chain"), edited.flags, 1u << 7);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_controller_vibration", "No Controller Vibration"), edited.flags, 1u << 8);
         int soundLevel = static_cast<int>(edited.soundLevel);
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputInt("Sound Level raw", &soundLevel)) {
+        if (ImGui::InputInt(Configuration::GetLoc("menu.sound_level_raw", "Sound Level raw"), &soundLevel)) {
             edited.soundLevel = static_cast<std::uint32_t>(std::max(soundLevel, 0));
             changed = true;
         }
@@ -1242,14 +1357,131 @@ namespace {
         auto edited = form;
         changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
         changed |= InputString(Configuration::GetLoc("menu.model_path", "Model path"), edited.modelPath, 420.0F);
-        changed |= DrawFormReferencePicker("Sound - Looping", "SoundDescriptor", edited.soundLoop);
-        changed |= DrawFormReferencePicker("Sound - Activation", "SoundDescriptor", edited.soundActivate);
-        changed |= DrawFormReferencePicker("Water Type", "Water", edited.waterType);
-        ImGui::TextDisabled("%s", "Activator FNAM flags");
-        changed |= FlagCheckbox("No Displacement", edited.flags, 1u << 0);
-        changed |= FlagCheckbox("Ignored By Sandbox", edited.flags, 1u << 1);
-        changed |= FlagCheckbox("Is Procedural Water", edited.flags, 1u << 2);
-        changed |= FlagCheckbox("Is LOD Water", edited.flags, 1u << 3);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.sound_looping", "Sound - Looping"), "SoundDescriptor", edited.soundLoop);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.sound_activation", "Sound - Activation"), "SoundDescriptor", edited.soundActivate);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.water_type", "Water Type"), "Water", edited.waterType);
+        ImGui::TextDisabled("%s", Configuration::GetLoc("menu.activator_fnam_flags", "Activator FNAM flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_displacement", "No Displacement"), edited.flags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignored_by_sandbox", "Ignored By Sandbox"), edited.flags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_is_procedural_water", "Is Procedural Water"), edited.flags, 1u << 2);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_is_lod_water", "Is LOD Water"), edited.flags, 1u << 3);
+
+        if (changed && Manager::UpdateForm(index, edited)) {
+            form = Manager::GetForms()[index];
+            return true;
+        }
+        return false;
+    }
+
+    void DrawFloatInput(const char* label, float& value, bool& changed, const float width = 160.0F) {
+        ImGui::SetNextItemWidth(width);
+        if (ImGui::InputFloat(label, &value)) {
+            changed = true;
+        }
+    }
+
+    bool RenderEffectShaderEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##effectShaderTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.textures", "Textures"))) {
+                changed |= InputString("Fill texture", edited.fillTexturePath, 460.0F);
+                changed |= InputString("Particle texture", edited.particleShaderTexturePath, 460.0F);
+                changed |= InputString(Configuration::GetLoc("menu.holes_texture", "Holes texture"), edited.holesTexturePath, 460.0F);
+                changed |= InputString(Configuration::GetLoc("menu.membrane_palette_texture", "Membrane palette texture"), edited.membranePaletteTexturePath, 460.0F);
+                changed |= InputString(Configuration::GetLoc("menu.particle_palette_texture", "Particle palette texture"), edited.particlePaletteTexturePath, 460.0F);
+                ImGui::TextDisabled("%s", Configuration::GetLoc("menu.texture_paths_hint_short", "Texture paths are relative to Data/Textures."));
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.ambient_sound", "Ambient sound"), "SoundDescriptor", edited.ambientSound);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.flags", "Flags"))) {
+                ImGui::Text(Configuration::GetLoc("menu.flags_0x", "Flags: 0x%08X"), edited.flags);
+                changed |= FlagCheckbox("No Membrane Shader", edited.flags, 1u << 0);
+                changed |= FlagCheckbox("Membrane Grayscale Color", edited.flags, 1u << 1);
+                changed |= FlagCheckbox("Membrane Grayscale Alpha", edited.flags, 1u << 2);
+                changed |= FlagCheckbox("No Particle Shader", edited.flags, 1u << 3);
+                changed |= FlagCheckbox("Edge Effect Inverse", edited.flags, 1u << 4);
+                changed |= FlagCheckbox("Affect Skin Only", edited.flags, 1u << 5);
+                changed |= FlagCheckbox("Ignore Alpha", edited.flags, 1u << 6);
+                changed |= FlagCheckbox("Project UVs", edited.flags, 1u << 7);
+                changed |= FlagCheckbox("Ignore Base Geometry Alpha", edited.flags, 1u << 8);
+                changed |= FlagCheckbox("Lighting", edited.flags, 1u << 9);
+                changed |= FlagCheckbox("No Weapons", edited.flags, 1u << 10);
+                changed |= FlagCheckbox("Unknown 11", edited.flags, 1u << 11);
+                changed |= FlagCheckbox("Unknown 12", edited.flags, 1u << 12);
+                changed |= FlagCheckbox("Unknown 13", edited.flags, 1u << 13);
+                changed |= FlagCheckbox("Unknown 14", edited.flags, 1u << 14);
+                changed |= FlagCheckbox("Particle Animated", edited.flags, 1u << 15);
+                changed |= FlagCheckbox("Particle Grayscale Color", edited.flags, 1u << 16);
+                changed |= FlagCheckbox("Particle Grayscale Alpha", edited.flags, 1u << 17);
+                changed |= FlagCheckbox("Unknown 18", edited.flags, 1u << 18);
+                changed |= FlagCheckbox("Unknown 19", edited.flags, 1u << 19);
+                changed |= FlagCheckbox("Unknown 20", edited.flags, 1u << 20);
+                changed |= FlagCheckbox("Unknown 21", edited.flags, 1u << 21);
+                changed |= FlagCheckbox("Unknown 22", edited.flags, 1u << 22);
+                changed |= FlagCheckbox("Unknown 23", edited.flags, 1u << 23);
+                changed |= FlagCheckbox("Use Blood Geometry", edited.flags, 1u << 24);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.fill", "Fill"))) {
+                changed |= DrawRGBAColorEditor("Fill color 1", edited.fillColor1Red, edited.fillColor1Green, edited.fillColor1Blue, edited.fillColor1Alpha);
+                changed |= DrawRGBAColorEditor("Fill color 2", edited.fillColor2Red, edited.fillColor2Green, edited.fillColor2Blue, edited.fillColor2Alpha);
+                changed |= DrawRGBAColorEditor("Fill color 3", edited.fillColor3Red, edited.fillColor3Green, edited.fillColor3Blue, edited.fillColor3Alpha);
+                DrawFloatInput("Alpha fade in", edited.fillAlphaFadeIn, changed);
+                DrawFloatInput("Full alpha time", edited.fillFullAlphaTime, changed);
+                DrawFloatInput("Alpha fade out", edited.fillAlphaFadeOut, changed);
+                DrawFloatInput("Persistent alpha ratio", edited.fillPersistentAlphaRatio, changed);
+                DrawFloatInput("Alpha pulse amplitude", edited.fillAlphaPulseAmplitude, changed);
+                DrawFloatInput("Alpha pulse frequency", edited.fillAlphaPulseFrequency, changed);
+                DrawFloatInput("Animation speed U", edited.fillTextureAnimationSpeedU, changed);
+                DrawFloatInput("Animation speed V", edited.fillTextureAnimationSpeedV, changed);
+                DrawFloatInput("Texture scale U", edited.fillTextureScaleU, changed);
+                DrawFloatInput("Texture scale V", edited.fillTextureScaleV, changed);
+                DrawFloatInput("Full alpha ratio", edited.fillFullAlphaRatio, changed);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.edge", "Edge"))) {
+                changed |= DrawRGBAColorEditor("Edge effect color", edited.edgeEffectRed, edited.edgeEffectGreen, edited.edgeEffectBlue, edited.edgeEffectAlpha);
+                changed |= DrawRGBAColorEditor("Edge color", edited.edgeColorRed, edited.edgeColorGreen, edited.edgeColorBlue, edited.edgeColorAlpha);
+                DrawFloatInput("Falloff", edited.edgeFalloff, changed);
+                DrawFloatInput("Alpha fade in", edited.edgeAlphaFadeIn, changed);
+                DrawFloatInput("Full alpha time", edited.edgeFullAlphaTime, changed);
+                DrawFloatInput("Alpha fade out", edited.edgeAlphaFadeOut, changed);
+                DrawFloatInput("Persistent alpha ratio", edited.edgePersistentAlphaRatio, changed);
+                DrawFloatInput("Alpha pulse amplitude", edited.edgeAlphaPulseAmplitude, changed);
+                DrawFloatInput("Alpha pulse frequency", edited.edgeAlphaPulseFrequency, changed);
+                DrawFloatInput("Full alpha ratio", edited.edgeFullAlphaRatio, changed);
+                DrawFloatInput("Width alpha units", edited.edgeWidthAlphaUnits, changed);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.particles", "Particles"))) {
+                changed |= DrawRGBAColorEditor("Color 1", edited.particleColor1Red, edited.particleColor1Green, edited.particleColor1Blue, edited.particleColor1Alpha);
+                changed |= DrawRGBAColorEditor("Color 2", edited.particleColor2Red, edited.particleColor2Green, edited.particleColor2Blue, edited.particleColor2Alpha);
+                changed |= DrawRGBAColorEditor("Color 3", edited.particleColor3Red, edited.particleColor3Green, edited.particleColor3Blue, edited.particleColor3Alpha);
+                DrawFloatInput("Birth ramp up time", edited.particleBirthRampUpTime, changed);
+                DrawFloatInput("Full birth time", edited.particleFullBirthTime, changed);
+                DrawFloatInput("Birth ramp down time", edited.particleBirthRampDownTime, changed);
+                DrawFloatInput("Full birth ratio", edited.particleFullBirthRatio, changed);
+                DrawFloatInput("Particle count", edited.particleCount, changed);
+                DrawFloatInput("Lifetime", edited.particleLifetime, changed);
+                DrawFloatInput("Lifetime variance", edited.particleLifetimeVariance, changed);
+                DrawFloatInput("Initial speed along normal", edited.particleInitialSpeedAlongNormal, changed);
+                DrawFloatInput("Acceleration along normal", edited.particleAccelerationAlongNormal, changed);
+                DrawFloatInput("Scale key 1", edited.particleScaleKey1, changed);
+                DrawFloatInput("Scale key 2", edited.particleScaleKey2, changed);
+                DrawFloatInput("Scale key 1 time", edited.particleScaleKey1Time, changed);
+                DrawFloatInput("Scale key 2 time", edited.particleScaleKey2Time, changed);
+                DrawFloatInput("Color 1 alpha", edited.particleColor1AlphaValue, changed);
+                DrawFloatInput("Color 2 alpha", edited.particleColor2AlphaValue, changed);
+                DrawFloatInput("Color 3 alpha", edited.particleColor3AlphaValue, changed);
+                DrawFloatInput("Color 1 time", edited.particleColor1Time, changed);
+                DrawFloatInput("Color 2 time", edited.particleColor2Time, changed);
+                DrawFloatInput("Color 3 time", edited.particleColor3Time, changed);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
 
         if (changed && Manager::UpdateForm(index, edited)) {
             form = Manager::GetForms()[index];
@@ -1318,7 +1550,7 @@ namespace {
         bool changed = false;
         const auto preview = ConditionFunctionPreview(condition);
         SetAvailableComboWidth(420.0F);
-        if (ImGui::BeginCombo("Function", preview.c_str())) {
+        if (ImGui::BeginCombo(Configuration::GetLoc("menu.function", "Function"), preview.c_str())) {
             const auto functions = ConditionCatalog::GetFunctions();
             char searchBuf[256]{};
             strcpy_s(searchBuf, conditionFunctionFilter.c_str());
@@ -1388,33 +1620,33 @@ namespace {
 
         int opCode = static_cast<int>(condition.opCode);
         SetStableComboWidth(CONDITION_OP_ITEMS, 160.0F);
-        if (ImGui::Combo("Operator", &opCode, CONDITION_OP_ITEMS.data(), static_cast<int>(CONDITION_OP_ITEMS.size()))) {
+        if (ImGui::Combo(Configuration::GetLoc("menu.operator", "Operator"), &opCode, CONDITION_OP_ITEMS.data(), static_cast<int>(CONDITION_OP_ITEMS.size()))) {
             condition.opCode = static_cast<std::uint32_t>(opCode);
             changed = true;
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("OR", &condition.isOr)) {
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.or", "OR"), &condition.isOr)) {
             changed = true;
         }
 
         ImGui::SetNextItemWidth(160.0F);
-        if (ImGui::InputFloat("Comparison", &condition.comparisonValue)) {
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.comparison", "Comparison"), &condition.comparisonValue)) {
             changed = true;
         }
 
-        if (ImGui::Checkbox("Swap target", &condition.swapTarget)) {
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.swap_target", "Swap target"), &condition.swapTarget)) {
             changed = true;
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("Use pack data", &condition.usePackData)) {
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.use_pack_data", "Use pack data"), &condition.usePackData)) {
             changed = true;
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("Use aliases", &condition.useAliases)) {
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.use_aliases", "Use aliases"), &condition.useAliases)) {
             changed = true;
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("Global comparison", &condition.useGlobalComparison)) {
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.global_comparison", "Global comparison"), &condition.useGlobalComparison)) {
             changed = true;
         }
         if (condition.useGlobalComparison) {
@@ -1423,33 +1655,33 @@ namespace {
 
         int runOn = static_cast<int>(std::min<std::uint32_t>(condition.runOn, static_cast<std::uint32_t>(CONDITION_RUN_ON_ITEMS.size() - 1)));
         SetStableComboWidth(CONDITION_RUN_ON_ITEMS, 220.0F);
-        if (ImGui::Combo("Run on", &runOn, CONDITION_RUN_ON_ITEMS.data(), static_cast<int>(CONDITION_RUN_ON_ITEMS.size()))) {
+        if (ImGui::Combo(Configuration::GetLoc("menu.run_on", "Run on"), &runOn, CONDITION_RUN_ON_ITEMS.data(), static_cast<int>(CONDITION_RUN_ON_ITEMS.size()))) {
             condition.runOn = static_cast<std::uint32_t>(runOn);
             changed = true;
         }
 
         if (condition.runOn == 2) {
-            changed |= InputString("Run on ref", condition.runOnRef, 360.0F);
+            changed |= InputString(Configuration::GetLoc("menu.run_on_ref", "Run on ref"), condition.runOnRef, 360.0F);
         } else {
-            ImGui::TextDisabled("%s", "Run on ref is used only when Run on = Reference.");
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.run_on_ref_hint", "Run on ref is used only when Run on = Reference."));
         }
 
         if (condition.runOn == 5 || condition.runOn == 6 || condition.runOn == 7) {
             int dataId = static_cast<int>(condition.dataId);
             ImGui::SetNextItemWidth(160.0F);
-            if (ImGui::InputInt("Data ID", &dataId)) {
+            if (ImGui::InputInt(Configuration::GetLoc("menu.data_id", "Data ID"), &dataId)) {
                 condition.dataId = static_cast<std::uint32_t>(std::max(dataId, 0));
                 changed = true;
             }
         } else {
-            ImGui::TextDisabled("%s", "Data ID is unused for this Run on mode.");
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.data_id_unused_hint", "Data ID is unused for this Run on mode."));
         }
 
         if (functionInfo) {
             changed |= DrawConditionParam("Param 1", functionInfo->rawParam1, condition.param1);
             changed |= DrawConditionParam("Param 2", functionInfo->rawParam2, condition.param2);
             if (std::string_view(functionInfo->rawParam3) != "ptNone") {
-                ImGui::TextColored({ 1.0F, 0.75F, 0.35F, 1.0F }, "Param 3 exists in catalog (%s), but this CommonLib condition layout exposes params[2].", functionInfo->rawParam3);
+                ImGui::TextColored({ 1.0F, 0.75F, 0.35F, 1.0F }, Configuration::GetLoc("menu.param_3_exists_in_catalog_but_this_commonlib_condition_layou", "Param 3 exists in catalog (%s), but this CommonLib condition layout exposes params[2]."), functionInfo->rawParam3);
             }
         } else {
             changed |= InputString("Param 1", condition.param1, 360.0F);
@@ -1461,7 +1693,7 @@ namespace {
 
     bool DrawPerkConditions(std::vector<DynamicForms::PerkCondition>& conditions) {
         bool changed = false;
-        if (ImGui::Button("Add condition")) {
+        if (ImGui::Button(Configuration::GetLoc("menu.add_condition", "Add condition"))) {
             DynamicForms::PerkCondition condition;
             condition.kind = DynamicForms::PerkConditionKind::Raw;
             condition.functionId = 277;
@@ -1493,7 +1725,7 @@ namespace {
 
     bool DrawPerkEntries(std::vector<DynamicForms::PerkEntry>& entries) {
         bool changed = false;
-        if (ImGui::Button("Add entry")) {
+        if (ImGui::Button(Configuration::GetLoc("menu.add_entry", "Add entry"))) {
             DynamicForms::PerkEntry entry;
             entry.entryPoint = 75;
             entry.function = 1;
@@ -1521,36 +1753,36 @@ namespace {
                 int function = static_cast<int>(entry.function);
                 int numArgs = static_cast<int>(entry.numArgs);
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Rank", &rank)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.rank", "Rank"), &rank)) {
                     entry.rank = static_cast<std::uint32_t>(std::max(rank, 0));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Priority", &priority)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.priority", "Priority"), &priority)) {
                     entry.priority = static_cast<std::uint32_t>(std::max(priority, 0));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Entry point", &entryPoint)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.entry_point", "Entry point"), &entryPoint)) {
                     entry.entryPoint = static_cast<std::uint32_t>(std::clamp(entryPoint, 0, 91));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Function", &function)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.function", "Function"), &function)) {
                     entry.function = static_cast<std::uint32_t>(std::clamp(function, 1, 15));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Num args", &numArgs)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.num_args", "Num args"), &numArgs)) {
                     entry.numArgs = static_cast<std::uint32_t>(std::max(numArgs, 0));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputFloat("Value", &entry.value)) {
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.value", "Value"), &entry.value)) {
                     changed = true;
                 }
                 ImGui::Separator();
-                ImGui::Text("%s", "Entry conditions");
+                ImGui::Text("%s", Configuration::GetLoc("menu.entry_conditions", "Entry conditions"));
                 changed |= DrawPerkConditions(entry.conditions);
             }
             ImGui::PopID();
@@ -1592,7 +1824,7 @@ namespace {
             ImGui::SameLine();
             int rank = values[i].rank;
             ImGui::SetNextItemWidth(90.0F);
-            if (ImGui::InputInt("Rank", &rank)) {
+            if (ImGui::InputInt(Configuration::GetLoc("menu.rank", "Rank"), &rank)) {
                 values[i].rank = rank;
                 changed = true;
             }
@@ -1615,7 +1847,7 @@ namespace {
 
     bool DrawTintLayerEditor(std::vector<DynamicForms::TintLayer>& values) {
         bool changed = false;
-        ImGui::Text("Tint layers: %zu", values.size());
+        ImGui::Text(Configuration::GetLoc("menu.tint_layers_u", "Tint layers: %zu"), values.size());
         for (std::size_t i = 0; i < values.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
             auto& layer = values[i];
@@ -1631,24 +1863,24 @@ namespace {
                 int index = layer.index;
                 int preset = layer.preset;
                 ImGui::SetNextItemWidth(140.0F);
-                if (ImGui::InputInt("Tint index", &index)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.tint_index", "Tint index"), &index)) {
                     layer.index = static_cast<std::uint16_t>(std::clamp(index, 0, 65535));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(140.0F);
-                if (ImGui::InputInt("Preset", &preset)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.preset", "Preset"), &preset)) {
                     layer.preset = static_cast<std::uint16_t>(std::clamp(preset, 0, 65535));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(140.0F);
-                if (ImGui::InputFloat("Interpolation", &layer.interpolation)) {
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.interpolation", "Interpolation"), &layer.interpolation)) {
                     changed = true;
                 }
                 changed |= DrawRGBAColorEditor("Color", layer.red, layer.green, layer.blue, layer.alpha);
             }
             ImGui::PopID();
         }
-        if (ImGui::Button("Add tint layer")) {
+        if (ImGui::Button(Configuration::GetLoc("menu.add_tint_layer", "Add tint layer"))) {
             values.emplace_back();
             changed = true;
         }
@@ -1660,22 +1892,22 @@ namespace {
         auto edited = form;
 
         if (ImGui::BeginTabBar("##perkTabs")) {
-            if (ImGui::BeginTabItem("Data")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
                 changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
                 changed |= InputString("Description", edited.description, 460.0F);
                 int level = edited.level;
                 int numRanks = edited.numRanks;
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Level", &level)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.level", "Level"), &level)) {
                     edited.level = static_cast<std::int8_t>(std::clamp(level, -128, 127));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt("Num ranks", &numRanks)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.num_ranks", "Num ranks"), &numRanks)) {
                     edited.numRanks = static_cast<std::int8_t>(std::clamp(numRanks, 0, 127));
                     changed = true;
                 }
-                if (ImGui::Checkbox("Trait", &edited.trait)) {
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.trait", "Trait"), &edited.trait)) {
                     changed = true;
                 }
                 ImGui::SameLine();
@@ -1683,26 +1915,26 @@ namespace {
                     changed = true;
                 }
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Hidden", &edited.hidden)) {
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.hidden", "Hidden"), &edited.hidden)) {
                     changed = true;
                 }
                 changed |= DrawFormReferencePicker("Next perk", "Perk", edited.nextPerk);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Conditions")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.conditions", "Conditions"))) {
                 changed |= DrawPerkConditions(edited.conditions);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Effects")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.effects", "Effects"))) {
                 changed |= DrawPerkEntries(edited.entries);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Debug")) {
-                ImGui::Text("conditions: %zu", edited.conditions.size());
-                ImGui::Text("entries: %zu", edited.entries.size());
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.debug", "Debug"))) {
+                ImGui::Text(Configuration::GetLoc("menu.conditions_u", "conditions: %zu"), edited.conditions.size());
+                ImGui::Text(Configuration::GetLoc("menu.entries_u", "entries: %zu"), edited.entries.size());
                 for (std::size_t i = 0; i < edited.conditions.size(); ++i) {
                     const auto& condition = edited.conditions[i];
-                    ImGui::Text("condition[%zu]: kind=%d function=%u op=%u cmp=%.3f p1=%s p2=%s",
+                    ImGui::Text(Configuration::GetLoc("menu.condition_u_kind_function_op_cmp_p1_p2", "condition[%zu]: kind=%d function=%u op=%u cmp=%.3f p1=%s p2=%s"),
                         i,
                         static_cast<int>(condition.kind),
                         condition.functionId,
@@ -1713,7 +1945,7 @@ namespace {
                 }
                 for (std::size_t i = 0; i < edited.entries.size(); ++i) {
                     const auto& entry = edited.entries[i];
-                    ImGui::Text("entry[%zu]: ep=%u function=%u rank=%u priority=%u value=%.3f conditions=%zu",
+                    ImGui::Text(Configuration::GetLoc("menu.entry_u_ep_function_rank_priority_value_conditions_u", "entry[%zu]: ep=%u function=%u rank=%u priority=%u value=%.3f conditions=%zu"),
                         i,
                         entry.entryPoint,
                         entry.function,
@@ -1740,7 +1972,7 @@ namespace {
         const bool listsReady = ListManager::GetSingleton()->PopulateAllLists(false);
 
         SetAvailableComboWidth(360.0F);
-        if (ImGui::BeginCombo("Add extra part", Configuration::GetLoc("common.select", "Select"))) {
+        if (ImGui::BeginCombo(Configuration::GetLoc("menu.add_extra_part", "Add extra part"), Configuration::GetLoc("common.select", "Select"))) {
             char searchBuf[256]{};
             strcpy_s(searchBuf, filter.c_str());
             ImGui::SetNextItemWidth(-1.0F);
@@ -1794,11 +2026,11 @@ namespace {
         auto edited = form;
 
         if (ImGui::BeginTabBar("##headPartTabs")) {
-            if (ImGui::BeginTabItem("Data")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
                 changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
                 int typeIndex = HeadPartTypeIndex(edited.headPartType);
                 SetStableComboWidth(HEAD_PART_TYPE_ITEMS, 220.0F);
-                if (ImGui::Combo("Type", &typeIndex, HEAD_PART_TYPE_ITEMS.data(), static_cast<int>(HEAD_PART_TYPE_ITEMS.size()))) {
+                if (ImGui::Combo(Configuration::GetLoc("menu.type", "Type"), &typeIndex, HEAD_PART_TYPE_ITEMS.data(), static_cast<int>(HEAD_PART_TYPE_ITEMS.size()))) {
                     edited.headPartType = HeadPartTypeFromIndex(typeIndex);
                     changed = true;
                 }
@@ -1806,38 +2038,38 @@ namespace {
                     changed = true;
                 }
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Male", &edited.male)) {
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.male", "Male"), &edited.male)) {
                     changed = true;
                 }
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Female", &edited.female)) {
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.female", "Female"), &edited.female)) {
                     changed = true;
                 }
-                if (ImGui::Checkbox("Is extra part", &edited.isExtraPart)) {
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.is_extra_part", "Is extra part"), &edited.isExtraPart)) {
                     changed = true;
                 }
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Use solid tint", &edited.useSolidTint)) {
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.use_solid_tint", "Use solid tint"), &edited.useSolidTint)) {
                     changed = true;
                 }
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Files")) {
-                changed |= InputString("NIF model", edited.modelPath, 460.0F);
-                changed |= InputString("Race Morph", edited.raceMorphPath, 460.0F);
-                changed |= InputString("Tri", edited.defaultMorphPath, 460.0F);
-                changed |= InputString("Chargen Morph", edited.chargenMorphPath, 460.0F);
-                ImGui::TextDisabled("%s", "Meshes paths are relative to Data/Meshes. Texture paths in texture sets are relative to Data/Textures.");
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.files", "Files"))) {
+                changed |= InputString(Configuration::GetLoc("menu.nif_model", "NIF model"), edited.modelPath, 460.0F);
+                changed |= InputString(Configuration::GetLoc("menu.race_morph", "Race Morph"), edited.raceMorphPath, 460.0F);
+                changed |= InputString(Configuration::GetLoc("menu.tri", "Tri"), edited.defaultMorphPath, 460.0F);
+                changed |= InputString(Configuration::GetLoc("menu.chargen_morph", "Chargen Morph"), edited.chargenMorphPath, 460.0F);
+                ImGui::TextDisabled("%s", Configuration::GetLoc("menu.meshes_and_textures_hint", "Meshes paths are relative to Data/Meshes. Texture paths in texture sets are relative to Data/Textures."));
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("References")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.references", "References"))) {
                 changed |= DrawFormReferencePicker("Texture set", "TextureSet", edited.textureSet);
                 changed |= DrawFormReferencePicker("Color", "Color", edited.colorForm);
                 changed |= DrawFormReferencePicker("Valid races", "FormList", edited.validRaces);
                 ImGui::Separator();
-                ImGui::Text("Extra parts: %zu", edited.extraParts.size());
+                ImGui::Text(Configuration::GetLoc("menu.extra_parts_u", "Extra parts: %zu"), edited.extraParts.size());
                 for (std::size_t i = 0; i < edited.extraParts.size(); ++i) {
                     ImGui::PushID(static_cast<int>(i));
                     const auto display = edited.extraParts[i].Display();
@@ -1855,21 +2087,21 @@ namespace {
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Debug")) {
-                ImGui::Text("type=%d", static_cast<int>(edited.headPartType));
-                ImGui::Text("flags playable=%d male=%d female=%d extra=%d solidTint=%d",
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.debug", "Debug"))) {
+                ImGui::Text(Configuration::GetLoc("menu.type", "type=%d"), static_cast<int>(edited.headPartType));
+                ImGui::Text(Configuration::GetLoc("menu.flags_playable_male_female_extra_solidtint", "flags playable=%d male=%d female=%d extra=%d solidTint=%d"),
                     edited.playable,
                     edited.male,
                     edited.female,
                     edited.isExtraPart,
                     edited.useSolidTint);
-                ImGui::Text("model=%s", edited.modelPath.c_str());
-                ImGui::Text("raceMorph=%s", edited.raceMorphPath.c_str());
-                ImGui::Text("defaultMorph=%s", edited.defaultMorphPath.c_str());
-                ImGui::Text("chargenMorph=%s", edited.chargenMorphPath.c_str());
-                ImGui::Text("textureSet=%s", edited.textureSet.Display().c_str());
-                ImGui::Text("color=%s", edited.colorForm.Display().c_str());
-                ImGui::Text("validRaces=%s", edited.validRaces.Display().c_str());
+                ImGui::Text(Configuration::GetLoc("menu.model", "model=%s"), edited.modelPath.c_str());
+                ImGui::Text(Configuration::GetLoc("menu.racemorph", "raceMorph=%s"), edited.raceMorphPath.c_str());
+                ImGui::Text(Configuration::GetLoc("menu.defaultmorph", "defaultMorph=%s"), edited.defaultMorphPath.c_str());
+                ImGui::Text(Configuration::GetLoc("menu.chargenmorph", "chargenMorph=%s"), edited.chargenMorphPath.c_str());
+                ImGui::Text(Configuration::GetLoc("menu.textureset", "textureSet=%s"), edited.textureSet.Display().c_str());
+                ImGui::Text(Configuration::GetLoc("menu.color", "color=%s"), edited.colorForm.Display().c_str());
+                ImGui::Text(Configuration::GetLoc("menu.validraces", "validRaces=%s"), edited.validRaces.Display().c_str());
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -1887,41 +2119,41 @@ namespace {
         auto edited = form;
 
         if (ImGui::BeginTabBar("##npcTabs")) {
-            if (ImGui::BeginTabItem("Data")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
                 changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputFloat("Height", &edited.height)) changed = true;
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.height", "Height"), &edited.height)) changed = true;
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputFloat("Weight", &edited.weight)) changed = true;
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.weight", "Weight"), &edited.weight)) changed = true;
                 changed |= DrawRGBAColorEditor("Body tint", edited.red, edited.green, edited.blue, edited.alpha);
 
-                if (ImGui::Checkbox("Female", &edited.femaleNpc)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.female", "Female"), &edited.femaleNpc)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Opposite gender anim", &edited.oppositeGenderAnim)) changed = true;
-                if (ImGui::Checkbox("Essential", &edited.essential)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.opposite_gender_anim", "Opposite gender anim"), &edited.oppositeGenderAnim)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.essential", "Essential"), &edited.essential)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Protected", &edited.protectedNpc)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.protected", "Protected"), &edited.protectedNpc)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Unique", &edited.unique)) changed = true;
-                if (ImGui::Checkbox("Calc stats", &edited.calcStats)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.unique", "Unique"), &edited.unique)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.calc_stats", "Calc stats"), &edited.calcStats)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Respawn", &edited.respawn)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.respawn", "Respawn"), &edited.respawn)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("No stealth meter", &edited.doesntAffectStealthMeter)) changed = true;
-                if (ImGui::Checkbox("Doesn't bleed", &edited.doesntBleed)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.no_stealth_meter", "No stealth meter"), &edited.doesntAffectStealthMeter)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.doesn_t_bleed", "Doesn't bleed"), &edited.doesntBleed)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Bleedout override flag", &edited.bleedoutOverrideFlag)) changed = true;
-                if (ImGui::Checkbox("Simple actor", &edited.simpleActor)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.bleedout_override_flag", "Bleedout override flag"), &edited.bleedoutOverrideFlag)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.simple_actor", "Simple actor"), &edited.simpleActor)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("No activation", &edited.noActivation)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.no_activation", "No activation"), &edited.noActivation)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Ghost", &edited.ghost)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.ghost", "Ghost"), &edited.ghost)) changed = true;
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Invulnerable", &edited.invulnerable)) changed = true;
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.invulnerable", "Invulnerable"), &edited.invulnerable)) changed = true;
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Refs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.refs", "Refs"))) {
                 changed |= DrawFormReferencePicker("Race", "Race", edited.race);
                 changed |= DrawFormReferencePicker("Skin", "Armor", edited.skin);
                 changed |= DrawFormReferencePicker("Default outfit", "Outfit", edited.defaultOutfit);
@@ -1937,14 +2169,14 @@ namespace {
                 changed |= DrawFormReferencePicker("Crime faction", "Faction", edited.crimeFaction);
                 int soundLevel = static_cast<int>(edited.soundLevel);
                 ImGui::SetNextItemWidth(140.0F);
-                if (ImGui::InputInt("Sound level raw", &soundLevel)) {
+                if (ImGui::InputInt(Configuration::GetLoc("menu.sound_level_raw", "Sound level raw"), &soundLevel)) {
                     edited.soundLevel = static_cast<std::uint32_t>(std::max(soundLevel, 0));
                     changed = true;
                 }
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Stats")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.stats", "Stats"))) {
                 int health = edited.health;
                 int magicka = edited.magicka;
                 int stamina = edited.stamina;
@@ -1958,33 +2190,33 @@ namespace {
                 int disposition = edited.dispositionBase;
                 int bleedout = edited.bleedoutOverride;
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Health", &health)) { edited.health = static_cast<std::uint16_t>(std::clamp(health, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.health", "Health"), &health)) { edited.health = static_cast<std::uint16_t>(std::clamp(health, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Magicka", &magicka)) { edited.magicka = static_cast<std::uint16_t>(std::clamp(magicka, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.magicka", "Magicka"), &magicka)) { edited.magicka = static_cast<std::uint16_t>(std::clamp(magicka, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Stamina", &stamina)) { edited.stamina = static_cast<std::uint16_t>(std::clamp(stamina, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.stamina", "Stamina"), &stamina)) { edited.stamina = static_cast<std::uint16_t>(std::clamp(stamina, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Health offset", &healthOffset)) { edited.healthOffset = static_cast<std::int16_t>(std::clamp(healthOffset, -32768, 32767)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.health_offset", "Health offset"), &healthOffset)) { edited.healthOffset = static_cast<std::int16_t>(std::clamp(healthOffset, -32768, 32767)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Magicka offset", &magickaOffset)) { edited.magickaOffset = static_cast<std::int16_t>(std::clamp(magickaOffset, -32768, 32767)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.magicka_offset", "Magicka offset"), &magickaOffset)) { edited.magickaOffset = static_cast<std::int16_t>(std::clamp(magickaOffset, -32768, 32767)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Stamina offset", &staminaOffset)) { edited.staminaOffset = static_cast<std::int16_t>(std::clamp(staminaOffset, -32768, 32767)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.stamina_offset", "Stamina offset"), &staminaOffset)) { edited.staminaOffset = static_cast<std::int16_t>(std::clamp(staminaOffset, -32768, 32767)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Calc min level", &minLevel)) { edited.calcMinLevel = static_cast<std::uint16_t>(std::clamp(minLevel, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.calc_min_level", "Calc min level"), &minLevel)) { edited.calcMinLevel = static_cast<std::uint16_t>(std::clamp(minLevel, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Calc max level", &maxLevel)) { edited.calcMaxLevel = static_cast<std::uint16_t>(std::clamp(maxLevel, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.calc_max_level", "Calc max level"), &maxLevel)) { edited.calcMaxLevel = static_cast<std::uint16_t>(std::clamp(maxLevel, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Level", &level)) { edited.npcLevel = static_cast<std::uint16_t>(std::clamp(level, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.level", "Level"), &level)) { edited.npcLevel = static_cast<std::uint16_t>(std::clamp(level, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Speed mult", &speed)) { edited.speedMult = static_cast<std::uint16_t>(std::clamp(speed, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.speed_mult", "Speed mult"), &speed)) { edited.speedMult = static_cast<std::uint16_t>(std::clamp(speed, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Disposition", &disposition)) { edited.dispositionBase = static_cast<std::uint16_t>(std::clamp(disposition, 0, 65535)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.disposition", "Disposition"), &disposition)) { edited.dispositionBase = static_cast<std::uint16_t>(std::clamp(disposition, 0, 65535)); changed = true; }
                 ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                if (ImGui::InputInt("Bleedout override", &bleedout)) { edited.bleedoutOverride = static_cast<std::int16_t>(std::clamp(bleedout, -32768, 32767)); changed = true; }
+                if (ImGui::InputInt(Configuration::GetLoc("menu.bleedout_override", "Bleedout override"), &bleedout)) { edited.bleedoutOverride = static_cast<std::int16_t>(std::clamp(bleedout, -32768, 32767)); changed = true; }
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Skills")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.skills", "Skills"))) {
                 for (std::size_t i = 0; i < edited.skills.size(); ++i) {
                     ImGui::PushID(static_cast<int>(i));
                     int base = edited.skills[i];
@@ -1992,13 +2224,13 @@ namespace {
                     ImGui::Text("%s", NPC_SKILL_NAMES[i]);
                     ImGui::SameLine(180.0F);
                     ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                    if (ImGui::InputInt("Base", &base)) {
+                    if (ImGui::InputInt(Configuration::GetLoc("menu.base", "Base"), &base)) {
                         edited.skills[i] = static_cast<std::uint8_t>(std::clamp(base, 0, 255));
                         changed = true;
                     }
                     ImGui::SameLine();
                     ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
-                    if (ImGui::InputInt("Offset", &offset)) {
+                    if (ImGui::InputInt(Configuration::GetLoc("menu.offset", "Offset"), &offset)) {
                         edited.skillOffsets[i] = static_cast<std::uint8_t>(std::clamp(offset, 0, 255));
                         changed = true;
                     }
@@ -2007,7 +2239,7 @@ namespace {
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Lists")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.lists", "Lists"))) {
                 changed |= DrawRankedFormRefListEditor("Faction", "Faction", edited.npcFactions);
                 ImGui::Separator();
                 changed |= DrawRankedFormRefListEditor("Perk", "Perk", edited.npcPerks);
@@ -2016,14 +2248,14 @@ namespace {
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Visual")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.visual", "Visual"))) {
                 SetStableComboWidth(HEAD_PART_FILTER_ITEMS, 220.0F);
-                ImGui::Combo("HeadPart filter", &selectedNpcHeadPartFilter, HEAD_PART_FILTER_ITEMS.data(), static_cast<int>(HEAD_PART_FILTER_ITEMS.size()));
+                ImGui::Combo(Configuration::GetLoc("menu.headpart_filter", "HeadPart filter"), &selectedNpcHeadPartFilter, HEAD_PART_FILTER_ITEMS.data(), static_cast<int>(HEAD_PART_FILTER_ITEMS.size()));
                 changed |= DrawFormRefListEditor("HeadPart", SelectedNpcHeadPartListType(), edited.headParts);
                 ImGui::Separator();
                 changed |= DrawTintLayerEditor(edited.tintLayers);
                 ImGui::Separator();
-                ImGui::Text("%s", "Face morphs");
+                ImGui::Text("%s", Configuration::GetLoc("menu.face_morphs", "Face morphs"));
                 for (std::size_t i = 0; i < edited.faceMorphs.size(); ++i) {
                     ImGui::PushID(static_cast<int>(i));
                     const auto label = i < NPC_MORPH_NAMES.size() ? std::string(NPC_MORPH_NAMES[i]) : std::format("Morph {}", i);
@@ -2033,7 +2265,7 @@ namespace {
                     }
                     ImGui::PopID();
                 }
-                ImGui::Text("%s", "Face part presets");
+                ImGui::Text("%s", Configuration::GetLoc("menu.face_part_presets", "Face part presets"));
                 for (std::size_t i = 0; i < edited.faceParts.size(); ++i) {
                     ImGui::PushID(static_cast<int>(i));
                     int part = edited.faceParts[i];
@@ -2048,9 +2280,9 @@ namespace {
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Debug")) {
-                ImGui::Text("race=%s", edited.race.Display().c_str());
-                ImGui::Text("headParts=%zu tintLayers=%zu factions=%zu perks=%zu spells=%zu",
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.debug", "Debug"))) {
+                ImGui::Text(Configuration::GetLoc("menu.race", "race=%s"), edited.race.Display().c_str());
+                ImGui::Text(Configuration::GetLoc("menu.headparts_u_tintlayers_u_factions_u_perks_u_spells_u", "headParts=%zu tintLayers=%zu factions=%zu perks=%zu spells=%zu"),
                     edited.headParts.size(),
                     edited.tintLayers.size(),
                     edited.npcFactions.size(),
@@ -2085,7 +2317,10 @@ namespace {
             ImGui::Text("%s: %u", Configuration::GetLoc("menu.local_id", "Local ID"), form.localId);
 
             if (ImGui::Button(Configuration::GetLoc("menu.delete", "Delete"))) {
+                const auto editorId = form.editorId;
                 if (Manager::DeleteForm(static_cast<std::size_t>(pendingDeleteIndex))) {
+                    selectedDeleteForms.erase(editorId);
+                    selectedExportForms.erase(editorId);
                     pendingDeleteIndex = -1;
                     requestDeletePopup = false;
                     deleteError.clear();
@@ -2112,9 +2347,81 @@ namespace {
         ImGui::EndPopup();
         return deleted;
     }
+
+    bool RenderBatchDeletePopup() {
+        bool deleted = false;
+        bool open = true;
+        if (!ImGui::BeginPopupModal(BATCH_DELETE_POPUP_ID, &open, ImGui::ImGuiWindowFlags_AlwaysAutoResize)) {
+            return false;
+        }
+
+        ImGui::Text("%s", Configuration::GetLoc("menu.delete_selected_forms", "Delete selected forms?"));
+        ImGui::Text(Configuration::GetLoc("menu.forms_selected_count", "%zu form(s) selected."), selectedDeleteForms.size());
+        if (!selectedDeleteForms.empty()) {
+            ImGui::BeginChild("##batchDeleteForms", { 420.0F, 160.0F }, true);
+            for (const auto& editorId : selectedDeleteForms) {
+                ImGui::TextUnformatted(editorId.c_str());
+            }
+            ImGui::EndChild();
+        }
+
+        if (selectedDeleteForms.empty()) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(Configuration::GetLoc("menu.confirm_delete", "Confirm delete"))) {
+            auto& forms = Manager::GetForms();
+            std::vector<std::size_t> indices;
+            for (std::size_t i = 0; i < forms.size(); ++i) {
+                if (selectedDeleteForms.contains(forms[i].editorId)) {
+                    indices.push_back(i);
+                }
+            }
+            std::ranges::sort(indices, [](const std::size_t lhs, const std::size_t rhs) {
+                return lhs > rhs;
+            });
+
+            bool ok = true;
+            for (const auto index : indices) {
+                ok = Manager::DeleteForm(index) && ok;
+            }
+
+            if (ok) {
+                for (const auto& editorId : selectedDeleteForms) {
+                    selectedExportForms.erase(editorId);
+                }
+                selectedDeleteForms.clear();
+                deleteSelectionMode = false;
+                requestBatchDeletePopup = false;
+                deleteError.clear();
+                ImGui::CloseCurrentPopup();
+                deleted = true;
+            } else {
+                deleteError = Configuration::GetLoc("menu.batch_delete_failed", "Could not delete one or more selected forms. Check if DPF is available.");
+            }
+        }
+        if (selectedDeleteForms.empty()) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.cancel", "Cancel"))) {
+            requestBatchDeletePopup = false;
+            deleteError.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        if (!deleteError.empty()) {
+            ImGui::TextColored(ERROR_COLOR, "%s", deleteError.c_str());
+        }
+
+        ImGui::EndPopup();
+        return deleted;
+    }
 }
 
 namespace Configuration {
+    void RenderExportMenu();
+
     void Register() {
         if (!SKSEMenuFramework::IsInstalled()) {
             logger::warn("SKSE Menu Framework is not installed.");
@@ -2124,8 +2431,9 @@ namespace Configuration {
         LoadLanguage();
         LoadForms();
 
-        SKSEMenuFramework::SetSection("Dynamic Forms Generator");
+        SKSEMenuFramework::SetSection(GetLoc("menu.section", "Dynamic Forms Generator"));
         SKSEMenuFramework::AddSectionItem(GetLoc("menu.forms", "Forms"), RenderFormsMenu);
+        SKSEMenuFramework::AddSectionItem(GetLoc("menu.export", "Export"), RenderExportMenu);
     }
 
     void LoadLanguage() {
@@ -2162,6 +2470,100 @@ namespace Configuration {
         Manager::SaveAllForms();
     }
 
+    void RenderExportMenu() {
+        auto& forms = Manager::GetForms();
+        std::set<std::string> existingEditorIds;
+        for (const auto& form : forms) {
+            existingEditorIds.insert(form.editorId);
+        }
+        for (auto it = selectedExportForms.begin(); it != selectedExportForms.end();) {
+            if (!existingEditorIds.contains(*it)) {
+                it = selectedExportForms.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        ImGui::Text("%s", Configuration::GetLoc("menu.export_package", "Export Package"));
+        ImGui::TextDisabled("%s", Configuration::GetLoc("menu.export_zip_hint", "ZIP files are saved to Data/Viny Mods/Dynamic Forms Generator/Export."));
+
+        ImGui::SetNextItemWidth(320.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.package_name", "Package name"), exportPackageName.data(), exportPackageName.size());
+
+        if (ImGui::Button(Configuration::GetLoc("menu.select_all", "Select all"))) {
+            selectedExportForms.clear();
+            for (const auto& form : forms) {
+                if (MatchesExportFilters(form)) {
+                    selectedExportForms.insert(form.editorId);
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.clear", "Clear"))) {
+            selectedExportForms.clear();
+        }
+        ImGui::SameLine();
+        if (selectedExportForms.empty()) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(std::format("{} ({})", Configuration::GetLoc("menu.export_selected", "Export selected"), selectedExportForms.size()).c_str())) {
+            if (const auto zipPath = ExportSelectedFormsAsZip(exportPackageName.data(), selectedExportForms)) {
+                lastExportSucceeded = true;
+                exportMessage = std::format("{} {}", Configuration::GetLoc("menu.exported_to", "Exported to"), zipPath->string());
+            } else {
+                lastExportSucceeded = false;
+                exportMessage = Configuration::GetLoc("menu.export_selected_failed", "Could not export selected forms. Check the log.");
+            }
+        }
+        if (selectedExportForms.empty()) {
+            ImGui::EndDisabled();
+        }
+
+        if (!exportMessage.empty()) {
+            ImGui::TextColored(lastExportSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", exportMessage.c_str());
+        }
+
+        ImGui::Separator();
+        SetStableComboWidth(FILTER_KIND_ITEMS, 220.0F);
+        ImGui::Combo(Configuration::GetLoc("menu.filter_by_type", "Filter by type"), &selectedExportFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
+        ImGui::SetNextItemWidth(280.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "Filter EditorID"), exportFilterEditorIdBuffer.data(), exportFilterEditorIdBuffer.size());
+
+        std::size_t visibleCount = 0;
+        for (const auto& form : forms) {
+            if (MatchesExportFilters(form)) {
+                ++visibleCount;
+            }
+        }
+        ImGui::TextDisabled(Configuration::GetLoc("menu.visible_total", "Visible: %zu / Total: %zu"), visibleCount, forms.size());
+
+        ImGui::BeginChild("##exportFormsList", { 0.0F, 560.0F }, true);
+        for (const auto& form : forms) {
+            if (!MatchesExportFilters(form)) {
+                continue;
+            }
+            ImGui::PushID(form.editorId.c_str());
+            bool selected = selectedExportForms.contains(form.editorId);
+            if (ImGui::Checkbox("##exportSelect", &selected)) {
+                if (selected) {
+                    selectedExportForms.insert(form.editorId);
+                } else {
+                    selectedExportForms.erase(form.editorId);
+                }
+            }
+            ImGui::SameLine();
+            ImGui::Text("%s", form.editorId.c_str());
+            ImGui::SameLine(360.0F);
+            ImGui::TextColored({ 0.7F, 0.8F, 1.0F, 1.0F }, "%s", FormKindLabel(form.kind));
+            if (form.dirty) {
+                ImGui::SameLine();
+                ImGui::TextColored(DIRTY_COLOR, "%s", Configuration::GetLoc("menu.need_save", "Need save"));
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    }
+
     void RenderFormsMenu() {
         ListManager::GetSingleton()->PopulateAllLists(ImGui::IsWindowAppearing());
 
@@ -2185,7 +2587,7 @@ namespace Configuration {
             ImGui::BeginDisabled();
         }
 
-        if (ImGui::Button("Create")) {
+        if (ImGui::Button(GetLoc("menu.create", "Create"))) {
             ImGui::OpenPopup(GetLoc("menu.create_popup", "Create Form"));
         }
 
@@ -2226,12 +2628,47 @@ namespace Configuration {
             ImGui::TextColored(lastSaveSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", saveMessage.c_str());
         }
 
+        if (ImGui::Button(deleteSelectionMode ? GetLoc("menu.cancel_delete_selection", "Cancel delete selection") : GetLoc("menu.select_to_delete", "Select to delete"))) {
+            deleteSelectionMode = !deleteSelectionMode;
+            selectedDeleteForms.clear();
+            deleteError.clear();
+        }
+        if (deleteSelectionMode) {
+            ImGui::SameLine();
+            if (selectedDeleteForms.empty()) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(std::format("{} ({})", GetLoc("menu.confirm_delete", "Confirm delete"), selectedDeleteForms.size()).c_str())) {
+                deleteError.clear();
+                requestBatchDeletePopup = true;
+            }
+            if (selectedDeleteForms.empty()) {
+                ImGui::EndDisabled();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(GetLoc("menu.clear_selected", "Clear selected"))) {
+                selectedDeleteForms.clear();
+            }
+        }
+
         SetStableComboWidth(FILTER_KIND_ITEMS, 220.0F);
         ImGui::Combo(GetLoc("menu.filter_type", "Filter by type"), &selectedFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
         ImGui::SetNextItemWidth(280.0F);
         ImGui::InputText(GetLoc("menu.filter_editor_id", "Filter EditorID"), filterEditorIdBuffer.data(), filterEditorIdBuffer.size());
 
         auto& forms = Manager::GetForms();
+        std::set<std::string> existingEditorIds;
+        for (const auto& form : forms) {
+            existingEditorIds.insert(form.editorId);
+        }
+        for (auto it = selectedDeleteForms.begin(); it != selectedDeleteForms.end();) {
+            if (!existingEditorIds.contains(*it)) {
+                it = selectedDeleteForms.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
         for (std::size_t i = 0; i < forms.size(); ++i) {
             auto& form = forms[i];
             if (!MatchesFilters(form)) {
@@ -2240,6 +2677,17 @@ namespace Configuration {
 
             ImGui::PushID(form.editorId.c_str());
             const bool isDirty = Manager::IsDirty(i);
+            if (deleteSelectionMode) {
+                bool selected = selectedDeleteForms.contains(form.editorId);
+                if (ImGui::Checkbox("##selectDelete", &selected)) {
+                    if (selected) {
+                        selectedDeleteForms.insert(form.editorId);
+                    } else {
+                        selectedDeleteForms.erase(form.editorId);
+                    }
+                }
+                ImGui::SameLine();
+            }
             std::string headerLabel = form.editorId;
             if (isDirty) {
                 headerLabel += " (Need save)";
@@ -2277,6 +2725,8 @@ namespace Configuration {
                     RenderExplosionEditor(i, form);
                 } else if (form.kind == DynamicForms::FormKind::Activator) {
                     RenderActivatorEditor(i, form);
+                } else if (form.kind == DynamicForms::FormKind::EffectShader) {
+                    RenderEffectShaderEditor(i, form);
                 } else if (form.kind == DynamicForms::FormKind::NPC) {
                     RenderNPCEditor(i, form);
                 } else {
@@ -2317,7 +2767,12 @@ namespace Configuration {
             requestDeletePopup = false;
             ImGui::OpenPopup(DELETE_POPUP_ID);
         }
+        if (requestBatchDeletePopup) {
+            requestBatchDeletePopup = false;
+            ImGui::OpenPopup(BATCH_DELETE_POPUP_ID);
+        }
 
         RenderDeletePopup();
+        RenderBatchDeletePopup();
     }
 }

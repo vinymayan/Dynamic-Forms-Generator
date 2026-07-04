@@ -295,6 +295,10 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
         return activator != nullptr;
     });
 
+    PopulateList<RE::TESEffectShader>("EffectShader", [](RE::TESEffectShader* shader) -> bool {
+        return shader != nullptr;
+    });
+
     PopulateList<RE::BGSImpactDataSet>("ImpactDataSet", [](RE::BGSImpactDataSet* impactDataSet) -> bool {
         return impactDataSet != nullptr;
     });

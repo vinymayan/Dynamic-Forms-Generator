@@ -187,6 +187,7 @@ begin
   else if sig = 'LIGH' then Result := 'Light'
   else if sig = 'EXPL' then Result := 'Explosion'
   else if sig = 'ACTI' then Result := 'Activator'
+  else if sig = 'EFSH' then Result := 'EffectShader'
   else if sig = 'NPC_' then Result := 'NPC'
   else Result := '';
 end;
@@ -366,6 +367,72 @@ begin
   AddKV(sl, '  ', 'flags', '0');
 end;
 
+procedure AddEffectShaderColor(sl: TStringList; prefix: string; e: IInterface; path: string);
+begin
+  AddKV(sl, '  ', prefix + 'Red', ColorChannel(e, path + '\Red', '255'));
+  AddKV(sl, '  ', prefix + 'Green', ColorChannel(e, path + '\Green', '255'));
+  AddKV(sl, '  ', prefix + 'Blue', ColorChannel(e, path + '\Blue', '255'));
+  AddKV(sl, '  ', prefix + 'Alpha', ColorChannel(e, path + '\Alpha', '0'));
+end;
+
+procedure AddEffectShaderFields(sl: TStringList; e: IInterface);
+begin
+  AddStringKV(sl, '  ', 'fillTexture', GetText(e, 'ICON - Fill Texture'));
+  AddStringKV(sl, '  ', 'particleShaderTexture', GetText(e, 'ICO2 - Particle Shader Texture'));
+  AddStringKV(sl, '  ', 'holesTexture', GetText(e, 'NAM7 - Holes Texture'));
+  AddStringKV(sl, '  ', 'membranePaletteTexture', GetText(e, 'NAM8 - Membrane Palette Texture'));
+  AddStringKV(sl, '  ', 'particlePaletteTexture', GetText(e, 'NAM9 - Particle Palette Texture'));
+  AddFormRefKV(sl, 'ambientSound', LinkedByPath(e, 'DATA - Data\Ambient Sound'));
+  AddKV(sl, '  ', 'flags', '0');
+  AddEffectShaderColor(sl, 'fillColor1', e, 'DATA - Data\Fill Texture Effect Color Key 1');
+  AddEffectShaderColor(sl, 'fillColor2', e, 'DATA - Data\Fill Texture Effect Color Key 2');
+  AddEffectShaderColor(sl, 'fillColor3', e, 'DATA - Data\Fill Texture Effect Color Key 3');
+  AddEffectShaderColor(sl, 'edgeEffect', e, 'DATA - Data\Edge Effect Color');
+  AddEffectShaderColor(sl, 'edgeColor', e, 'DATA - Data\Edge Color');
+  AddEffectShaderColor(sl, 'particleColor1', e, 'DATA - Data\Color Key 1');
+  AddEffectShaderColor(sl, 'particleColor2', e, 'DATA - Data\Color Key 2');
+  AddEffectShaderColor(sl, 'particleColor3', e, 'DATA - Data\Color Key 3');
+  AddKV(sl, '  ', 'fillAlphaFadeIn', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Alpha Fade In Time'), '0.0'));
+  AddKV(sl, '  ', 'fillFullAlphaTime', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Full Alpha Time'), '0.0'));
+  AddKV(sl, '  ', 'fillAlphaFadeOut', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Alpha Fade Out Time'), '0.0'));
+  AddKV(sl, '  ', 'fillPersistentAlphaRatio', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Persistent Alpha Ratio'), '0.0'));
+  AddKV(sl, '  ', 'fillAlphaPulseAmplitude', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Alpha Pulse Amplitude'), '0.0'));
+  AddKV(sl, '  ', 'fillAlphaPulseFrequency', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Alpha Pulse Frequency'), '0.0'));
+  AddKV(sl, '  ', 'fillTextureAnimationSpeedU', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Texture Animation Speed U'), '0.0'));
+  AddKV(sl, '  ', 'fillTextureAnimationSpeedV', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Texture Animation Speed V'), '0.0'));
+  AddKV(sl, '  ', 'fillTextureScaleU', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Texture Scale U'), '1.0'));
+  AddKV(sl, '  ', 'fillTextureScaleV', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Texture Scale V'), '1.0'));
+  AddKV(sl, '  ', 'fillFullAlphaRatio', SafeFloat(GetText(e, 'DATA - Data\Fill Texture Effect Full Alpha Ratio'), '1.0'));
+  AddKV(sl, '  ', 'edgeFalloff', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Fall Off'), '0.0'));
+  AddKV(sl, '  ', 'edgeAlphaFadeIn', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Alpha Fade In Time'), '0.0'));
+  AddKV(sl, '  ', 'edgeFullAlphaTime', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Full Alpha Time'), '0.0'));
+  AddKV(sl, '  ', 'edgeAlphaFadeOut', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Alpha Fade Out Time'), '0.0'));
+  AddKV(sl, '  ', 'edgePersistentAlphaRatio', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Persistent Alpha Ratio'), '0.0'));
+  AddKV(sl, '  ', 'edgeAlphaPulseAmplitude', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Alpha Pulse Amplitude'), '0.0'));
+  AddKV(sl, '  ', 'edgeAlphaPulseFrequency', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Alpha Pulse Frequency'), '0.0'));
+  AddKV(sl, '  ', 'edgeFullAlphaRatio', SafeFloat(GetText(e, 'DATA - Data\Edge Effect Full Alpha Ratio'), '1.0'));
+  AddKV(sl, '  ', 'edgeWidthAlphaUnits', SafeFloat(GetText(e, 'DATA - Data\Edge Width Alpha Units'), '0.0'));
+  AddKV(sl, '  ', 'particleBirthRampUpTime', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Particle Birth Ramp Up Time'), '0.0'));
+  AddKV(sl, '  ', 'particleFullBirthTime', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Full Particle Birth Time'), '0.0'));
+  AddKV(sl, '  ', 'particleBirthRampDownTime', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Particle Birth Ramp Down Time'), '0.0'));
+  AddKV(sl, '  ', 'particleFullBirthRatio', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Full Particle Birth Ratio'), '1.0'));
+  AddKV(sl, '  ', 'particleCount', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Persistent Particle Count'), '0.0'));
+  AddKV(sl, '  ', 'particleLifetime', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Particle Lifetime'), '0.0'));
+  AddKV(sl, '  ', 'particleLifetimeVariance', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Particle Lifetime Variance'), '0.0'));
+  AddKV(sl, '  ', 'particleInitialSpeedAlongNormal', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Initial Speed Along Normal'), '0.0'));
+  AddKV(sl, '  ', 'particleAccelerationAlongNormal', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Acceleration Along Normal'), '0.0'));
+  AddKV(sl, '  ', 'particleScaleKey1', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Scale Key 1'), '1.0'));
+  AddKV(sl, '  ', 'particleScaleKey2', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Scale Key 2'), '1.0'));
+  AddKV(sl, '  ', 'particleScaleKey1Time', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Scale Key 1 Time'), '0.0'));
+  AddKV(sl, '  ', 'particleScaleKey2Time', SafeFloat(GetText(e, 'DATA - Data\Particle Shader Scale Key 2 Time'), '1.0'));
+  AddKV(sl, '  ', 'particleColor1AlphaValue', SafeFloat(GetText(e, 'DATA - Data\Color Key 1 Alpha'), '1.0'));
+  AddKV(sl, '  ', 'particleColor2AlphaValue', SafeFloat(GetText(e, 'DATA - Data\Color Key 2 Alpha'), '1.0'));
+  AddKV(sl, '  ', 'particleColor3AlphaValue', SafeFloat(GetText(e, 'DATA - Data\Color Key 3 Alpha'), '1.0'));
+  AddKV(sl, '  ', 'particleColor1Time', SafeFloat(GetText(e, 'DATA - Data\Color Key 1 Time'), '0.0'));
+  AddKV(sl, '  ', 'particleColor2Time', SafeFloat(GetText(e, 'DATA - Data\Color Key 2 Time'), '0.5'));
+  AddKV(sl, '  ', 'particleColor3Time', SafeFloat(GetText(e, 'DATA - Data\Color Key 3 Time'), '1.0'));
+end;
+
 procedure AddNPCFields(sl: TStringList; e: IInterface);
 var
   flags: string;
@@ -457,6 +524,7 @@ begin
     sl.Add('{');
     AddKV(sl, '  ', 'schemaVersion', '1');
     AddStringKV(sl, '  ', 'formKind', kind);
+    AddStringKV(sl, '  ', 'sourceSignature', sig);
     AddStringKV(sl, '  ', 'editorId', edid);
 
     if sig = 'GLOB' then begin
@@ -472,6 +540,7 @@ begin
     else if sig = 'LIGH' then AddLightFields(sl, e)
     else if sig = 'EXPL' then AddExplosionFields(sl, e)
     else if sig = 'ACTI' then AddActivatorFields(sl, e)
+    else if sig = 'EFSH' then AddEffectShaderFields(sl, e)
     else if sig = 'NPC_' then AddNPCFields(sl, e);
 
     RemoveTrailingComma(sl);

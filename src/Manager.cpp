@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/ostreamwrapper.h>
@@ -73,6 +74,8 @@ namespace {
             return "Explosion";
         case DynamicForms::FormKind::Activator:
             return "Activator";
+        case DynamicForms::FormKind::EffectShader:
+            return "EffectShader";
         case DynamicForms::FormKind::NPC:
             return "NPC";
         case DynamicForms::FormKind::Global:
@@ -81,41 +84,59 @@ namespace {
         }
     }
 
-    DynamicForms::FormKind FormKindFromString(const std::string_view value) {
-        if (value == "Keyword") {
+    std::string NormalizeKindName(const std::string_view value) {
+        std::string normalized;
+        normalized.reserve(value.size());
+        for (const unsigned char ch : value) {
+            if (std::isalnum(ch)) {
+                normalized.push_back(static_cast<char>(std::tolower(ch)));
+            }
+        }
+        return normalized;
+    }
+
+    std::optional<DynamicForms::FormKind> TryFormKindFromString(const std::string_view value) {
+        const auto normalized = NormalizeKindName(value);
+        if (normalized == "global" || normalized == "glob") {
+            return DynamicForms::FormKind::Global;
+        }
+        if (normalized == "keyword" || normalized == "kywd") {
             return DynamicForms::FormKind::Keyword;
         }
-        if (value == "Outfit") {
+        if (normalized == "outfit" || normalized == "otft") {
             return DynamicForms::FormKind::Outfit;
         }
-        if (value == "Color") {
+        if (normalized == "color" || normalized == "colorform" || normalized == "clfm") {
             return DynamicForms::FormKind::Color;
         }
-        if (value == "ArtObject" || value == "Art Object") {
+        if (normalized == "artobject" || normalized == "arto") {
             return DynamicForms::FormKind::ArtObject;
         }
-        if (value == "Perk") {
+        if (normalized == "perk") {
             return DynamicForms::FormKind::Perk;
         }
-        if (value == "HeadPart" || value == "Head Part") {
+        if (normalized == "headpart" || normalized == "hdpt") {
             return DynamicForms::FormKind::HeadPart;
         }
-        if (value == "SoundDescriptor" || value == "Sound Description" || value == "Sound Descriptor") {
+        if (normalized == "sounddescriptor" || normalized == "sounddescription" || normalized == "sndr") {
             return DynamicForms::FormKind::SoundDescriptor;
         }
-        if (value == "Light") {
+        if (normalized == "light" || normalized == "ligh") {
             return DynamicForms::FormKind::Light;
         }
-        if (value == "Explosion") {
+        if (normalized == "explosion" || normalized == "expl") {
             return DynamicForms::FormKind::Explosion;
         }
-        if (value == "Activator") {
+        if (normalized == "activator" || normalized == "acti") {
             return DynamicForms::FormKind::Activator;
         }
-        if (value == "NPC") {
+        if (normalized == "effectshader" || normalized == "efsh") {
+            return DynamicForms::FormKind::EffectShader;
+        }
+        if (normalized == "npc") {
             return DynamicForms::FormKind::NPC;
         }
-        return DynamicForms::FormKind::Global;
+        return std::nullopt;
     }
 
     std::string ToString(const DynamicForms::GlobalType type) {
@@ -430,6 +451,8 @@ namespace {
             return static_cast<std::uint32_t>(RE::FormType::Explosion);
         case DynamicForms::FormKind::Activator:
             return static_cast<std::uint32_t>(RE::FormType::Activator);
+        case DynamicForms::FormKind::EffectShader:
+            return static_cast<std::uint32_t>(RE::FormType::EffectShader);
         case DynamicForms::FormKind::NPC:
             return static_cast<std::uint32_t>(RE::FormType::NPC);
         case DynamicForms::FormKind::Global:
@@ -1115,6 +1138,79 @@ namespace {
         return true;
     }
 
+    bool ConfigureEffectShader(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* shader = tesForm ? tesForm->As<RE::TESEffectShader>() : nullptr;
+        if (!shader) {
+            logger::warn("Dynamic form '{}' is not a TESEffectShader", form.editorId);
+            return false;
+        }
+
+        shader->SetFormEditorID(form.editorId.c_str());
+        shader->fillTexture.textureName = form.fillTexturePath.c_str();
+        shader->particleShaderTexture.textureName = form.particleShaderTexturePath.c_str();
+        shader->holesTexture.textureName = form.holesTexturePath.c_str();
+        shader->membranePaletteTexture.textureName = form.membranePaletteTexturePath.c_str();
+        shader->particlePaletteTexture.textureName = form.particlePaletteTexturePath.c_str();
+
+        auto& data = shader->data;
+        data.flags = static_cast<RE::EffectShaderData::Flags>(form.flags);
+        data.fillTextureEffectColorKey1 = RE::Color(form.fillColor1Red, form.fillColor1Green, form.fillColor1Blue, form.fillColor1Alpha);
+        data.fillTextureEffectColorKey2 = RE::Color(form.fillColor2Red, form.fillColor2Green, form.fillColor2Blue, form.fillColor2Alpha);
+        data.fillTextureEffectColorKey3 = RE::Color(form.fillColor3Red, form.fillColor3Green, form.fillColor3Blue, form.fillColor3Alpha);
+        data.edgeEffectColor = RE::Color(form.edgeEffectRed, form.edgeEffectGreen, form.edgeEffectBlue, form.edgeEffectAlpha);
+        data.edgeColor = RE::Color(form.edgeColorRed, form.edgeColorGreen, form.edgeColorBlue, form.edgeColorAlpha);
+        data.colorKey1 = RE::Color(form.particleColor1Red, form.particleColor1Green, form.particleColor1Blue, form.particleColor1Alpha);
+        data.colorKey2 = RE::Color(form.particleColor2Red, form.particleColor2Green, form.particleColor2Blue, form.particleColor2Alpha);
+        data.colorKey3 = RE::Color(form.particleColor3Red, form.particleColor3Green, form.particleColor3Blue, form.particleColor3Alpha);
+        data.fillTextureEffectAlphaFadeInTime = form.fillAlphaFadeIn;
+        data.fillTextureEffectFullAlphaTime = form.fillFullAlphaTime;
+        data.fillTextureEffectAlphaFadeOutTime = form.fillAlphaFadeOut;
+        data.fillTextureEffectPersistentAlphaRatio = form.fillPersistentAlphaRatio;
+        data.fillTextureEffectAlphaPulseAmplitude = form.fillAlphaPulseAmplitude;
+        data.fillTextureEffectAlphaPulseFrequency = form.fillAlphaPulseFrequency;
+        data.fillTextureEffectTextureAnimationSpeedU = form.fillTextureAnimationSpeedU;
+        data.fillTextureEffectTextureAnimationSpeedV = form.fillTextureAnimationSpeedV;
+        data.fillTextureEffectTextureScaleU = form.fillTextureScaleU;
+        data.fillTextureEffectTextureScaleV = form.fillTextureScaleV;
+        data.fillTextureEffectFullAlphaRatio = form.fillFullAlphaRatio;
+        data.edgeEffectFallOff = form.edgeFalloff;
+        data.edgeEffectAlphaFadeInTime = form.edgeAlphaFadeIn;
+        data.edgeEffectFullAlphaTime = form.edgeFullAlphaTime;
+        data.edgeEffectAlphaFadeOutTime = form.edgeAlphaFadeOut;
+        data.edgeEffectPersistentAlphaRatio = form.edgePersistentAlphaRatio;
+        data.edgeEffectAlphaPulseAmplitude = form.edgeAlphaPulseAmplitude;
+        data.edgeEffectAlphaPulseFrequency = form.edgeAlphaPulseFrequency;
+        data.edgeEffectFullAlphaRatio = form.edgeFullAlphaRatio;
+        data.edgeWidthAlphaUnits = form.edgeWidthAlphaUnits;
+        data.particleShaderParticleBirthRampUpTime = form.particleBirthRampUpTime;
+        data.particleShaderFullParticleBirthTime = form.particleFullBirthTime;
+        data.particleShaderParticleBirthRampDownTime = form.particleBirthRampDownTime;
+        data.particleShaderFullParticleBirthRatio = form.particleFullBirthRatio;
+        data.particleShaderPersistantParticleCount = form.particleCount;
+        data.particleShaderParticleLifetime = form.particleLifetime;
+        data.particleShaderParticleLifetimeVariance = form.particleLifetimeVariance;
+        data.particleShaderInitialSpeedAlongNormal = form.particleInitialSpeedAlongNormal;
+        data.particleShaderAccelerationAlongNormal = form.particleAccelerationAlongNormal;
+        data.particleShaderScaleKey1 = form.particleScaleKey1;
+        data.particleShaderScaleKey2 = form.particleScaleKey2;
+        data.particleShaderScaleKey1Time = form.particleScaleKey1Time;
+        data.particleShaderScaleKey2Time = form.particleScaleKey2Time;
+        data.colorKey1ColorAlpha = form.particleColor1AlphaValue;
+        data.colorKey2ColorAlpha = form.particleColor2AlphaValue;
+        data.colorKey3ColorAlpha = form.particleColor3AlphaValue;
+        data.colorKey1ColorKeyTime = form.particleColor1Time;
+        data.colorKey2ColorKeyTime = form.particleColor2Time;
+        data.colorKey3ColorKeyTime = form.particleColor3Time;
+        data.ambientSound = nullptr;
+        if (!form.ambientSound.empty()) {
+            if (auto* sound = ResolveConfigForm(form.ambientSound)) {
+                data.ambientSound = sound->As<RE::BGSSoundDescriptorForm>();
+            }
+        }
+        logger::info("Configured effect shader '{}' flags {:08X}.", form.editorId, form.flags);
+        return true;
+    }
+
     void SetActorBaseFlag(RE::TESNPC& npc, const RE::ACTOR_BASE_DATA::Flag flag, const bool enabled) {
         if (enabled) {
             npc.actorData.actorBaseFlags.set(flag);
@@ -1350,6 +1446,9 @@ namespace {
         if (form.kind == DynamicForms::FormKind::Activator) {
             return ConfigureActivator(tesForm, form);
         }
+        if (form.kind == DynamicForms::FormKind::EffectShader) {
+            return ConfigureEffectShader(tesForm, form);
+        }
         if (form.kind == DynamicForms::FormKind::NPC) {
             return ConfigureNPC(tesForm, form);
         }
@@ -1366,12 +1465,30 @@ namespace {
 
         bool existed = false;
         auto localId = form.localId;
+        const auto formType = FormTypeForKind(form.kind);
         auto* tesForm = api->GetOrCreateByOwnerKey(
             Manager::DPF_OWNER,
             form.editorId.c_str(),
-            FormTypeForKind(form.kind),
+            formType,
             &localId,
             &existed);
+        if (!tesForm && (existed || form.localId != 0)) {
+            logger::warn("DPF returned null for dynamic {} '{}'. Releasing stale owner/key and retrying once.",
+                ToString(form.kind),
+                form.editorId);
+            if (api->ReleaseByOwnerKey(Manager::DPF_OWNER, form.editorId.c_str())) {
+                localId = 0;
+                existed = false;
+                tesForm = api->GetOrCreateByOwnerKey(
+                    Manager::DPF_OWNER,
+                    form.editorId.c_str(),
+                    formType,
+                    &localId,
+                    &existed);
+            } else {
+                logger::warn("Could not release stale DPF owner/key for dynamic form '{}'.", form.editorId);
+            }
+        }
         if (!tesForm) {
             logger::warn("DPF returned null for dynamic form '{}'", form.editorId);
             return false;
@@ -1393,6 +1510,33 @@ namespace {
 
     void AddString(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::string& value) {
         object.AddMember(rapidjson::Value(key, allocator), rapidjson::Value(value.c_str(), allocator), allocator);
+    }
+
+    void AddUIntMember(
+        rapidjson::Value& object,
+        rapidjson::Document::AllocatorType& allocator,
+        const std::string& key,
+        const unsigned value)
+    {
+        rapidjson::Value keyValue(key.c_str(), allocator);
+        rapidjson::Value valueValue(value);
+        object.AddMember(keyValue, valueValue, allocator);
+    }
+
+    void AddColorMembers(
+        rapidjson::Value& object,
+        rapidjson::Document::AllocatorType& allocator,
+        const char* prefix,
+        const std::uint8_t red,
+        const std::uint8_t green,
+        const std::uint8_t blue,
+        const std::uint8_t alpha)
+    {
+        const std::string base(prefix);
+        AddUIntMember(object, allocator, base + "Red", static_cast<unsigned>(red));
+        AddUIntMember(object, allocator, base + "Green", static_cast<unsigned>(green));
+        AddUIntMember(object, allocator, base + "Blue", static_cast<unsigned>(blue));
+        AddUIntMember(object, allocator, base + "Alpha", static_cast<unsigned>(alpha));
     }
 
     std::uint8_t ReadUInt8(const rapidjson::Value& doc, const char* key, const std::uint8_t fallback) {
@@ -1437,10 +1581,41 @@ namespace {
         return doc[key].GetFloat();
     }
 
+    void ReadColorMembers(
+        const rapidjson::Value& doc,
+        const char* prefix,
+        std::uint8_t& red,
+        std::uint8_t& green,
+        std::uint8_t& blue,
+        std::uint8_t& alpha)
+    {
+        const std::string base(prefix);
+        red = ReadUInt8(doc, (base + "Red").c_str(), red);
+        green = ReadUInt8(doc, (base + "Green").c_str(), green);
+        blue = ReadUInt8(doc, (base + "Blue").c_str(), blue);
+        alpha = ReadUInt8(doc, (base + "Alpha").c_str(), alpha);
+    }
+
     void ReadString(const rapidjson::Value& doc, const char* key, std::string& target) {
         if (doc.HasMember(key) && doc[key].IsString()) {
             target = doc[key].GetString();
         }
+    }
+
+    bool LooksLikeEffectShaderJson(const rapidjson::Value& doc) {
+        if (doc.HasMember("sourceSignature") && doc["sourceSignature"].IsString() &&
+            NormalizeKindName(doc["sourceSignature"].GetString()) == "efsh") {
+            return true;
+        }
+
+        return doc.HasMember("fillTexture") ||
+               doc.HasMember("particleShaderTexture") ||
+               doc.HasMember("holesTexture") ||
+               doc.HasMember("membranePaletteTexture") ||
+               doc.HasMember("particlePaletteTexture") ||
+               doc.HasMember("fillAlphaFadeIn") ||
+               doc.HasMember("particleBirthRampUpTime") ||
+               doc.HasMember("edgeFalloff");
     }
 
     void ReadStringArray(const rapidjson::Value& doc, const char* key, std::vector<std::string>& target) {
@@ -1721,7 +1896,40 @@ namespace {
             return false;
         }
 
-        out.kind = FormKindFromString(doc["formKind"].GetString());
+        const std::string_view rawKind = doc["formKind"].GetString();
+        const auto parsedKind = TryFormKindFromString(rawKind);
+        std::optional<DynamicForms::FormKind> sourceKind;
+        if (doc.HasMember("sourceSignature") && doc["sourceSignature"].IsString()) {
+            sourceKind = TryFormKindFromString(doc["sourceSignature"].GetString());
+        }
+
+        if (sourceKind) {
+            out.kind = *sourceKind;
+            if (!parsedKind || *parsedKind != *sourceKind) {
+                logger::warn("JSON '{}' has formKind '{}' but sourceSignature '{}'; using source signature kind '{}'.",
+                    path.string(),
+                    rawKind,
+                    doc["sourceSignature"].GetString(),
+                    ToString(*sourceKind));
+            }
+        } else if (parsedKind) {
+            out.kind = *parsedKind;
+        } else if (LooksLikeEffectShaderJson(doc)) {
+            logger::warn("JSON '{}' has unknown formKind '{}' but looks like an EffectShader; using EffectShader.",
+                path.string(),
+                rawKind);
+            out.kind = DynamicForms::FormKind::EffectShader;
+        } else {
+            logger::warn("Unknown formKind '{}' in '{}'; skipping file to avoid rewriting it as Global.",
+                rawKind,
+                path.string());
+            return false;
+        }
+
+        if (out.kind == DynamicForms::FormKind::Global && LooksLikeEffectShaderJson(doc)) {
+            logger::warn("JSON '{}' looks like an EffectShader but formKind is Global; using EffectShader.", path.string());
+            out.kind = DynamicForms::FormKind::EffectShader;
+        }
         if (doc.HasMember("globalType") && doc["globalType"].IsString()) {
             out.globalType = GlobalTypeFromString(doc["globalType"].GetString());
         }
@@ -1864,6 +2072,69 @@ namespace {
         ReadFormRef(doc, "soundLoop", out.soundLoop);
         ReadFormRef(doc, "soundActivate", out.soundActivate);
         ReadFormRef(doc, "waterType", out.waterType);
+        if (doc.HasMember("fillTexture") && doc["fillTexture"].IsString()) {
+            out.fillTexturePath = doc["fillTexture"].GetString();
+        }
+        if (doc.HasMember("particleShaderTexture") && doc["particleShaderTexture"].IsString()) {
+            out.particleShaderTexturePath = doc["particleShaderTexture"].GetString();
+        }
+        if (doc.HasMember("holesTexture") && doc["holesTexture"].IsString()) {
+            out.holesTexturePath = doc["holesTexture"].GetString();
+        }
+        if (doc.HasMember("membranePaletteTexture") && doc["membranePaletteTexture"].IsString()) {
+            out.membranePaletteTexturePath = doc["membranePaletteTexture"].GetString();
+        }
+        if (doc.HasMember("particlePaletteTexture") && doc["particlePaletteTexture"].IsString()) {
+            out.particlePaletteTexturePath = doc["particlePaletteTexture"].GetString();
+        }
+        ReadFormRef(doc, "ambientSound", out.ambientSound);
+        ReadColorMembers(doc, "fillColor1", out.fillColor1Red, out.fillColor1Green, out.fillColor1Blue, out.fillColor1Alpha);
+        ReadColorMembers(doc, "fillColor2", out.fillColor2Red, out.fillColor2Green, out.fillColor2Blue, out.fillColor2Alpha);
+        ReadColorMembers(doc, "fillColor3", out.fillColor3Red, out.fillColor3Green, out.fillColor3Blue, out.fillColor3Alpha);
+        ReadColorMembers(doc, "edgeEffect", out.edgeEffectRed, out.edgeEffectGreen, out.edgeEffectBlue, out.edgeEffectAlpha);
+        ReadColorMembers(doc, "edgeColor", out.edgeColorRed, out.edgeColorGreen, out.edgeColorBlue, out.edgeColorAlpha);
+        ReadColorMembers(doc, "particleColor1", out.particleColor1Red, out.particleColor1Green, out.particleColor1Blue, out.particleColor1Alpha);
+        ReadColorMembers(doc, "particleColor2", out.particleColor2Red, out.particleColor2Green, out.particleColor2Blue, out.particleColor2Alpha);
+        ReadColorMembers(doc, "particleColor3", out.particleColor3Red, out.particleColor3Green, out.particleColor3Blue, out.particleColor3Alpha);
+        out.fillAlphaFadeIn = ReadFloat(doc, "fillAlphaFadeIn", out.fillAlphaFadeIn);
+        out.fillFullAlphaTime = ReadFloat(doc, "fillFullAlphaTime", out.fillFullAlphaTime);
+        out.fillAlphaFadeOut = ReadFloat(doc, "fillAlphaFadeOut", out.fillAlphaFadeOut);
+        out.fillPersistentAlphaRatio = ReadFloat(doc, "fillPersistentAlphaRatio", out.fillPersistentAlphaRatio);
+        out.fillAlphaPulseAmplitude = ReadFloat(doc, "fillAlphaPulseAmplitude", out.fillAlphaPulseAmplitude);
+        out.fillAlphaPulseFrequency = ReadFloat(doc, "fillAlphaPulseFrequency", out.fillAlphaPulseFrequency);
+        out.fillTextureAnimationSpeedU = ReadFloat(doc, "fillTextureAnimationSpeedU", out.fillTextureAnimationSpeedU);
+        out.fillTextureAnimationSpeedV = ReadFloat(doc, "fillTextureAnimationSpeedV", out.fillTextureAnimationSpeedV);
+        out.fillTextureScaleU = ReadFloat(doc, "fillTextureScaleU", out.fillTextureScaleU);
+        out.fillTextureScaleV = ReadFloat(doc, "fillTextureScaleV", out.fillTextureScaleV);
+        out.fillFullAlphaRatio = ReadFloat(doc, "fillFullAlphaRatio", out.fillFullAlphaRatio);
+        out.edgeFalloff = ReadFloat(doc, "edgeFalloff", out.edgeFalloff);
+        out.edgeAlphaFadeIn = ReadFloat(doc, "edgeAlphaFadeIn", out.edgeAlphaFadeIn);
+        out.edgeFullAlphaTime = ReadFloat(doc, "edgeFullAlphaTime", out.edgeFullAlphaTime);
+        out.edgeAlphaFadeOut = ReadFloat(doc, "edgeAlphaFadeOut", out.edgeAlphaFadeOut);
+        out.edgePersistentAlphaRatio = ReadFloat(doc, "edgePersistentAlphaRatio", out.edgePersistentAlphaRatio);
+        out.edgeAlphaPulseAmplitude = ReadFloat(doc, "edgeAlphaPulseAmplitude", out.edgeAlphaPulseAmplitude);
+        out.edgeAlphaPulseFrequency = ReadFloat(doc, "edgeAlphaPulseFrequency", out.edgeAlphaPulseFrequency);
+        out.edgeFullAlphaRatio = ReadFloat(doc, "edgeFullAlphaRatio", out.edgeFullAlphaRatio);
+        out.edgeWidthAlphaUnits = ReadFloat(doc, "edgeWidthAlphaUnits", out.edgeWidthAlphaUnits);
+        out.particleBirthRampUpTime = ReadFloat(doc, "particleBirthRampUpTime", out.particleBirthRampUpTime);
+        out.particleFullBirthTime = ReadFloat(doc, "particleFullBirthTime", out.particleFullBirthTime);
+        out.particleBirthRampDownTime = ReadFloat(doc, "particleBirthRampDownTime", out.particleBirthRampDownTime);
+        out.particleFullBirthRatio = ReadFloat(doc, "particleFullBirthRatio", out.particleFullBirthRatio);
+        out.particleCount = ReadFloat(doc, "particleCount", out.particleCount);
+        out.particleLifetime = ReadFloat(doc, "particleLifetime", out.particleLifetime);
+        out.particleLifetimeVariance = ReadFloat(doc, "particleLifetimeVariance", out.particleLifetimeVariance);
+        out.particleInitialSpeedAlongNormal = ReadFloat(doc, "particleInitialSpeedAlongNormal", out.particleInitialSpeedAlongNormal);
+        out.particleAccelerationAlongNormal = ReadFloat(doc, "particleAccelerationAlongNormal", out.particleAccelerationAlongNormal);
+        out.particleScaleKey1 = ReadFloat(doc, "particleScaleKey1", out.particleScaleKey1);
+        out.particleScaleKey2 = ReadFloat(doc, "particleScaleKey2", out.particleScaleKey2);
+        out.particleScaleKey1Time = ReadFloat(doc, "particleScaleKey1Time", out.particleScaleKey1Time);
+        out.particleScaleKey2Time = ReadFloat(doc, "particleScaleKey2Time", out.particleScaleKey2Time);
+        out.particleColor1AlphaValue = ReadFloat(doc, "particleColor1AlphaValue", out.particleColor1AlphaValue);
+        out.particleColor2AlphaValue = ReadFloat(doc, "particleColor2AlphaValue", out.particleColor2AlphaValue);
+        out.particleColor3AlphaValue = ReadFloat(doc, "particleColor3AlphaValue", out.particleColor3AlphaValue);
+        out.particleColor1Time = ReadFloat(doc, "particleColor1Time", out.particleColor1Time);
+        out.particleColor2Time = ReadFloat(doc, "particleColor2Time", out.particleColor2Time);
+        out.particleColor3Time = ReadFloat(doc, "particleColor3Time", out.particleColor3Time);
         ReadFormRef(doc, "race", out.race);
         ReadFormRef(doc, "skin", out.skin);
         ReadFormRef(doc, "defaultOutfit", out.defaultOutfit);
@@ -2132,6 +2403,62 @@ namespace Manager {
             AddFormRef(doc, allocator, "soundActivate", form.soundActivate);
             AddFormRef(doc, allocator, "waterType", form.waterType);
             doc.AddMember("flags", form.flags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::EffectShader) {
+            AddString(doc, allocator, "fillTexture", form.fillTexturePath);
+            AddString(doc, allocator, "particleShaderTexture", form.particleShaderTexturePath);
+            AddString(doc, allocator, "holesTexture", form.holesTexturePath);
+            AddString(doc, allocator, "membranePaletteTexture", form.membranePaletteTexturePath);
+            AddString(doc, allocator, "particlePaletteTexture", form.particlePaletteTexturePath);
+            AddFormRef(doc, allocator, "ambientSound", form.ambientSound);
+            doc.AddMember("flags", form.flags, allocator);
+            AddColorMembers(doc, allocator, "fillColor1", form.fillColor1Red, form.fillColor1Green, form.fillColor1Blue, form.fillColor1Alpha);
+            AddColorMembers(doc, allocator, "fillColor2", form.fillColor2Red, form.fillColor2Green, form.fillColor2Blue, form.fillColor2Alpha);
+            AddColorMembers(doc, allocator, "fillColor3", form.fillColor3Red, form.fillColor3Green, form.fillColor3Blue, form.fillColor3Alpha);
+            AddColorMembers(doc, allocator, "edgeEffect", form.edgeEffectRed, form.edgeEffectGreen, form.edgeEffectBlue, form.edgeEffectAlpha);
+            AddColorMembers(doc, allocator, "edgeColor", form.edgeColorRed, form.edgeColorGreen, form.edgeColorBlue, form.edgeColorAlpha);
+            AddColorMembers(doc, allocator, "particleColor1", form.particleColor1Red, form.particleColor1Green, form.particleColor1Blue, form.particleColor1Alpha);
+            AddColorMembers(doc, allocator, "particleColor2", form.particleColor2Red, form.particleColor2Green, form.particleColor2Blue, form.particleColor2Alpha);
+            AddColorMembers(doc, allocator, "particleColor3", form.particleColor3Red, form.particleColor3Green, form.particleColor3Blue, form.particleColor3Alpha);
+            doc.AddMember("fillAlphaFadeIn", form.fillAlphaFadeIn, allocator);
+            doc.AddMember("fillFullAlphaTime", form.fillFullAlphaTime, allocator);
+            doc.AddMember("fillAlphaFadeOut", form.fillAlphaFadeOut, allocator);
+            doc.AddMember("fillPersistentAlphaRatio", form.fillPersistentAlphaRatio, allocator);
+            doc.AddMember("fillAlphaPulseAmplitude", form.fillAlphaPulseAmplitude, allocator);
+            doc.AddMember("fillAlphaPulseFrequency", form.fillAlphaPulseFrequency, allocator);
+            doc.AddMember("fillTextureAnimationSpeedU", form.fillTextureAnimationSpeedU, allocator);
+            doc.AddMember("fillTextureAnimationSpeedV", form.fillTextureAnimationSpeedV, allocator);
+            doc.AddMember("fillTextureScaleU", form.fillTextureScaleU, allocator);
+            doc.AddMember("fillTextureScaleV", form.fillTextureScaleV, allocator);
+            doc.AddMember("fillFullAlphaRatio", form.fillFullAlphaRatio, allocator);
+            doc.AddMember("edgeFalloff", form.edgeFalloff, allocator);
+            doc.AddMember("edgeAlphaFadeIn", form.edgeAlphaFadeIn, allocator);
+            doc.AddMember("edgeFullAlphaTime", form.edgeFullAlphaTime, allocator);
+            doc.AddMember("edgeAlphaFadeOut", form.edgeAlphaFadeOut, allocator);
+            doc.AddMember("edgePersistentAlphaRatio", form.edgePersistentAlphaRatio, allocator);
+            doc.AddMember("edgeAlphaPulseAmplitude", form.edgeAlphaPulseAmplitude, allocator);
+            doc.AddMember("edgeAlphaPulseFrequency", form.edgeAlphaPulseFrequency, allocator);
+            doc.AddMember("edgeFullAlphaRatio", form.edgeFullAlphaRatio, allocator);
+            doc.AddMember("edgeWidthAlphaUnits", form.edgeWidthAlphaUnits, allocator);
+            doc.AddMember("particleBirthRampUpTime", form.particleBirthRampUpTime, allocator);
+            doc.AddMember("particleFullBirthTime", form.particleFullBirthTime, allocator);
+            doc.AddMember("particleBirthRampDownTime", form.particleBirthRampDownTime, allocator);
+            doc.AddMember("particleFullBirthRatio", form.particleFullBirthRatio, allocator);
+            doc.AddMember("particleCount", form.particleCount, allocator);
+            doc.AddMember("particleLifetime", form.particleLifetime, allocator);
+            doc.AddMember("particleLifetimeVariance", form.particleLifetimeVariance, allocator);
+            doc.AddMember("particleInitialSpeedAlongNormal", form.particleInitialSpeedAlongNormal, allocator);
+            doc.AddMember("particleAccelerationAlongNormal", form.particleAccelerationAlongNormal, allocator);
+            doc.AddMember("particleScaleKey1", form.particleScaleKey1, allocator);
+            doc.AddMember("particleScaleKey2", form.particleScaleKey2, allocator);
+            doc.AddMember("particleScaleKey1Time", form.particleScaleKey1Time, allocator);
+            doc.AddMember("particleScaleKey2Time", form.particleScaleKey2Time, allocator);
+            doc.AddMember("particleColor1AlphaValue", form.particleColor1AlphaValue, allocator);
+            doc.AddMember("particleColor2AlphaValue", form.particleColor2AlphaValue, allocator);
+            doc.AddMember("particleColor3AlphaValue", form.particleColor3AlphaValue, allocator);
+            doc.AddMember("particleColor1Time", form.particleColor1Time, allocator);
+            doc.AddMember("particleColor2Time", form.particleColor2Time, allocator);
+            doc.AddMember("particleColor3Time", form.particleColor3Time, allocator);
         }
         if (form.kind == DynamicForms::FormKind::NPC) {
             AddString(doc, allocator, "fullName", form.fullName);
