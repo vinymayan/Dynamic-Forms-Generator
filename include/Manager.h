@@ -20,6 +20,9 @@ namespace Manager {
     bool AddForm(const DynamicForms::DynamicForm& form);
     bool UpdateForm(std::size_t index, const DynamicForms::DynamicForm& form);
     bool DeleteForm(std::size_t index);
+    bool AddFormToPlayerInventory(std::size_t index);
+    bool SpawnFormAtPlayer(std::size_t index);
+    bool SpawnLydiaForDebug();
     bool HasEditorId(std::string_view editorId);
     bool IsDirty(std::size_t index);
     bool HasDirtyForms();

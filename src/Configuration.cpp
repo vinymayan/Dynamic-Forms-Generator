@@ -57,6 +57,8 @@ namespace {
     std::string deleteError;
     std::string saveMessage;
     bool lastSaveSucceeded = true;
+    std::string testActionMessage;
+    bool lastTestActionSucceeded = true;
     bool requestDeletePopup = false;
     bool deleteSelectionMode = false;
     bool requestBatchDeletePopup = false;
@@ -72,8 +74,8 @@ namespace {
     const ImGui::ImVec4 DIRTY_COLOR{ 1.0F, 0.72F, 0.2F, 1.0F };
     const ImGui::ImVec4 SUCCESS_COLOR{ 0.45F, 0.9F, 0.55F, 1.0F };
     const ImGui::ImVec4 ERROR_COLOR{ 1.0F, 0.35F, 0.35F, 1.0F };
-    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Outfit", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
-    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Outfit", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Outfit", "Armor Type", "Armor", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Outfit", "Armor Type", "Armor", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
     constexpr std::array GLOBAL_TYPE_ITEMS{ "short", "long", "float" };
     constexpr std::array ART_TYPE_ITEMS{ "MagicCasting", "MagicHitEffect", "MagicEnchantEffect" };
     constexpr std::array HEAD_PART_TYPE_ITEMS{ "Misc", "Face", "Eyes", "Hair", "FacialHair", "Scar", "Eyebrows" };
@@ -93,6 +95,14 @@ namespace {
     };
     constexpr std::array NPC_FACE_PART_NAMES{ "Nose", "Unknown", "Eyes", "Mouth" };
     constexpr std::array HEAD_PART_FILTER_ITEMS{ "All", "Hair", "Facial Hair", "Eye Brows", "Eye", "Face", "Misc", "Scar" };
+    constexpr std::array ARMOR_TYPE_ITEMS{ "Light Armor", "Heavy Armor", "Clothing" };
+    constexpr std::array BIPED_SLOT_ITEMS{
+        "Head", "Hair", "Body", "Hands", "Forearms", "Amulet", "Ring", "Feet",
+        "Calves", "Shield", "Tail", "Long Hair", "Circlet", "Ears", "Mod Mouth", "Mod Neck",
+        "Mod Chest Primary", "Mod Back", "Mod Misc 1", "Mod Pelvis Primary", "Decapitate Head", "Decapitate",
+        "Mod Pelvis Secondary", "Mod Leg Right", "Mod Leg Left", "Mod Face Jewelry", "Mod Chest Secondary",
+        "Mod Shoulder", "Mod Arm Left", "Mod Arm Right", "Mod Misc 2", "FX01"
+    };
     constexpr float NPC_NUMBER_INPUT_WIDTH = 180.0F;
 
     int selectedNpcHeadPartFilter = 0;
@@ -142,24 +152,28 @@ namespace {
         case 2:
             return DynamicForms::FormKind::Outfit;
         case 3:
-            return DynamicForms::FormKind::Color;
+            return DynamicForms::FormKind::ArmorType;
         case 4:
-            return DynamicForms::FormKind::ArtObject;
+            return DynamicForms::FormKind::Armor;
         case 5:
-            return DynamicForms::FormKind::Perk;
+            return DynamicForms::FormKind::Color;
         case 6:
-            return DynamicForms::FormKind::HeadPart;
+            return DynamicForms::FormKind::ArtObject;
         case 7:
-            return DynamicForms::FormKind::SoundDescriptor;
+            return DynamicForms::FormKind::Perk;
         case 8:
-            return DynamicForms::FormKind::Light;
+            return DynamicForms::FormKind::HeadPart;
         case 9:
-            return DynamicForms::FormKind::Explosion;
+            return DynamicForms::FormKind::SoundDescriptor;
         case 10:
-            return DynamicForms::FormKind::Activator;
+            return DynamicForms::FormKind::Light;
         case 11:
-            return DynamicForms::FormKind::EffectShader;
+            return DynamicForms::FormKind::Explosion;
         case 12:
+            return DynamicForms::FormKind::Activator;
+        case 13:
+            return DynamicForms::FormKind::EffectShader;
+        case 14:
             return DynamicForms::FormKind::NPC;
         case 0:
         default:
@@ -236,6 +250,10 @@ namespace {
             return "Keyword";
         case DynamicForms::FormKind::Outfit:
             return "Outfit";
+        case DynamicForms::FormKind::ArmorType:
+            return "Armor Type";
+        case DynamicForms::FormKind::Armor:
+            return "Armor";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -377,6 +395,20 @@ namespace {
         return DynamicForms::HeadPartType::Misc;
     }
 
+    int ArmorTypeIndex(const std::uint32_t armorType) {
+        if (armorType <= 2) {
+            return static_cast<int>(armorType);
+        }
+        return 2;
+    }
+
+    std::uint32_t ArmorTypeFromIndex(const int index) {
+        if (index >= 0 && index < static_cast<int>(ARMOR_TYPE_ITEMS.size())) {
+            return static_cast<std::uint32_t>(index);
+        }
+        return 2;
+    }
+
     const char* SelectedNpcHeadPartListType() {
         switch (selectedNpcHeadPartFilter) {
         case 1:
@@ -432,12 +464,6 @@ namespace {
         return value;
     }
 
-    float AvailableItemWidth(const float fallback = 360.0F) {
-        ImGui::ImVec2 available{};
-        ImGui::GetContentRegionAvail(&available);
-        return available.x > 0.0F ? available.x : fallback;
-    }
-
     float TextWidth(const char* text) {
         ImGui::ImVec2 size{};
         ImGui::CalcTextSize(&size, text ? text : "", nullptr, true, -1.0F);
@@ -456,53 +482,58 @@ namespace {
     template <class T>
     void SetStableComboWidth(const T& items, const float minWidth = 160.0F, const float maxWidth = 520.0F) {
         const float desired = std::min(WidestItemWidth(items, minWidth), maxWidth);
-        const float available = AvailableItemWidth(desired);
-        ImGui::SetNextItemWidth(std::max(minWidth, std::min(desired, available)));
+        ImGui::SetNextItemWidth(std::max(minWidth, desired));
     }
 
     void SetAvailableComboWidth(const float minWidth = 360.0F, const float maxWidth = 720.0F) {
-        const float available = AvailableItemWidth(minWidth);
-        ImGui::SetNextItemWidth(std::max(minWidth, std::min(available, maxWidth)));
+        static_cast<void>(maxWidth);
+        ImGui::SetNextItemWidth(minWidth);
+    }
+
+    void SetFixedComboPopupWidth(const float width = 360.0F) {
+        ImGui::SetNextWindowSize({ width, 0.0F }, ImGui::ImGuiCond_Always);
+    }
+
+    std::optional<DynamicForms::FormKind> FormKindFromFilterIndex(const int kindFilter) {
+        switch (kindFilter) {
+        case 1:
+            return DynamicForms::FormKind::Global;
+        case 2:
+            return DynamicForms::FormKind::Keyword;
+        case 3:
+            return DynamicForms::FormKind::Outfit;
+        case 4:
+            return DynamicForms::FormKind::ArmorType;
+        case 5:
+            return DynamicForms::FormKind::Armor;
+        case 6:
+            return DynamicForms::FormKind::Color;
+        case 7:
+            return DynamicForms::FormKind::ArtObject;
+        case 8:
+            return DynamicForms::FormKind::Perk;
+        case 9:
+            return DynamicForms::FormKind::HeadPart;
+        case 10:
+            return DynamicForms::FormKind::SoundDescriptor;
+        case 11:
+            return DynamicForms::FormKind::Light;
+        case 12:
+            return DynamicForms::FormKind::Explosion;
+        case 13:
+            return DynamicForms::FormKind::Activator;
+        case 14:
+            return DynamicForms::FormKind::EffectShader;
+        case 15:
+            return DynamicForms::FormKind::NPC;
+        default:
+            return std::nullopt;
+        }
     }
 
     bool MatchesFilterValues(const DynamicForms::DynamicForm& form, const int kindFilter, const std::string_view editorIdFilter) {
-        if (kindFilter == 1 && form.kind != DynamicForms::FormKind::Global) {
-            return false;
-        }
-        if (kindFilter == 2 && form.kind != DynamicForms::FormKind::Keyword) {
-            return false;
-        }
-        if (kindFilter == 3 && form.kind != DynamicForms::FormKind::Outfit) {
-            return false;
-        }
-        if (kindFilter == 4 && form.kind != DynamicForms::FormKind::Color) {
-            return false;
-        }
-        if (kindFilter == 5 && form.kind != DynamicForms::FormKind::ArtObject) {
-            return false;
-        }
-        if (kindFilter == 6 && form.kind != DynamicForms::FormKind::Perk) {
-            return false;
-        }
-        if (kindFilter == 7 && form.kind != DynamicForms::FormKind::HeadPart) {
-            return false;
-        }
-        if (kindFilter == 8 && form.kind != DynamicForms::FormKind::SoundDescriptor) {
-            return false;
-        }
-        if (kindFilter == 9 && form.kind != DynamicForms::FormKind::Light) {
-            return false;
-        }
-        if (kindFilter == 10 && form.kind != DynamicForms::FormKind::Explosion) {
-            return false;
-        }
-        if (kindFilter == 11 && form.kind != DynamicForms::FormKind::Activator) {
-            return false;
-        }
-        if (kindFilter == 12 && form.kind != DynamicForms::FormKind::EffectShader) {
-            return false;
-        }
-        if (kindFilter == 13 && form.kind != DynamicForms::FormKind::NPC) {
+        const auto filterKind = FormKindFromFilterIndex(kindFilter);
+        if (filterKind && form.kind != *filterKind) {
             return false;
         }
 
@@ -520,6 +551,19 @@ namespace {
 
     bool MatchesExportFilters(const DynamicForms::DynamicForm& form) {
         return MatchesFilterValues(form, selectedExportFilterKind, exportFilterEditorIdBuffer.data());
+    }
+
+    bool CanAddToInventory(const DynamicForms::FormKind kind) {
+        return kind == DynamicForms::FormKind::Armor ||
+            kind == DynamicForms::FormKind::Light;
+    }
+
+    bool CanSpawnInWorld(const DynamicForms::FormKind kind) {
+        return kind == DynamicForms::FormKind::Armor ||
+            kind == DynamicForms::FormKind::Light ||
+            kind == DynamicForms::FormKind::Explosion ||
+            kind == DynamicForms::FormKind::Activator ||
+            kind == DynamicForms::FormKind::NPC;
     }
 
     void ResetCreateState() {
@@ -641,6 +685,18 @@ namespace {
             SetStableComboWidth(ART_TYPE_ITEMS, 260.0F);
             ImGui::Combo(Configuration::GetLoc("menu.art_type", "Art type"), &selectedArtType, ART_TYPE_ITEMS.data(), static_cast<int>(ART_TYPE_ITEMS.size()));
         }
+        if (SelectedFormKind() == DynamicForms::FormKind::ArmorType ||
+            SelectedFormKind() == DynamicForms::FormKind::Armor) {
+            ImGui::Separator();
+            ImGui::Text("%s", Configuration::GetLoc("menu.armor_settings", "Armor settings"));
+            if (SelectedFormKind() == DynamicForms::FormKind::Armor) {
+                ImGui::SetNextItemWidth(260.0F);
+                ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
+            }
+            ImGui::SetNextItemWidth(360.0F);
+            ImGui::InputText(Configuration::GetLoc("menu.model_path", "Male world model"), createModelBuffer.data(), createModelBuffer.size());
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.meshes_path_hint", "Meshes paths are relative to Data/Meshes."));
+        }
         if (SelectedFormKind() == DynamicForms::FormKind::Perk) {
             ImGui::Separator();
             ImGui::Text("%s", Configuration::GetLoc("menu.perk_settings", "Perk settings"));
@@ -734,6 +790,9 @@ namespace {
             form.blue = static_cast<std::uint8_t>(createColor[2]);
             form.alpha = static_cast<std::uint8_t>(createColor[3]);
             form.modelPath = createModelBuffer.data();
+            if (form.kind == DynamicForms::FormKind::ArmorType || form.kind == DynamicForms::FormKind::Armor) {
+                form.maleWorldModel = createModelBuffer.data();
+            }
             form.artType = SelectedArtType();
             form.headPartType = SelectedHeadPartType();
             form.male = createHeadPartMale;
@@ -950,9 +1009,10 @@ namespace {
         auto& filter = outfitPieceFilters[label];
         const auto preview = Configuration::GetLoc("menu.add_piece", "Add piece");
 
-        const bool listsReady = ListManager::GetSingleton()->PopulateAllLists(false);
         SetAvailableComboWidth(360.0F);
+        SetFixedComboPopupWidth(360.0F);
         if (ImGui::BeginCombo(label, preview)) {
+            const bool listsReady = ListManager::GetSingleton()->IsPopulated();
             char searchBuf[256]{};
             strcpy_s(searchBuf, filter.c_str());
             ImGui::SetNextItemWidth(-1.0F);
@@ -985,20 +1045,12 @@ namespace {
     bool DrawFormReferencePicker(const char* label, const char* typeName, DynamicForms::FormRef& value) {
         bool changed = false;
         auto& filter = formPickerFilters[std::string(label) + ":" + typeName];
-        const bool listsReady = ListManager::GetSingleton()->PopulateAllLists(false);
         auto previewText = value.empty() ? std::string(Configuration::GetLoc("common.select", "Select")) : value.Display();
-        if (listsReady && !value.empty()) {
-            for (const auto& info : ListManager::GetSingleton()->GetList(typeName)) {
-                const auto id = MakeFormRef(info);
-                if (SameFormRef(value, id)) {
-                    previewText = ReferenceLabel(info);
-                    break;
-                }
-            }
-        }
 
         SetAvailableComboWidth(360.0F);
+        SetFixedComboPopupWidth(360.0F);
         if (ImGui::BeginCombo(label, previewText.c_str())) {
+            const bool listsReady = ListManager::GetSingleton()->IsPopulated();
             char searchBuf[256]{};
             strcpy_s(searchBuf, filter.c_str());
             ImGui::SetNextItemWidth(-1.0F);
@@ -1550,6 +1602,7 @@ namespace {
         bool changed = false;
         const auto preview = ConditionFunctionPreview(condition);
         SetAvailableComboWidth(420.0F);
+        SetFixedComboPopupWidth(420.0F);
         if (ImGui::BeginCombo(Configuration::GetLoc("menu.function", "Function"), preview.c_str())) {
             const auto functions = ConditionCatalog::GetFunctions();
             char searchBuf[256]{};
@@ -1845,6 +1898,147 @@ namespace {
         return changed;
     }
 
+    bool DrawBipedDataEditor(DynamicForms::DynamicForm& edited) {
+        bool changed = false;
+        int armorType = ArmorTypeIndex(edited.armorType);
+        SetStableComboWidth(ARMOR_TYPE_ITEMS, 220.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.armor_type", "Armor type"), &armorType, ARMOR_TYPE_ITEMS.data(), static_cast<int>(ARMOR_TYPE_ITEMS.size()))) {
+            edited.armorType = ArmorTypeFromIndex(armorType);
+            changed = true;
+        }
+
+        if (ImGui::TreeNode(Configuration::GetLoc("menu.biped_slots", "Biped slots"))) {
+            for (std::size_t i = 0; i < BIPED_SLOT_ITEMS.size(); ++i) {
+                const auto mask = static_cast<std::uint32_t>(1u << i);
+                bool selected = (edited.bipedSlots & mask) != 0;
+                if (ImGui::Checkbox(BIPED_SLOT_ITEMS[i], &selected)) {
+                    if (selected) {
+                        edited.bipedSlots |= mask;
+                    } else {
+                        edited.bipedSlots &= ~mask;
+                    }
+                    changed = true;
+                }
+                if ((i + 1) % 4 != 0) {
+                    ImGui::SameLine();
+                }
+            }
+            ImGui::TreePop();
+        }
+
+        return changed;
+    }
+
+    bool DrawArmorModelEditor(DynamicForms::DynamicForm& edited, const bool includeIcons) {
+        bool changed = false;
+        changed |= InputString(Configuration::GetLoc("menu.male_world_model", "Male world model"), edited.maleWorldModel, 460.0F);
+        changed |= InputString(Configuration::GetLoc("menu.female_world_model", "Female world model"), edited.femaleWorldModel, 460.0F);
+        changed |= InputString(Configuration::GetLoc("menu.male_first_person_model", "Male 1st person model"), edited.maleFirstPersonModel, 460.0F);
+        changed |= InputString(Configuration::GetLoc("menu.female_first_person_model", "Female 1st person model"), edited.femaleFirstPersonModel, 460.0F);
+        if (includeIcons) {
+            ImGui::Separator();
+            changed |= InputString(Configuration::GetLoc("menu.male_inventory_icon", "Male inventory icon"), edited.maleInventoryIcon, 460.0F);
+            changed |= InputString(Configuration::GetLoc("menu.female_inventory_icon", "Female inventory icon"), edited.femaleInventoryIcon, 460.0F);
+            changed |= InputString(Configuration::GetLoc("menu.male_message_icon", "Male message icon"), edited.maleMessageIcon, 460.0F);
+            changed |= InputString(Configuration::GetLoc("menu.female_message_icon", "Female message icon"), edited.femaleMessageIcon, 460.0F);
+        }
+        ImGui::TextDisabled("%s", Configuration::GetLoc("menu.meshes_and_textures_hint", "Meshes paths are relative to Data/Meshes. Texture paths in texture sets are relative to Data/Textures."));
+        return changed;
+    }
+
+    bool RenderArmorTypeEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##armorTypeTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                changed |= DrawBipedDataEditor(edited);
+                changed |= DrawFormReferencePicker("Race", "Race", edited.race);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.models", "Models"))) {
+                changed |= DrawArmorModelEditor(edited, false);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.references", "References"))) {
+                changed |= DrawFormReferencePicker("Male skin texture", "TextureSet", edited.maleSkinTexture);
+                changed |= DrawFormReferencePicker("Female skin texture", "TextureSet", edited.femaleSkinTexture);
+                changed |= DrawFormReferencePicker("Male skin texture swap list", "FormList", edited.maleSkinTextureSwapList);
+                changed |= DrawFormReferencePicker("Female skin texture swap list", "FormList", edited.femaleSkinTextureSwapList);
+                changed |= DrawFormReferencePicker("Footstep set", "FootstepSet", edited.footstepSet);
+                changed |= DrawFormReferencePicker("Art object", "ArtObject", edited.armorArtObject);
+                ImGui::Separator();
+                changed |= DrawFormRefListEditor("Additional race", "Race", edited.additionalRaces);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
+        if (changed && Manager::UpdateForm(index, edited)) {
+            form = Manager::GetForms()[index];
+            return true;
+        }
+        return false;
+    }
+
+    bool RenderArmorEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##armorTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
+                changed |= DrawBipedDataEditor(edited);
+                int value = edited.armorValue;
+                int enchantmentAmount = edited.enchantmentAmount;
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.value", "Value"), &value)) {
+                    edited.armorValue = value;
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.weight", "Weight"), &edited.armorWeight)) {
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.armor_rating", "Armor rating"), &edited.armorRating)) {
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.enchantment_amount", "Enchantment amount"), &enchantmentAmount)) {
+                    edited.enchantmentAmount = static_cast<std::uint16_t>(std::clamp(enchantmentAmount, 0, 65535));
+                    changed = true;
+                }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.models", "Models"))) {
+                changed |= DrawArmorModelEditor(edited, true);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.references", "References"))) {
+                changed |= DrawFormReferencePicker("Race", "Race", edited.race);
+                changed |= DrawFormReferencePicker("Equip slot", "EquipSlot", edited.equipSlot);
+                changed |= DrawFormReferencePicker("Enchantment", "Enchantment", edited.enchantment);
+                changed |= DrawFormReferencePicker("Template armor", "Armor", edited.templateArmor);
+                changed |= DrawFormReferencePicker("Pickup sound", "SoundDescriptor", edited.pickupSound);
+                changed |= DrawFormReferencePicker("Putdown sound", "SoundDescriptor", edited.putdownSound);
+                changed |= DrawFormReferencePicker("Block bash impact data set", "ImpactDataSet", edited.blockBashImpactDataSet);
+                changed |= DrawFormReferencePicker("Alt block material type", "MaterialType", edited.altBlockMaterialType);
+                ImGui::Separator();
+                changed |= DrawFormRefListEditor("Armor type", "ArmorType", edited.armorAddons);
+                changed |= DrawFormRefListEditor("Keyword", "Keyword", edited.keywords);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
+        if (changed && Manager::UpdateForm(index, edited)) {
+            form = Manager::GetForms()[index];
+            return true;
+        }
+        return false;
+    }
+
     bool DrawTintLayerEditor(std::vector<DynamicForms::TintLayer>& values) {
         bool changed = false;
         ImGui::Text(Configuration::GetLoc("menu.tint_layers_u", "Tint layers: %zu"), values.size());
@@ -1969,10 +2163,11 @@ namespace {
     bool DrawHeadPartExtraPicker(DynamicForms::DynamicForm& edited) {
         bool changed = false;
         auto& filter = formPickerFilters["headpart_extra_parts"];
-        const bool listsReady = ListManager::GetSingleton()->PopulateAllLists(false);
 
         SetAvailableComboWidth(360.0F);
+        SetFixedComboPopupWidth(360.0F);
         if (ImGui::BeginCombo(Configuration::GetLoc("menu.add_extra_part", "Add extra part"), Configuration::GetLoc("common.select", "Select"))) {
+            const bool listsReady = ListManager::GetSingleton()->IsPopulated();
             char searchBuf[256]{};
             strcpy_s(searchBuf, filter.c_str());
             ImGui::SetNextItemWidth(-1.0F);
@@ -2176,6 +2371,43 @@ namespace {
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.ai", "AI"))) {
+                int aggression = edited.aiAggression;
+                int confidence = edited.aiConfidence;
+                int energy = edited.aiEnergyLevel;
+                int morality = edited.aiMorality;
+                int mood = edited.aiMood;
+                int assistance = edited.aiAssistance;
+                int warn = edited.aiAggroRadiusWarn;
+                int warnAndAttack = edited.aiAggroRadiusWarnAndAttack;
+                int attack = edited.aiAggroRadiusAttack;
+
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_aggression", "Aggression"), &aggression)) { edited.aiAggression = std::clamp(aggression, 0, 3); changed = true; }
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_confidence", "Confidence"), &confidence)) { edited.aiConfidence = std::clamp(confidence, 0, 4); changed = true; }
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_energy", "Energy"), &energy)) { edited.aiEnergyLevel = static_cast<std::uint8_t>(std::clamp(energy, 0, 100)); changed = true; }
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_morality", "Morality"), &morality)) { edited.aiMorality = std::clamp(morality, 0, 3); changed = true; }
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_mood", "Mood"), &mood)) { edited.aiMood = std::clamp(mood, 0, 7); changed = true; }
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_assistance", "Assistance"), &assistance)) { edited.aiAssistance = std::clamp(assistance, 0, 2); changed = true; }
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.ai_aggro_radius", "Aggro radius behavior"), &edited.aiAggroRadiusBehavior)) changed = true;
+                ImGui::SameLine();
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.ai_no_slow_approach", "No slow approach"), &edited.aiNoSlowApproach)) changed = true;
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_warn", "Warn"), &warn)) { edited.aiAggroRadiusWarn = static_cast<std::uint16_t>(std::clamp(warn, 0, 65535)); changed = true; }
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_warn_attack", "Warn/Attack"), &warnAndAttack)) { edited.aiAggroRadiusWarnAndAttack = static_cast<std::uint16_t>(std::clamp(warnAndAttack, 0, 65535)); changed = true; }
+                ImGui::SetNextItemWidth(NPC_NUMBER_INPUT_WIDTH);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.ai_attack", "Attack"), &attack)) { edited.aiAggroRadiusAttack = static_cast<std::uint16_t>(std::clamp(attack, 0, 65535)); changed = true; }
+                ImGui::Separator();
+                changed |= DrawFormRefListEditor("Package", "Package", edited.packages);
+                ImGui::EndTabItem();
+            }
+
             if (ImGui::BeginTabItem(Configuration::GetLoc("menu.stats", "Stats"))) {
                 int health = edited.health;
                 int magicka = edited.magicka;
@@ -2245,6 +2477,8 @@ namespace {
                 changed |= DrawRankedFormRefListEditor("Perk", "Perk", edited.npcPerks);
                 ImGui::Separator();
                 changed |= DrawFormRefListEditor("Spell", "Spell", edited.spells);
+                ImGui::Separator();
+                changed |= DrawFormRefListEditor("Package", "Package", edited.packages);
                 ImGui::EndTabItem();
             }
 
@@ -2288,6 +2522,14 @@ namespace {
                     edited.npcFactions.size(),
                     edited.npcPerks.size(),
                     edited.spells.size());
+                ImGui::Text("packages=%zu ai=[agg=%d conf=%d energy=%u morality=%d mood=%d assistance=%d]",
+                    edited.packages.size(),
+                    edited.aiAggression,
+                    edited.aiConfidence,
+                    edited.aiEnergyLevel,
+                    edited.aiMorality,
+                    edited.aiMood,
+                    edited.aiAssistance);
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -2565,8 +2807,6 @@ namespace Configuration {
     }
 
     void RenderFormsMenu() {
-        ListManager::GetSingleton()->PopulateAllLists(ImGui::IsWindowAppearing());
-
         std::string editorId = editorIdBuffer.data();
         const bool validEditorId = IsValidEditorId(editorId);
         const bool duplicateEditorId = validEditorId && Manager::HasEditorId(editorId);
@@ -2691,10 +2931,10 @@ namespace Configuration {
             std::string headerLabel = form.editorId;
             if (isDirty) {
                 headerLabel += " (Need save)";
-                headerLabel += "###";
-                headerLabel += form.editorId;
                 ImGui::PushStyleColor(ImGui::ImGuiCol_Header, { 0.4F, 0.3F, 0.1F, 1.0F });
             }
+            headerLabel += "###";
+            headerLabel += form.editorId;
             if (ImGui::CollapsingHeader(headerLabel.c_str())) {
                 if (isDirty) {
                     ImGui::PopStyleColor();
@@ -2705,10 +2945,54 @@ namespace Configuration {
                 }
                 ImGui::Text("%s: %s", GetLoc("menu.form_type", "Form type"), FormKindLabel(form.kind));
                 ImGui::Text("%s: %u", GetLoc("menu.local_id", "Local ID"), form.localId);
+                if (CanAddToInventory(form.kind)) {
+                    if (ImGui::Button(GetLoc("menu.add_to_inventory", "Add to inventory"))) {
+                        if (Manager::AddFormToPlayerInventory(i)) {
+                            lastTestActionSucceeded = true;
+                            testActionMessage = std::format("{} {}", form.editorId, GetLoc("menu.added_to_inventory", "added to inventory."));
+                        } else {
+                            lastTestActionSucceeded = false;
+                            testActionMessage = std::format("{} {}", GetLoc("menu.add_to_inventory_failed", "Could not add to inventory:"), form.editorId);
+                        }
+                    }
+                }
+                if (CanSpawnInWorld(form.kind)) {
+                    if (CanAddToInventory(form.kind)) {
+                        ImGui::SameLine();
+                    }
+                    if (ImGui::Button(GetLoc("menu.spawn_at_player", "Spawn at player"))) {
+                        if (Manager::SpawnFormAtPlayer(i)) {
+                            lastTestActionSucceeded = true;
+                            testActionMessage = std::format("{} {}", form.editorId, GetLoc("menu.spawned_at_player", "spawned at player."));
+                        } else {
+                            lastTestActionSucceeded = false;
+                            testActionMessage = std::format("{} {}", GetLoc("menu.spawn_at_player_failed", "Could not spawn:"), form.editorId);
+                        }
+                    }
+                    if (form.kind == DynamicForms::FormKind::NPC) {
+                        ImGui::SameLine();
+                        if (ImGui::Button(GetLoc("menu.spawn_lydia_debug", "Spawn Lydia debug"))) {
+                            if (Manager::SpawnLydiaForDebug()) {
+                                lastTestActionSucceeded = true;
+                                testActionMessage = GetLoc("menu.spawned_lydia_debug", "Lydia debug spawned.");
+                            } else {
+                                lastTestActionSucceeded = false;
+                                testActionMessage = GetLoc("menu.spawn_lydia_debug_failed", "Could not spawn Lydia debug.");
+                            }
+                        }
+                    }
+                }
+                if (!testActionMessage.empty()) {
+                    ImGui::TextColored(lastTestActionSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", testActionMessage.c_str());
+                }
                 if (form.kind == DynamicForms::FormKind::Global) {
                     RenderGlobalEditor(i, form);
                 } else if (form.kind == DynamicForms::FormKind::Outfit) {
                     RenderOutfitEditor(i, form);
+                } else if (form.kind == DynamicForms::FormKind::ArmorType) {
+                    RenderArmorTypeEditor(i, form);
+                } else if (form.kind == DynamicForms::FormKind::Armor) {
+                    RenderArmorEditor(i, form);
                 } else if (form.kind == DynamicForms::FormKind::Color) {
                     RenderColorEditor(i, form);
                 } else if (form.kind == DynamicForms::FormKind::ArtObject) {

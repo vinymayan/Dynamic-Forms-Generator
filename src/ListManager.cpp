@@ -211,6 +211,10 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
         return armor != nullptr;
     });
 
+    PopulateList<RE::TESObjectARMA>("ArmorType", [](RE::TESObjectARMA* armorType) -> bool {
+        return armorType != nullptr;
+    });
+
     PopulateList<RE::TESLevItem>("LeveledItem", [](RE::TESLevItem* leveledItem) -> bool {
         return leveledItem != nullptr;
     });
@@ -271,6 +275,10 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
         return formList != nullptr;
     });
 
+    PopulateList<RE::TESPackage>("Package", [](RE::TESPackage* package) -> bool {
+        return package != nullptr;
+    });
+
     PopulateList<RE::BGSSoundDescriptorForm>("SoundDescriptor", [](RE::BGSSoundDescriptorForm* sound) -> bool {
         return sound != nullptr;
     });
@@ -321,6 +329,18 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
 
     PopulateList<RE::EnchantmentItem>("Enchantment", [](RE::EnchantmentItem* enchantment) -> bool {
         return enchantment != nullptr;
+    });
+
+    PopulateList<RE::BGSEquipSlot>("EquipSlot", [](RE::BGSEquipSlot* equipSlot) -> bool {
+        return equipSlot != nullptr;
+    });
+
+    PopulateList<RE::BGSFootstepSet>("FootstepSet", [](RE::BGSFootstepSet* footstepSet) -> bool {
+        return footstepSet != nullptr;
+    });
+
+    PopulateList<RE::BGSMaterialType>("MaterialType", [](RE::BGSMaterialType* materialType) -> bool {
+        return materialType != nullptr;
     });
 
     PopulateList<RE::TESNPC>("NPC", [](RE::TESNPC* npc) -> bool {

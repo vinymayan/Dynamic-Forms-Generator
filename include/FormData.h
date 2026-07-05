@@ -11,6 +11,8 @@ namespace DynamicForms {
         Global,
         Keyword,
         Outfit,
+        ArmorType,
+        Armor,
         Color,
         ArtObject,
         Perk,
@@ -141,6 +143,36 @@ namespace DynamicForms {
         GlobalType globalType{ GlobalType::Float };
         float defaultValue{ 0.0F };
         std::vector<FormRef> outfitPieces;
+        std::uint32_t bipedSlots{ 0 };
+        std::uint32_t armorType{ 2 };
+        std::int32_t armorValue{ 0 };
+        float armorWeight{ 0.0F };
+        float armorRating{ 0.0F };
+        std::uint16_t enchantmentAmount{ 0 };
+        std::string maleWorldModel;
+        std::string femaleWorldModel;
+        std::string maleFirstPersonModel;
+        std::string femaleFirstPersonModel;
+        std::string maleInventoryIcon;
+        std::string femaleInventoryIcon;
+        std::string maleMessageIcon;
+        std::string femaleMessageIcon;
+        FormRef enchantment;
+        FormRef equipSlot;
+        FormRef templateArmor;
+        FormRef pickupSound;
+        FormRef putdownSound;
+        FormRef blockBashImpactDataSet;
+        FormRef altBlockMaterialType;
+        std::vector<FormRef> armorAddons;
+        std::vector<FormRef> keywords;
+        FormRef maleSkinTexture;
+        FormRef femaleSkinTexture;
+        FormRef maleSkinTextureSwapList;
+        FormRef femaleSkinTextureSwapList;
+        FormRef footstepSet;
+        FormRef armorArtObject;
+        std::vector<FormRef> additionalRaces;
         std::string fullName;
         std::string description;
         std::uint8_t red{ 255 };
@@ -333,6 +365,17 @@ namespace DynamicForms {
         std::uint16_t speedMult{ 100 };
         std::uint16_t dispositionBase{ 35 };
         std::int16_t bleedoutOverride{ 0 };
+        std::int32_t aiAggression{ 0 };
+        std::int32_t aiConfidence{ 2 };
+        std::uint8_t aiEnergyLevel{ 50 };
+        std::int32_t aiMorality{ 0 };
+        std::int32_t aiMood{ 0 };
+        std::int32_t aiAssistance{ 0 };
+        bool aiAggroRadiusBehavior{ false };
+        std::uint16_t aiAggroRadiusWarn{ 0 };
+        std::uint16_t aiAggroRadiusWarnAndAttack{ 0 };
+        std::uint16_t aiAggroRadiusAttack{ 0 };
+        bool aiNoSlowApproach{ false };
         std::array<std::uint8_t, 18> skills{};
         std::array<std::uint8_t, 18> skillOffsets{};
         std::array<float, 19> faceMorphs{};
@@ -342,6 +385,7 @@ namespace DynamicForms {
         std::vector<RankedFormRef> npcFactions;
         std::vector<RankedFormRef> npcPerks;
         std::vector<FormRef> spells;
+        std::vector<FormRef> packages;
         std::uint32_t localId{ 0 };
         bool dirty{ false };
     };

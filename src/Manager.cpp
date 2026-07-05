@@ -8,10 +8,13 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <rapidjson/document.h>
@@ -19,6 +22,7 @@
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/prettywriter.h>
 #include <ranges>
+#include <set>
 
 namespace {
     std::vector<DynamicForms::DynamicForm> forms;
@@ -58,6 +62,10 @@ namespace {
             return "Keyword";
         case DynamicForms::FormKind::Outfit:
             return "Outfit";
+        case DynamicForms::FormKind::ArmorType:
+            return "ArmorType";
+        case DynamicForms::FormKind::Armor:
+            return "Armor";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -105,6 +113,12 @@ namespace {
         }
         if (normalized == "outfit" || normalized == "otft") {
             return DynamicForms::FormKind::Outfit;
+        }
+        if (normalized == "armortype" || normalized == "armoraddon" || normalized == "armature" || normalized == "arma") {
+            return DynamicForms::FormKind::ArmorType;
+        }
+        if (normalized == "armor" || normalized == "armo") {
+            return DynamicForms::FormKind::Armor;
         }
         if (normalized == "color" || normalized == "colorform" || normalized == "clfm") {
             return DynamicForms::FormKind::Color;
@@ -435,6 +449,10 @@ namespace {
             return static_cast<std::uint32_t>(RE::FormType::Keyword);
         case DynamicForms::FormKind::Outfit:
             return static_cast<std::uint32_t>(RE::FormType::Outfit);
+        case DynamicForms::FormKind::ArmorType:
+            return static_cast<std::uint32_t>(RE::FormType::Armature);
+        case DynamicForms::FormKind::Armor:
+            return static_cast<std::uint32_t>(RE::FormType::Armor);
         case DynamicForms::FormKind::Color:
             return static_cast<std::uint32_t>(RE::FormType::ColorForm);
         case DynamicForms::FormKind::ArtObject:
@@ -553,6 +571,123 @@ namespace {
         }
 
         logger::info("Configured outfit '{}' with {} pieces.", form.editorId, outfit->outfitItems.size());
+        return true;
+    }
+
+    void ConfigureBipedObject(RE::BGSBipedObjectForm& biped, const DynamicForms::DynamicForm& form) {
+        biped.bipedModelData.bipedObjectSlots = static_cast<RE::BIPED_MODEL::BipedObjectSlot>(form.bipedSlots);
+        biped.bipedModelData.armorType = static_cast<RE::BIPED_MODEL::ArmorType>(form.armorType);
+    }
+
+    void SetModelIfPresent(RE::TESModel& model, const std::string& path) {
+        model.SetModel(path.c_str());
+    }
+
+    void SetIconIfPresent(RE::TESIcon& icon, const std::string& path) {
+        icon.textureName = path.c_str();
+    }
+
+    template <class T>
+    T* ResolveAs(const DynamicForms::FormRef& ref);
+
+    template <class T>
+    T* ResolveOrKeep(const DynamicForms::FormRef& ref, T* current, const std::string_view editorId, const std::string_view fieldName) {
+        if (ref.empty()) {
+            return current;
+        }
+
+        auto* resolved = ResolveAs<T>(ref);
+        if (!resolved) {
+            logger::warn("NPC '{}' {} '{}' could not be resolved. Keeping template/current value.",
+                editorId,
+                fieldName,
+                ref.Display());
+            return current;
+        }
+        return resolved;
+    }
+
+    bool ConfigureArmorType(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* armorType = tesForm ? tesForm->As<RE::TESObjectARMA>() : nullptr;
+        if (!armorType) {
+            logger::warn("Dynamic form '{}' is not a TESObjectARMA", form.editorId);
+            return false;
+        }
+
+        armorType->SetFormEditorID(form.editorId.c_str());
+        armorType->race = ResolveAs<RE::TESRace>(form.race);
+        ConfigureBipedObject(*armorType, form);
+        SetModelIfPresent(armorType->bipedModels[RE::SEX::kMale], form.maleWorldModel);
+        SetModelIfPresent(armorType->bipedModels[RE::SEX::kFemale], form.femaleWorldModel);
+        SetModelIfPresent(armorType->bipedModel1stPersons[RE::SEX::kMale], form.maleFirstPersonModel);
+        SetModelIfPresent(armorType->bipedModel1stPersons[RE::SEX::kFemale], form.femaleFirstPersonModel);
+        armorType->skinTextures[RE::SEX::kMale] = ResolveAs<RE::BGSTextureSet>(form.maleSkinTexture);
+        armorType->skinTextures[RE::SEX::kFemale] = ResolveAs<RE::BGSTextureSet>(form.femaleSkinTexture);
+        armorType->skinTextureSwapLists[RE::SEX::kMale] = ResolveAs<RE::BGSListForm>(form.maleSkinTextureSwapList);
+        armorType->skinTextureSwapLists[RE::SEX::kFemale] = ResolveAs<RE::BGSListForm>(form.femaleSkinTextureSwapList);
+        armorType->additionalRaces.clear();
+        for (const auto& raceRef : form.additionalRaces) {
+            if (auto* race = ResolveAs<RE::TESRace>(raceRef)) {
+                armorType->additionalRaces.push_back(race);
+            }
+        }
+        armorType->footstepSet = ResolveAs<RE::BGSFootstepSet>(form.footstepSet);
+        armorType->artObject = ResolveAs<RE::BGSArtObject>(form.armorArtObject);
+        logger::info("Configured armor type '{}' with {} additional races.", form.editorId, armorType->additionalRaces.size());
+        return true;
+    }
+
+    bool ConfigureArmor(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* armor = tesForm ? tesForm->As<RE::TESObjectARMO>() : nullptr;
+        if (!armor) {
+            logger::warn("Dynamic form '{}' is not a TESObjectARMO", form.editorId);
+            return false;
+        }
+
+        armor->SetFormEditorID(form.editorId.c_str());
+        armor->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        armor->race = ResolveAs<RE::TESRace>(form.race);
+        armor->value = form.armorValue;
+        armor->weight = form.armorWeight;
+        armor->formEnchanting = ResolveAs<RE::EnchantmentItem>(form.enchantment);
+        armor->amountofEnchantment = form.enchantmentAmount;
+        armor->SetEquipSlot(ResolveAs<RE::BGSEquipSlot>(form.equipSlot));
+        const auto armorRating = std::clamp(
+            static_cast<double>(form.armorRating) * 100.0,
+            0.0,
+            static_cast<double>(std::numeric_limits<std::uint32_t>::max()));
+        armor->armorRating = static_cast<std::uint32_t>(armorRating);
+        armor->templateArmor = ResolveAs<RE::TESObjectARMO>(form.templateArmor);
+        armor->pickupSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.pickupSound);
+        armor->putdownSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.putdownSound);
+        armor->blockBashImpactDataSet = ResolveAs<RE::BGSImpactDataSet>(form.blockBashImpactDataSet);
+        armor->altBlockMaterialType = ResolveAs<RE::BGSMaterialType>(form.altBlockMaterialType);
+        ConfigureBipedObject(*armor, form);
+        SetModelIfPresent(armor->worldModels[RE::TESBipedModelForm::Sexes::kMale], form.maleWorldModel);
+        SetModelIfPresent(armor->worldModels[RE::TESBipedModelForm::Sexes::kFemale], form.femaleWorldModel);
+        SetIconIfPresent(armor->inventoryIcons[RE::TESBipedModelForm::Sexes::kMale], form.maleInventoryIcon);
+        SetIconIfPresent(armor->inventoryIcons[RE::TESBipedModelForm::Sexes::kFemale], form.femaleInventoryIcon);
+        SetIconIfPresent(armor->messageIcons[RE::TESBipedModelForm::Sexes::kMale].icon, form.maleMessageIcon);
+        SetIconIfPresent(armor->messageIcons[RE::TESBipedModelForm::Sexes::kFemale].icon, form.femaleMessageIcon);
+
+        armor->armorAddons.clear();
+        for (const auto& addonRef : form.armorAddons) {
+            if (auto* addon = ResolveAs<RE::TESObjectARMA>(addonRef)) {
+                armor->armorAddons.push_back(addon);
+            }
+        }
+
+        std::vector<RE::BGSKeyword*> keywords;
+        for (const auto& keywordRef : form.keywords) {
+            if (auto* keyword = ResolveAs<RE::BGSKeyword>(keywordRef)) {
+                keywords.push_back(keyword);
+            }
+        }
+        while (armor->GetNumKeywords() > 0) {
+            armor->RemoveKeyword(static_cast<std::uint32_t>(0));
+        }
+        armor->AddKeywords(keywords);
+        logger::info("Configured armor '{}' with {} armor add-ons and {} keywords.", form.editorId, armor->armorAddons.size(), keywords.size());
         return true;
     }
 
@@ -765,6 +900,64 @@ namespace {
         return functionData;
     }
 
+    bool PerkEntryFunctionUsesOneValue(const std::uint32_t function) {
+        using Function = RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION;
+        switch (static_cast<Function>(function)) {
+        case Function::kSetValue:
+        case Function::kAddValue:
+        case Function::kMultiplyValue:
+        case Function::kAbsoluteValue:
+        case Function::kNegativeAbsoluteValue:
+        case Function::kAddActorValueMult:
+        case Function::kSetToActorValueMult:
+        case Function::kMultiplyActorValueMult:
+        case Function::kMultiplyOnePlusActorValueMult:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    const char* PerkEntryFunctionName(const std::uint32_t function) {
+        using Function = RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION;
+        switch (static_cast<Function>(function)) {
+        case Function::kNullFunction:
+            return "Null Function";
+        case Function::kSetValue:
+            return "Set Value";
+        case Function::kAddValue:
+            return "Add Value";
+        case Function::kMultiplyValue:
+            return "Multiply Value";
+        case Function::kAddRangeToValue:
+            return "Add Range To Value";
+        case Function::kAddActorValueMult:
+            return "Add Actor Value Mult";
+        case Function::kAbsoluteValue:
+            return "Absolute Value";
+        case Function::kNegativeAbsoluteValue:
+            return "Negative Absolute Value";
+        case Function::kAddLeveledList:
+            return "Add Leveled List";
+        case Function::kAddActivateChoice:
+            return "Add Activate Choice";
+        case Function::kSelectSpell:
+            return "Select Spell";
+        case Function::kSelectText:
+            return "Select Text";
+        case Function::kSetToActorValueMult:
+            return "Set To Actor Value Mult";
+        case Function::kMultiplyActorValueMult:
+            return "Multiply Actor Value Mult";
+        case Function::kMultiplyOnePlusActorValueMult:
+            return "Multiply 1 + Actor Value Mult";
+        case Function::kSetText:
+            return "Set Text";
+        default:
+            return "Unknown";
+        }
+    }
+
     RE::BGSStandardSoundDef* CreateStandardSoundDefObject() {
         auto* soundDef = RE::calloc<RE::BGSStandardSoundDef>(1);
         SetRuntimeVTable(soundDef, RE::VTABLE_BGSStandardSoundDef[0]);
@@ -803,15 +996,20 @@ namespace {
         entry->entryData.numArgs = static_cast<std::uint8_t>(std::min(source.numArgs, 255U));
         entry->perk = &perk;
 
-        if (source.function == 1) {
+        if (PerkEntryFunctionUsesOneValue(source.function)) {
             if (auto* functionData = CreateOneValueFunctionDataObject()) {
                 functionData->data = source.value;
                 entry->functionData = functionData;
             } else {
                 logger::warn("Could not allocate BGSEntryPointFunctionDataOneValue for perk '{}'.", perk.GetFormEditorID());
             }
+        } else if (source.function == static_cast<std::uint32_t>(RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION::kNullFunction)) {
+            entry->functionData = nullptr;
         } else {
-            logger::warn("Perk entry function {} is not fully mapped. Creating entry without function data.", source.function);
+            logger::warn(
+                "Perk entry function {} ({}) needs function data not represented by the current DFG JSON schema. Creating entry without function data.",
+                source.function,
+                PerkEntryFunctionName(source.function));
         }
 
         entry->conditions.resize(1);
@@ -1225,11 +1423,307 @@ namespace {
         return form ? form->As<T>() : nullptr;
     }
 
+    std::string EditorIdOrFormId(const RE::TESForm* form) {
+        if (!form) {
+            return "<null>";
+        }
+        auto editorId = clib_util::editorID::get_editorID(const_cast<RE::TESForm*>(form));
+        if (editorId.empty()) {
+            return std::format("{:08X}", form->GetFormID());
+        }
+        return std::string(editorId);
+    }
+
+    void LogNPCSnapshot(const char* label, const RE::TESNPC* npc) {
+        if (!npc) {
+            logger::info("{} NPC snapshot: <null>", label);
+            return;
+        }
+
+        const auto* spellList = static_cast<const RE::TESSpellList*>(npc);
+        const auto* spellData = spellList ? spellList->actorEffects : nullptr;
+        logger::info(
+            "{} NPC snapshot '{}': ptr={} formID={:08X} formFlags={:08X} actorFlags={:08X} templateFlags={:04X} sex={} "
+            "race={} originalRace={} faceNPC={} class={} voice={} skin={} defaultOutfit={} sleepOutfit={} packageList={} crimeFaction={} "
+            "aiAggression={} aiConfidence={} aiEnergy={} aiMorality={} aiMood={} aiAssistance={} aiPackages={} "
+            "level={} calcMin={} calcMax={} health={} magicka={} stamina={} healthOffset={} magickaOffset={} staminaOffset={} speed={} disposition={} bleedout={} "
+            "height={} weight={} soundLevel={} headParts={} headPartsPtr={} faceData={} tintLayersPtr={} tintLayers={} headRelatedData={} relationships={} "
+            "factions={} perksPtr={} perkCount={} spellData={} spells={} levSpells={} shouts={}.",
+            label,
+            EditorIdOrFormId(npc),
+            fmt::ptr(npc),
+            npc->GetFormID(),
+            npc->formFlags,
+            npc->actorData.actorBaseFlags.underlying(),
+            npc->actorData.templateUseFlags.underlying(),
+            static_cast<std::uint32_t>(npc->GetSex()),
+            EditorIdOrFormId(npc->race),
+            EditorIdOrFormId(npc->originalRace),
+            EditorIdOrFormId(npc->faceNPC),
+            EditorIdOrFormId(npc->npcClass),
+            EditorIdOrFormId(npc->voiceType),
+            EditorIdOrFormId(npc->farSkin),
+            EditorIdOrFormId(npc->defaultOutfit),
+            EditorIdOrFormId(npc->sleepOutfit),
+            EditorIdOrFormId(npc->defaultPackList),
+            EditorIdOrFormId(npc->crimeFaction),
+            static_cast<std::int32_t>(npc->GetAggressionLevel()),
+            static_cast<std::int32_t>(npc->GetConfidenceLevel()),
+            static_cast<std::uint32_t>(npc->GetEnergyLevel()),
+            static_cast<std::int32_t>(npc->GetMoralityLevel()),
+            static_cast<std::int32_t>(npc->GetMoodLevel()),
+            static_cast<std::int32_t>(npc->GetAssistanceLevel()),
+            npc->aiPackages.packages.size(),
+            npc->actorData.level,
+            npc->actorData.calcLevelMin,
+            npc->actorData.calcLevelMax,
+            npc->playerSkills.health,
+            npc->playerSkills.magicka,
+            npc->playerSkills.stamina,
+            npc->actorData.healthOffset,
+            npc->actorData.magickaOffset,
+            npc->actorData.staminaOffset,
+            npc->actorData.speedMult,
+            npc->actorData.baseDisposition,
+            npc->actorData.bleedoutOverride,
+            npc->height,
+            npc->weight,
+            static_cast<std::uint32_t>(npc->soundLevel.underlying()),
+            static_cast<std::uint32_t>(npc->numHeadParts),
+            fmt::ptr(npc->headParts),
+            fmt::ptr(npc->faceData),
+            fmt::ptr(npc->tintLayers),
+            npc->tintLayers ? npc->tintLayers->size() : 0,
+            fmt::ptr(npc->headRelatedData),
+            fmt::ptr(npc->relationships),
+            npc->factions.size(),
+            fmt::ptr(npc->perks),
+            npc->perkCount,
+            fmt::ptr(spellData),
+            spellData ? spellData->numSpells : 0,
+            spellData ? spellData->numlevSpells : 0,
+            spellData ? spellData->numShouts : 0);
+
+        if (npc->headRelatedData) {
+            logger::info("{} NPC head data: hairColor={} faceTexture={}.",
+                label,
+                EditorIdOrFormId(npc->headRelatedData->hairColor),
+                EditorIdOrFormId(npc->headRelatedData->faceDetails));
+        }
+
+        if (npc->headParts && npc->numHeadParts > 0) {
+            const auto count = std::min<std::uint32_t>(static_cast<std::uint32_t>(npc->numHeadParts), 16);
+            for (std::uint32_t i = 0; i < count; ++i) {
+                logger::info("{} NPC headPart[{}]={}", label, i, EditorIdOrFormId(npc->headParts[i]));
+            }
+        }
+
+        if (npc->faceData) {
+            logger::info("{} NPC face parts: [{}, {}, {}, {}]",
+                label,
+                npc->faceData->parts[0],
+                npc->faceData->parts[1],
+                npc->faceData->parts[2],
+                npc->faceData->parts[3]);
+            logger::info("{} NPC morphs[0..8]: [{:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}]",
+                label,
+                npc->faceData->morphs[0],
+                npc->faceData->morphs[1],
+                npc->faceData->morphs[2],
+                npc->faceData->morphs[3],
+                npc->faceData->morphs[4],
+                npc->faceData->morphs[5],
+                npc->faceData->morphs[6],
+                npc->faceData->morphs[7],
+                npc->faceData->morphs[8]);
+        }
+    }
+
+    RE::TESNPC* LookupLydiaNPC() {
+        if (auto* form = RE::TESForm::LookupByEditorID("HousecarlWhiterun")) {
+            if (auto* npc = form->As<RE::TESNPC>()) {
+                return npc;
+            }
+        }
+        return RE::TESForm::LookupByID<RE::TESNPC>(0x000A2C8E);
+    }
+
+    RE::TESNPC* LookupDPFNpcTemplate() {
+        constexpr RE::FormID TEMPLATE_LOCAL_ID = 0xD63;
+        constexpr std::string_view TEMPLATE_PLUGIN = "DPF.esp";
+
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler) {
+            logger::warn("Could not resolve DPF NPC template: TESDataHandler is unavailable.");
+            return nullptr;
+        }
+
+        const auto formId = dataHandler->LookupFormID(TEMPLATE_LOCAL_ID, TEMPLATE_PLUGIN);
+        if (formId == 0) {
+            logger::warn("Could not resolve DPF NPC template {}|{:X}.", TEMPLATE_PLUGIN, TEMPLATE_LOCAL_ID);
+            return nullptr;
+        }
+
+        auto* npc = RE::TESForm::LookupByID<RE::TESNPC>(formId);
+        if (!npc) {
+            logger::warn("DPF NPC template {}|{:X} resolved to {:08X}, but it is not a TESNPC.",
+                TEMPLATE_PLUGIN,
+                TEMPLATE_LOCAL_ID,
+                formId);
+            return nullptr;
+        }
+
+        return npc;
+    }
+
+    RE::TESRace* LookupDefaultNPCRace() {
+        constexpr RE::FormID NORD_RACE_LOCAL_ID = 0x13746;
+        constexpr std::string_view SKYRIM_PLUGIN = "Skyrim.esm";
+
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler) {
+            return nullptr;
+        }
+
+        const auto formId = dataHandler->LookupFormID(NORD_RACE_LOCAL_ID, SKYRIM_PLUGIN);
+        return formId != 0 ? RE::TESForm::LookupByID<RE::TESRace>(formId) : nullptr;
+    }
+
+    bool HasMeaningfulFaceMorphs(const DynamicForms::DynamicForm& form) {
+        return std::ranges::any_of(form.faceMorphs, [](const float value) {
+            return std::abs(value) > 0.0001F;
+        });
+    }
+
+    bool HasMeaningfulFaceParts(const DynamicForms::DynamicForm& form) {
+        return std::ranges::any_of(form.faceParts, [](const std::int32_t value) {
+            return value != 0;
+        });
+    }
+
+    bool HeadPartHasUsableModel(RE::BGSHeadPart* headPart) {
+        const auto* model = headPart ? headPart->GetModel() : nullptr;
+        return model && model[0] != '\0';
+    }
+
+    bool IsHeadPartAllowedForRaceSex(RE::BGSHeadPart* headPart, RE::TESRace* race, const bool female) {
+        if (!headPart) {
+            return false;
+        }
+
+        const bool hpFemale = headPart->flags.all(RE::BGSHeadPart::Flag::kFemale);
+        const bool hpMale = headPart->flags.all(RE::BGSHeadPart::Flag::kMale);
+        if (female && hpMale && !hpFemale) {
+            return false;
+        }
+        if (!female && hpFemale && !hpMale) {
+            return false;
+        }
+
+        if (!race || !headPart->validRaces) {
+            return true;
+        }
+        if (headPart->validRaces->HasForm(race)) {
+            return true;
+        }
+        if (race->armorParentRace && headPart->validRaces->HasForm(race->armorParentRace)) {
+            return true;
+        }
+
+        return headPart->validRaces->forms.empty();
+    }
+
+    bool IsSafeFaceHeadPart(RE::BGSHeadPart* headPart, RE::TESRace* race, const bool female) {
+        return headPart &&
+               headPart->type == RE::BGSHeadPart::HeadPartType::kFace &&
+               HeadPartHasUsableModel(headPart) &&
+               IsHeadPartAllowedForRaceSex(headPart, race, female);
+    }
+
+    RE::BGSHeadPart* FindCurrentSafeFaceHeadPart(RE::TESNPC* npc) {
+        if (!npc || !npc->headParts) {
+            return nullptr;
+        }
+
+        const bool female = npc->actorData.actorBaseFlags.all(RE::ACTOR_BASE_DATA::Flag::kFemale);
+        for (int i = 0; i < npc->numHeadParts; ++i) {
+            if (auto* headPart = npc->headParts[i]; IsSafeFaceHeadPart(headPart, npc->race, female)) {
+                return headPart;
+            }
+        }
+        return nullptr;
+    }
+
+    void SetAIDataBits(RE::TESNPC& npc, const DynamicForms::DynamicForm& form) {
+        npc.SetAggressionLevel(static_cast<RE::ACTOR_AGGRESSION>(std::clamp(form.aiAggression, 0, 3)));
+        npc.SetConfidenceLevel(static_cast<RE::ACTOR_CONFIDENCE>(std::clamp(form.aiConfidence, 0, 4)));
+        npc.SetAssistanceLevel(static_cast<RE::ACTOR_ASSISTANCE>(std::clamp(form.aiAssistance, 0, 2)));
+
+        const auto energy = static_cast<std::uint8_t>(std::clamp<int>(form.aiEnergyLevel, 0, 100));
+        npc.aiData.energyLevel1 = (energy & (1U << 0)) != 0;
+        npc.aiData.energyLevel2 = (energy & (1U << 1)) != 0;
+        npc.aiData.energyLevel3 = (energy & (1U << 2)) != 0;
+        npc.aiData.energyLevel4 = (energy & (1U << 3)) != 0;
+        npc.aiData.energyLevel5 = (energy & (1U << 4)) != 0;
+        npc.aiData.energyLevel6 = (energy & (1U << 5)) != 0;
+        npc.aiData.energyLevel7 = (energy & (1U << 6)) != 0;
+        npc.aiData.energyLevel8 = (energy & (1U << 7)) != 0;
+
+        const auto morality = static_cast<std::uint8_t>(std::clamp(form.aiMorality, 0, 3));
+        npc.aiData.morality1 = (morality & (1U << 0)) != 0;
+        npc.aiData.morality2 = (morality & (1U << 1)) != 0;
+
+        const auto mood = static_cast<std::uint8_t>(std::clamp(form.aiMood, 0, 7));
+        npc.aiData.mood1 = (mood & (1U << 0)) != 0;
+        npc.aiData.mood2 = (mood & (1U << 1)) != 0;
+        npc.aiData.mood3 = (mood & (1U << 2)) != 0;
+
+        npc.aiData.aggroRadiusBehaviour = form.aiAggroRadiusBehavior;
+        npc.aiData.aggroRadius[RE::ACTOR_AGGRO_RADIUS::kWarn] = form.aiAggroRadiusWarn;
+        npc.aiData.aggroRadius[RE::ACTOR_AGGRO_RADIUS::kWarnAndAttack] = form.aiAggroRadiusWarnAndAttack;
+        npc.aiData.aggroRadius[RE::ACTOR_AGGRO_RADIUS::kAttack] = form.aiAggroRadiusAttack;
+        npc.aiData.noSlowApproach = form.aiNoSlowApproach;
+    }
+
     bool ConfigureNPC(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
         auto* npc = tesForm ? tesForm->As<RE::TESNPC>() : nullptr;
         if (!npc) {
             logger::warn("Dynamic form '{}' is not a TESNPC", form.editorId);
             return false;
+        }
+
+        const bool rawFactoryNpc = !npc->race && !npc->headParts && !npc->tintLayers;
+        logger::info("Preparing NPC '{}': FormID={:08X} racePtr={} headPartsPtr={} faceData={} tintLayersPtr={} rawFactoryNpc={}",
+            form.editorId,
+            npc->GetFormID(),
+            fmt::ptr(npc->race),
+            fmt::ptr(npc->headParts),
+            fmt::ptr(npc->faceData),
+            fmt::ptr(npc->tintLayers),
+            rawFactoryNpc);
+
+        if (auto* templateNpc = LookupDPFNpcTemplate(); templateNpc && templateNpc != npc) {
+            const auto oldFormID = npc->GetFormID();
+            npc->Copy(templateNpc);
+            if (npc->GetFormID() != oldFormID) {
+                logger::warn("NPC '{}' template copy changed dynamic FormID from {:08X} to {:08X}. Restoring original FormID.",
+                    form.editorId,
+                    oldFormID,
+                    npc->GetFormID());
+                npc->SetFormID(oldFormID, false);
+            }
+            npc->faceNPC = nullptr;
+            logger::info("Copied DPF NPC template into '{}': templateFormID={:08X} dynamicFormIDBefore={:08X} dynamicFormIDAfter={:08X} templateRace={} dynamicRace={}",
+                form.editorId,
+                templateNpc->GetFormID(),
+                oldFormID,
+                npc->GetFormID(),
+                templateNpc->race ? clib_util::editorID::get_editorID(templateNpc->race) : "<null>",
+                npc->race ? clib_util::editorID::get_editorID(npc->race) : "<null>");
+        } else if (rawFactoryNpc) {
+            logger::warn("Using fallback InitializeData/InitItemImpl for NPC '{}' because the DPF NPC template was not available.", form.editorId);
+            npc->InitializeData();
+            npc->InitItemImpl();
         }
 
         npc->SetFormEditorID(form.editorId.c_str());
@@ -1252,6 +1746,7 @@ namespace {
         SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kNoActivation, form.noActivation);
         SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kIsGhost, form.ghost);
         SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kInvulnerable, form.invulnerable);
+        SetActorBaseFlag(*npc, RE::ACTOR_BASE_DATA::Flag::kIsChargenFacePreset, true);
 
         npc->playerSkills.health = form.health;
         npc->playerSkills.magicka = form.magicka;
@@ -1270,25 +1765,44 @@ namespace {
             npc->playerSkills.offsets[i] = form.skillOffsets[i];
         }
 
-        npc->race = ResolveAs<RE::TESRace>(form.race);
-        npc->farSkin = ResolveAs<RE::TESObjectARMO>(form.skin);
-        npc->defaultOutfit = ResolveAs<RE::BGSOutfit>(form.defaultOutfit);
-        npc->sleepOutfit = ResolveAs<RE::BGSOutfit>(form.sleepOutfit);
-        npc->voiceType = ResolveAs<RE::BGSVoiceType>(form.voice);
-        npc->npcClass = ResolveAs<RE::TESClass>(form.npcClass);
-        npc->combatStyle = ResolveAs<RE::TESCombatStyle>(form.combatStyle);
-        npc->giftFilter = ResolveAs<RE::BGSListForm>(form.giftFilter);
-        npc->deathItem = ResolveAs<RE::TESLevItem>(form.deathItem);
-        npc->defaultPackList = ResolveAs<RE::BGSListForm>(form.defaultPackageList);
-        npc->crimeFaction = ResolveAs<RE::TESFaction>(form.crimeFaction);
+        npc->race = ResolveOrKeep<RE::TESRace>(form.race, npc->race, form.editorId, "race");
+        if (!npc->race) {
+            npc->race = LookupDefaultNPCRace();
+            logger::warn("NPC '{}' had no race after template/config apply. Fallback NordRace={}.",
+                form.editorId,
+                npc->race ? "ok" : "missing");
+        }
+        npc->originalRace = npc->race;
+        npc->farSkin = ResolveOrKeep<RE::TESObjectARMO>(form.skin, npc->farSkin, form.editorId, "skin");
+        npc->defaultOutfit = ResolveOrKeep<RE::BGSOutfit>(form.defaultOutfit, npc->defaultOutfit, form.editorId, "default outfit");
+        npc->sleepOutfit = ResolveOrKeep<RE::BGSOutfit>(form.sleepOutfit, npc->sleepOutfit, form.editorId, "sleep outfit");
+        npc->voiceType = ResolveOrKeep<RE::BGSVoiceType>(form.voice, npc->voiceType, form.editorId, "voice");
+        npc->npcClass = ResolveOrKeep<RE::TESClass>(form.npcClass, npc->npcClass, form.editorId, "class");
+        npc->combatStyle = ResolveOrKeep<RE::TESCombatStyle>(form.combatStyle, npc->combatStyle, form.editorId, "combat style");
+        npc->giftFilter = ResolveOrKeep<RE::BGSListForm>(form.giftFilter, npc->giftFilter, form.editorId, "gift filter");
+        npc->deathItem = ResolveOrKeep<RE::TESLevItem>(form.deathItem, npc->deathItem, form.editorId, "death item");
+        npc->defaultPackList = ResolveOrKeep<RE::BGSListForm>(form.defaultPackageList, npc->defaultPackList, form.editorId, "default package list");
+        npc->crimeFaction = ResolveOrKeep<RE::TESFaction>(form.crimeFaction, npc->crimeFaction, form.editorId, "crime faction");
         npc->soundLevel = static_cast<RE::SOUND_LEVEL>(form.soundLevel);
+        SetAIDataBits(*npc, form);
+
+        npc->aiPackages.packages.clear();
+        std::size_t packageIndex = 0;
+        for (const auto& packageRef : form.packages) {
+            auto* package = ResolveAs<RE::TESPackage>(packageRef);
+            if (!package) {
+                logger::warn("NPC '{}' package '{}' could not be resolved.", form.editorId, packageRef.Display());
+                continue;
+            }
+            npc->aiPackages.packages.insert_at(packageIndex++, package);
+        }
 
         if (npc->headRelatedData || !form.hairColor.empty() || !form.faceTexture.empty()) {
             if (!npc->headRelatedData) {
                 npc->headRelatedData = new RE::TESNPC::HeadRelatedData();
             }
-            npc->headRelatedData->hairColor = ResolveAs<RE::BGSColorForm>(form.hairColor);
-            npc->headRelatedData->faceDetails = ResolveAs<RE::BGSTextureSet>(form.faceTexture);
+            npc->headRelatedData->hairColor = ResolveOrKeep<RE::BGSColorForm>(form.hairColor, npc->headRelatedData->hairColor, form.editorId, "hair color");
+            npc->headRelatedData->faceDetails = ResolveOrKeep<RE::BGSTextureSet>(form.faceTexture, npc->headRelatedData->faceDetails, form.editorId, "face texture");
         }
 
         npc->factions.clear();
@@ -1348,19 +1862,39 @@ namespace {
             }
         }
 
-        if (npc->headParts) {
-            RE::free(npc->headParts);
-            npc->headParts = nullptr;
-            npc->numHeadParts = 0;
-        }
         std::vector<RE::BGSHeadPart*> parts;
-        for (const auto& headPartRef : form.headParts) {
-            auto* headPart = ResolveAs<RE::BGSHeadPart>(headPartRef);
-            if (!headPart) {
-                logger::warn("NPC '{}' headpart '{}' could not be resolved.", form.editorId, headPartRef.Display());
-                continue;
+        if (!form.headParts.empty()) {
+            std::set<RE::BGSHeadPart*> processed;
+            bool hasFaceHeadPart = false;
+            auto* fallbackFaceHeadPart = FindCurrentSafeFaceHeadPart(npc);
+            std::function<void(RE::BGSHeadPart*)> addPartAndExtras = [&](RE::BGSHeadPart* headPart) {
+                if (!headPart || processed.contains(headPart)) {
+                    return;
+                }
+                processed.insert(headPart);
+                if (headPart->type == RE::BGSHeadPart::HeadPartType::kFace) {
+                    hasFaceHeadPart = true;
+                }
+                parts.push_back(headPart);
+                for (auto* extraPart : headPart->extraParts) {
+                    addPartAndExtras(extraPart);
+                }
+            };
+
+            for (const auto& headPartRef : form.headParts) {
+                auto* headPart = ResolveAs<RE::BGSHeadPart>(headPartRef);
+                if (!headPart) {
+                    logger::warn("NPC '{}' headpart '{}' could not be resolved.", form.editorId, headPartRef.Display());
+                    continue;
+                }
+                addPartAndExtras(headPart);
             }
-            parts.push_back(headPart);
+            if (!hasFaceHeadPart && fallbackFaceHeadPart) {
+                logger::info("NPC '{}' headparts do not include a Face part. Preserving fallback face headpart '{}'.",
+                    form.editorId,
+                    fallbackFaceHeadPart->GetFormEditorID() ? fallbackFaceHeadPart->GetFormEditorID() : "<no editor id>");
+                addPartAndExtras(fallbackFaceHeadPart);
+            }
         }
         if (!parts.empty()) {
             const auto partCount = std::min<std::size_t>(parts.size(), 127);
@@ -1386,24 +1920,62 @@ namespace {
                 layer->tintColor = RE::Color(source.red, source.green, source.blue, source.alpha);
                 npc->tintLayers->push_back(layer);
             }
-        } else if (npc->tintLayers) {
-            npc->tintLayers->clear();
         }
 
-        if (!npc->faceData) {
-            npc->faceData = new RE::TESNPC::FaceData();
-        }
-        for (std::size_t i = 0; i < form.faceMorphs.size(); ++i) {
-            npc->faceData->morphs[i] = form.faceMorphs[i];
-        }
-        for (std::size_t i = 0; i < form.faceParts.size(); ++i) {
-            npc->faceData->parts[i] = form.faceParts[i];
+        const bool hasFaceMorphs = HasMeaningfulFaceMorphs(form);
+        const bool hasFaceParts = HasMeaningfulFaceParts(form);
+        if (hasFaceMorphs || hasFaceParts) {
+            auto* faceData = new RE::TESNPC::FaceData();
+            if (npc->faceData) {
+                *faceData = *npc->faceData;
+            }
+            npc->faceData = faceData;
+            if (hasFaceMorphs) {
+                for (std::size_t i = 0; i < form.faceMorphs.size(); ++i) {
+                    npc->faceData->morphs[i] = form.faceMorphs[i];
+                }
+            }
+            if (hasFaceParts) {
+                for (std::size_t i = 0; i < form.faceParts.size(); ++i) {
+                    npc->faceData->parts[i] = form.faceParts[i];
+                }
+            }
+        } else {
+            logger::info("NPC '{}' has no meaningful faceMorphs/faceParts in JSON; preserving template faceData instead of applying zeroed arrays.",
+                form.editorId);
         }
 
-        logger::info("Configured NPC '{}' headParts={} tintLayers={} factions={} perks={} spells={}.",
+        logger::info("Configured NPC '{}' FormID={:08X} race={} class={} voice={} skin={} defaultOutfit={} sleepOutfit={} flags={:08X} level={} calcMin={} calcMax={} health={} magicka={} stamina={} speedMult={} height={} weight={} aiAggression={} aiConfidence={} aiEnergy={} aiMorality={} aiMood={} aiAssistance={} packages={} headParts={} headPartsPtr={} faceData={} tintLayers={} tintLayersPtr={} factions={} perks={} spells={}.",
             form.editorId,
+            npc->GetFormID(),
+            npc->race ? clib_util::editorID::get_editorID(npc->race) : "<null>",
+            npc->npcClass ? clib_util::editorID::get_editorID(npc->npcClass) : "<null>",
+            npc->voiceType ? clib_util::editorID::get_editorID(npc->voiceType) : "<null>",
+            npc->farSkin ? clib_util::editorID::get_editorID(npc->farSkin) : "<null>",
+            npc->defaultOutfit ? clib_util::editorID::get_editorID(npc->defaultOutfit) : "<null>",
+            npc->sleepOutfit ? clib_util::editorID::get_editorID(npc->sleepOutfit) : "<null>",
+            npc->actorData.actorBaseFlags.underlying(),
+            npc->actorData.level,
+            npc->actorData.calcLevelMin,
+            npc->actorData.calcLevelMax,
+            npc->playerSkills.health,
+            npc->playerSkills.magicka,
+            npc->playerSkills.stamina,
+            npc->actorData.speedMult,
+            npc->height,
+            npc->weight,
+            form.aiAggression,
+            form.aiConfidence,
+            form.aiEnergyLevel,
+            form.aiMorality,
+            form.aiMood,
+            form.aiAssistance,
+            form.packages.size(),
             parts.size(),
+            fmt::ptr(npc->headParts),
+            fmt::ptr(npc->faceData),
             form.tintLayers.size(),
+            fmt::ptr(npc->tintLayers),
             form.npcFactions.size(),
             form.npcPerks.size(),
             form.spells.size());
@@ -1421,6 +1993,12 @@ namespace {
         }
         if (form.kind == DynamicForms::FormKind::Outfit) {
             return ConfigureOutfit(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::ArmorType) {
+            return ConfigureArmorType(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Armor) {
+            return ConfigureArmor(tesForm, form);
         }
         if (form.kind == DynamicForms::FormKind::Color) {
             return ConfigureColor(tesForm, form);
@@ -1456,11 +2034,11 @@ namespace {
         return true;
     }
 
-    bool ResolveDPFForm(DynamicForms::DynamicForm& form) {
+    RE::TESForm* ResolveDPFFormObject(DynamicForms::DynamicForm& form, const bool configure = true) {
         auto* api = DPF::GetAPI();
         if (!api) {
             logger::warn("Dynamic Persistent Forms API is not available yet.");
-            return false;
+            return nullptr;
         }
 
         bool existed = false;
@@ -1491,12 +2069,12 @@ namespace {
         }
         if (!tesForm) {
             logger::warn("DPF returned null for dynamic form '{}'", form.editorId);
-            return false;
+            return nullptr;
         }
 
         form.localId = localId;
-        if (!ConfigureForm(tesForm, form)) {
-            return false;
+        if (configure && !ConfigureForm(tesForm, form)) {
+            return nullptr;
         }
 
         logger::info("DPF {} dynamic {} '{}' owner '{}' localId {:06X}.",
@@ -1505,7 +2083,11 @@ namespace {
             form.editorId,
             Manager::DPF_OWNER,
             form.localId);
-        return true;
+        return tesForm;
+    }
+
+    bool ResolveDPFForm(DynamicForms::DynamicForm& form) {
+        return ResolveDPFFormObject(form, true) != nullptr;
     }
 
     void AddString(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::string& value) {
@@ -1948,6 +2530,62 @@ namespace {
                 }
             }
         }
+        out.bipedSlots = ReadUInt32(doc, "bipedSlots", out.bipedSlots);
+        out.armorType = ReadUInt32(doc, "armorType", out.armorType);
+        if (doc.HasMember("armorValue") && doc["armorValue"].IsInt()) {
+            out.armorValue = doc["armorValue"].GetInt();
+        }
+        out.armorWeight = ReadFloat(doc, "armorWeight", out.armorWeight);
+        out.armorRating = ReadFloat(doc, "armorRating", out.armorRating);
+        out.enchantmentAmount = ReadUInt16(doc, "enchantmentAmount", out.enchantmentAmount);
+        ReadString(doc, "maleWorldModel", out.maleWorldModel);
+        ReadString(doc, "femaleWorldModel", out.femaleWorldModel);
+        ReadString(doc, "maleFirstPersonModel", out.maleFirstPersonModel);
+        ReadString(doc, "femaleFirstPersonModel", out.femaleFirstPersonModel);
+        ReadString(doc, "maleInventoryIcon", out.maleInventoryIcon);
+        ReadString(doc, "femaleInventoryIcon", out.femaleInventoryIcon);
+        ReadString(doc, "maleMessageIcon", out.maleMessageIcon);
+        ReadString(doc, "femaleMessageIcon", out.femaleMessageIcon);
+        ReadFormRef(doc, "enchantment", out.enchantment);
+        ReadFormRef(doc, "equipSlot", out.equipSlot);
+        ReadFormRef(doc, "templateArmor", out.templateArmor);
+        ReadFormRef(doc, "pickupSound", out.pickupSound);
+        ReadFormRef(doc, "putdownSound", out.putdownSound);
+        ReadFormRef(doc, "blockBashImpactDataSet", out.blockBashImpactDataSet);
+        ReadFormRef(doc, "altBlockMaterialType", out.altBlockMaterialType);
+        ReadFormRef(doc, "maleSkinTexture", out.maleSkinTexture);
+        ReadFormRef(doc, "femaleSkinTexture", out.femaleSkinTexture);
+        ReadFormRef(doc, "maleSkinTextureSwapList", out.maleSkinTextureSwapList);
+        ReadFormRef(doc, "femaleSkinTextureSwapList", out.femaleSkinTextureSwapList);
+        ReadFormRef(doc, "footstepSet", out.footstepSet);
+        ReadFormRef(doc, "armorArtObject", out.armorArtObject);
+        if (doc.HasMember("armorAddons") && doc["armorAddons"].IsArray()) {
+            out.armorAddons.clear();
+            for (const auto& item : doc["armorAddons"].GetArray()) {
+                auto ref = ReadFormRefValue(item);
+                if (!ref.empty()) {
+                    out.armorAddons.push_back(std::move(ref));
+                }
+            }
+        }
+        if (doc.HasMember("keywords") && doc["keywords"].IsArray()) {
+            out.keywords.clear();
+            for (const auto& item : doc["keywords"].GetArray()) {
+                auto ref = ReadFormRefValue(item);
+                if (!ref.empty()) {
+                    out.keywords.push_back(std::move(ref));
+                }
+            }
+        }
+        if (doc.HasMember("additionalRaces") && doc["additionalRaces"].IsArray()) {
+            out.additionalRaces.clear();
+            for (const auto& item : doc["additionalRaces"].GetArray()) {
+                auto ref = ReadFormRefValue(item);
+                if (!ref.empty()) {
+                    out.additionalRaces.push_back(std::move(ref));
+                }
+            }
+        }
         if (doc.HasMember("fullName") && doc["fullName"].IsString()) {
             out.fullName = doc["fullName"].GetString();
         }
@@ -2204,6 +2842,31 @@ namespace {
         out.speedMult = ReadUInt16(doc, "speedMult", out.speedMult);
         out.dispositionBase = ReadUInt16(doc, "dispositionBase", out.dispositionBase);
         out.bleedoutOverride = ReadInt16(doc, "bleedoutOverride", out.bleedoutOverride);
+        if (doc.HasMember("aiAggression") && doc["aiAggression"].IsInt()) {
+            out.aiAggression = std::clamp(doc["aiAggression"].GetInt(), 0, 3);
+        }
+        if (doc.HasMember("aiConfidence") && doc["aiConfidence"].IsInt()) {
+            out.aiConfidence = std::clamp(doc["aiConfidence"].GetInt(), 0, 4);
+        }
+        out.aiEnergyLevel = ReadUInt8(doc, "aiEnergyLevel", out.aiEnergyLevel);
+        if (doc.HasMember("aiMorality") && doc["aiMorality"].IsInt()) {
+            out.aiMorality = std::clamp(doc["aiMorality"].GetInt(), 0, 3);
+        }
+        if (doc.HasMember("aiMood") && doc["aiMood"].IsInt()) {
+            out.aiMood = std::clamp(doc["aiMood"].GetInt(), 0, 7);
+        }
+        if (doc.HasMember("aiAssistance") && doc["aiAssistance"].IsInt()) {
+            out.aiAssistance = std::clamp(doc["aiAssistance"].GetInt(), 0, 2);
+        }
+        if (doc.HasMember("aiAggroRadiusBehavior") && doc["aiAggroRadiusBehavior"].IsBool()) {
+            out.aiAggroRadiusBehavior = doc["aiAggroRadiusBehavior"].GetBool();
+        }
+        out.aiAggroRadiusWarn = ReadUInt16(doc, "aiAggroRadiusWarn", out.aiAggroRadiusWarn);
+        out.aiAggroRadiusWarnAndAttack = ReadUInt16(doc, "aiAggroRadiusWarnAndAttack", out.aiAggroRadiusWarnAndAttack);
+        out.aiAggroRadiusAttack = ReadUInt16(doc, "aiAggroRadiusAttack", out.aiAggroRadiusAttack);
+        if (doc.HasMember("aiNoSlowApproach") && doc["aiNoSlowApproach"].IsBool()) {
+            out.aiNoSlowApproach = doc["aiNoSlowApproach"].GetBool();
+        }
         ReadUInt8Array18(doc, "skills", out.skills);
         ReadUInt8Array18(doc, "skillOffsets", out.skillOffsets);
         ReadFloatArray19(doc, "faceMorphs", out.faceMorphs);
@@ -2213,6 +2876,7 @@ namespace {
         ReadRankedFormRefArray(doc, "factions", out.npcFactions);
         ReadRankedFormRefArray(doc, "perks", out.npcPerks);
         ReadFormRefArray(doc, "spells", out.spells);
+        ReadFormRefArray(doc, "packages", out.packages);
 
         return true;
     }
@@ -2275,6 +2939,44 @@ namespace Manager {
                 PushFormRef(pieces, allocator, piece);
             }
             doc.AddMember("outfitPieces", pieces, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::ArmorType || form.kind == DynamicForms::FormKind::Armor) {
+            doc.AddMember("bipedSlots", form.bipedSlots, allocator);
+            doc.AddMember("armorType", form.armorType, allocator);
+            AddString(doc, allocator, "maleWorldModel", form.maleWorldModel);
+            AddString(doc, allocator, "femaleWorldModel", form.femaleWorldModel);
+            AddString(doc, allocator, "maleFirstPersonModel", form.maleFirstPersonModel);
+            AddString(doc, allocator, "femaleFirstPersonModel", form.femaleFirstPersonModel);
+            AddFormRef(doc, allocator, "race", form.race);
+        }
+        if (form.kind == DynamicForms::FormKind::ArmorType) {
+            AddFormRef(doc, allocator, "maleSkinTexture", form.maleSkinTexture);
+            AddFormRef(doc, allocator, "femaleSkinTexture", form.femaleSkinTexture);
+            AddFormRef(doc, allocator, "maleSkinTextureSwapList", form.maleSkinTextureSwapList);
+            AddFormRef(doc, allocator, "femaleSkinTextureSwapList", form.femaleSkinTextureSwapList);
+            AddFormRef(doc, allocator, "footstepSet", form.footstepSet);
+            AddFormRef(doc, allocator, "armorArtObject", form.armorArtObject);
+            AddFormRefArray(doc, allocator, "additionalRaces", form.additionalRaces);
+        }
+        if (form.kind == DynamicForms::FormKind::Armor) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            doc.AddMember("armorValue", form.armorValue, allocator);
+            doc.AddMember("armorWeight", form.armorWeight, allocator);
+            doc.AddMember("armorRating", form.armorRating, allocator);
+            doc.AddMember("enchantmentAmount", form.enchantmentAmount, allocator);
+            AddString(doc, allocator, "maleInventoryIcon", form.maleInventoryIcon);
+            AddString(doc, allocator, "femaleInventoryIcon", form.femaleInventoryIcon);
+            AddString(doc, allocator, "maleMessageIcon", form.maleMessageIcon);
+            AddString(doc, allocator, "femaleMessageIcon", form.femaleMessageIcon);
+            AddFormRef(doc, allocator, "enchantment", form.enchantment);
+            AddFormRef(doc, allocator, "equipSlot", form.equipSlot);
+            AddFormRef(doc, allocator, "templateArmor", form.templateArmor);
+            AddFormRef(doc, allocator, "pickupSound", form.pickupSound);
+            AddFormRef(doc, allocator, "putdownSound", form.putdownSound);
+            AddFormRef(doc, allocator, "blockBashImpactDataSet", form.blockBashImpactDataSet);
+            AddFormRef(doc, allocator, "altBlockMaterialType", form.altBlockMaterialType);
+            AddFormRefArray(doc, allocator, "armorAddons", form.armorAddons);
+            AddFormRefArray(doc, allocator, "keywords", form.keywords);
         }
         if (form.kind == DynamicForms::FormKind::Color) {
             AddString(doc, allocator, "fullName", form.fullName);
@@ -2508,15 +3210,33 @@ namespace Manager {
             doc.AddMember("dispositionBase", static_cast<unsigned>(form.dispositionBase), allocator);
             doc.AddMember("bleedoutOverride", static_cast<int>(form.bleedoutOverride), allocator);
             doc.AddMember("soundLevel", form.soundLevel, allocator);
+            doc.AddMember("aiAggression", form.aiAggression, allocator);
+            doc.AddMember("aiConfidence", form.aiConfidence, allocator);
+            doc.AddMember("aiEnergyLevel", static_cast<unsigned>(form.aiEnergyLevel), allocator);
+            doc.AddMember("aiMorality", form.aiMorality, allocator);
+            doc.AddMember("aiMood", form.aiMood, allocator);
+            doc.AddMember("aiAssistance", form.aiAssistance, allocator);
+            doc.AddMember("aiAggroRadiusBehavior", form.aiAggroRadiusBehavior, allocator);
+            doc.AddMember("aiAggroRadiusWarn", static_cast<unsigned>(form.aiAggroRadiusWarn), allocator);
+            doc.AddMember("aiAggroRadiusWarnAndAttack", static_cast<unsigned>(form.aiAggroRadiusWarnAndAttack), allocator);
+            doc.AddMember("aiAggroRadiusAttack", static_cast<unsigned>(form.aiAggroRadiusAttack), allocator);
+            doc.AddMember("aiNoSlowApproach", form.aiNoSlowApproach, allocator);
             AddUInt8Array18(doc, allocator, "skills", form.skills);
             AddUInt8Array18(doc, allocator, "skillOffsets", form.skillOffsets);
-            AddFloatArray19(doc, allocator, "faceMorphs", form.faceMorphs);
-            AddIntArray4(doc, allocator, "faceParts", form.faceParts);
+            if (HasMeaningfulFaceMorphs(form)) {
+                AddFloatArray19(doc, allocator, "faceMorphs", form.faceMorphs);
+            }
+            if (HasMeaningfulFaceParts(form)) {
+                AddIntArray4(doc, allocator, "faceParts", form.faceParts);
+            }
             AddFormRefArray(doc, allocator, "headParts", form.headParts);
-            AddTintLayers(doc, allocator, form.tintLayers);
+            if (!form.tintLayers.empty()) {
+                AddTintLayers(doc, allocator, form.tintLayers);
+            }
             AddRankedFormRefArray(doc, allocator, "factions", form.npcFactions);
             AddRankedFormRefArray(doc, allocator, "perks", form.npcPerks);
             AddFormRefArray(doc, allocator, "spells", form.spells);
+            AddFormRefArray(doc, allocator, "packages", form.packages);
         }
         if (form.localId != 0) {
             doc.AddMember("localId", form.localId, allocator);
@@ -2598,13 +3318,8 @@ namespace Manager {
             return false;
         }
 
-        auto updatedForm = form;
-        if (!ResolveDPFForm(updatedForm)) {
-            return false;
-        }
-
-        updatedForm.dirty = true;
-        forms[index] = std::move(updatedForm);
+        forms[index] = form;
+        forms[index].dirty = true;
         return true;
     }
 
@@ -2646,6 +3361,138 @@ namespace Manager {
         return true;
     }
 
+    bool AddFormToPlayerInventory(const std::size_t index) {
+        if (index >= forms.size()) {
+            return false;
+        }
+        if (forms[index].dirty) {
+            logger::warn("Could not add '{}' to inventory: save the form before testing it.", forms[index].editorId);
+            return false;
+        }
+
+        const auto oldLocalId = forms[index].localId;
+        const bool configureBeforeTest = forms[index].kind == DynamicForms::FormKind::NPC;
+        auto* runtimeForm = ResolveDPFFormObject(forms[index], configureBeforeTest);
+        if (!runtimeForm) {
+            return false;
+        }
+        if (forms[index].localId != oldLocalId) {
+            SaveForm(forms[index]);
+        }
+
+        auto* boundObject = runtimeForm->As<RE::TESBoundObject>();
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (!boundObject || !player) {
+            logger::warn("Could not add '{}' to inventory: runtime form is not a bound object or player is unavailable.", forms[index].editorId);
+            return false;
+        }
+
+        player->AddObjectToContainer(boundObject, nullptr, 1, nullptr);
+        logger::info("Added dynamic form '{}' to player inventory.", forms[index].editorId);
+        return true;
+    }
+
+    bool SpawnFormAtPlayer(const std::size_t index) {
+        if (index >= forms.size()) {
+            return false;
+        }
+        if (forms[index].dirty) {
+            logger::warn("Could not spawn '{}': save the form before testing it.", forms[index].editorId);
+            return false;
+        }
+
+        const auto oldLocalId = forms[index].localId;
+        const bool configureBeforeTest = forms[index].kind == DynamicForms::FormKind::NPC;
+        auto* runtimeForm = ResolveDPFFormObject(forms[index], configureBeforeTest);
+        if (!runtimeForm) {
+            return false;
+        }
+        if (forms[index].localId != oldLocalId) {
+            SaveForm(forms[index]);
+        }
+
+        auto* boundObject = runtimeForm->As<RE::TESBoundObject>();
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (!boundObject || !player) {
+            logger::warn("Could not spawn '{}': runtime form is not a bound object or player is unavailable.", forms[index].editorId);
+            return false;
+        }
+
+        if (forms[index].kind == DynamicForms::FormKind::NPC) {
+            auto* npc = runtimeForm->As<RE::TESNPC>();
+            LogNPCSnapshot("Reference Lydia before DFG spawn", LookupLydiaNPC());
+            logger::info("Spawn debug for NPC '{}': runtimeForm={} boundObject={} npc={} formID={:08X} formType={} localId={:06X}",
+                forms[index].editorId,
+                fmt::ptr(runtimeForm),
+                fmt::ptr(boundObject),
+                fmt::ptr(npc),
+                runtimeForm->GetFormID(),
+                static_cast<std::uint32_t>(runtimeForm->GetFormType()),
+                forms[index].localId);
+            if (!npc) {
+                logger::warn("Spawn aborted for '{}': runtime form is not TESNPC.", forms[index].editorId);
+                return false;
+            }
+            LogNPCSnapshot("DFG dynamic before spawn", npc);
+            logger::info("Spawn debug for NPC '{}': race={} class={} voice={} skin={} defaultOutfit={} headParts={} headPartsPtr={} faceData={} tintLayersPtr={} flags={:08X} level={} health={} magicka={} stamina={}",
+                forms[index].editorId,
+                npc->race ? clib_util::editorID::get_editorID(npc->race) : "<null>",
+                npc->npcClass ? clib_util::editorID::get_editorID(npc->npcClass) : "<null>",
+                npc->voiceType ? clib_util::editorID::get_editorID(npc->voiceType) : "<null>",
+                npc->farSkin ? clib_util::editorID::get_editorID(npc->farSkin) : "<null>",
+                npc->defaultOutfit ? clib_util::editorID::get_editorID(npc->defaultOutfit) : "<null>",
+                static_cast<std::uint32_t>(npc->numHeadParts),
+                fmt::ptr(npc->headParts),
+                fmt::ptr(npc->faceData),
+                fmt::ptr(npc->tintLayers),
+                npc->actorData.actorBaseFlags.underlying(),
+                npc->actorData.level,
+                npc->playerSkills.health,
+                npc->playerSkills.magicka,
+                npc->playerSkills.stamina);
+            if (!npc->race) {
+                logger::warn("Spawn aborted for NPC '{}': race is null. Set a race before spawning.", forms[index].editorId);
+                return false;
+            }
+        }
+
+        logger::info("Calling PlaceObjectAtMe for dynamic form '{}' FormID={:08X}.", forms[index].editorId, runtimeForm->GetFormID());
+        const auto placed = player->PlaceObjectAtMe(boundObject, true);
+        if (!placed) {
+            logger::warn("PlaceObjectAtMe failed for dynamic form '{}'.", forms[index].editorId);
+            return false;
+        }
+
+        logger::info("Spawned dynamic form '{}' at player.", forms[index].editorId);
+        return true;
+    }
+
+    bool SpawnLydiaForDebug() {
+        auto* lydia = LookupLydiaNPC();
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (!lydia || !player) {
+            logger::warn("Could not run Lydia debug spawn: Lydia NPC or player is unavailable.");
+            return false;
+        }
+
+        LogNPCSnapshot("Lydia debug spawn", lydia);
+        auto* boundObject = lydia->As<RE::TESBoundObject>();
+        if (!boundObject) {
+            logger::warn("Could not run Lydia debug spawn: Lydia is not a TESBoundObject.");
+            return false;
+        }
+
+        logger::info("Calling PlaceObjectAtMe for Lydia debug NPC FormID={:08X}.", lydia->GetFormID());
+        const auto placed = player->PlaceObjectAtMe(boundObject, true);
+        if (!placed) {
+            logger::warn("PlaceObjectAtMe failed for Lydia debug NPC.");
+            return false;
+        }
+
+        logger::info("Spawned Lydia debug NPC at player.");
+        return true;
+    }
+
     bool HasEditorId(const std::string_view editorId) {
         return std::ranges::any_of(forms, [editorId](const DynamicForms::DynamicForm& form) {
             return form.editorId == editorId;
@@ -2664,17 +3511,30 @@ namespace Manager {
 
     void ApplyAllForms() {
         bool changed = false;
+        bool allApplied = true;
         for (auto& form : forms) {
             const auto oldLocalId = form.localId;
             if (ResolveDPFForm(form)) {
                 if (form.localId != oldLocalId) {
                     changed = true;
                 }
+            } else {
+                allApplied = false;
             }
         }
 
+        if (!allApplied) {
+            logger::warn("DynamicFormsGenerator load/apply did not finish because one or more forms could not be resolved through DPF. Loaded event will not be dispatched yet.");
+            return;
+        }
+
         if (changed) {
-            SaveAllForms(false);
+            if (!SaveAllForms(false)) {
+                logger::warn("DynamicFormsGenerator resolved forms but could not persist updated local IDs. Loaded event will not be dispatched.");
+                return;
+            }
+        } else {
+            ListManager::GetSingleton()->PopulateAllLists(true);
         }
         DispatchEvent(LOADED_EVENT, "All", static_cast<float>(forms.size()));
     }

@@ -41,6 +41,7 @@ public:
     }
 
     bool PopulateAllLists(bool forceRefresh = false);
+    [[nodiscard]] bool IsPopulated() const { return _isPopulated; }
 
     static std::string ToUTF8(std::string_view a_str);
     const std::vector<InternalFormInfo>& GetList(const std::string& typeName);
