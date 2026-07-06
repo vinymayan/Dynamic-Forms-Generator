@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -21,8 +22,11 @@
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
 #include <ranges>
 #include <set>
+#include <sqlite3.h>
+#include <unordered_map>
 
 namespace {
     std::vector<DynamicForms::DynamicForm> forms;
@@ -60,12 +64,30 @@ namespace {
         switch (kind) {
         case DynamicForms::FormKind::Keyword:
             return "Keyword";
+        case DynamicForms::FormKind::FormList:
+            return "FormList";
+        case DynamicForms::FormKind::EquipSlot:
+            return "EquipSlot";
+        case DynamicForms::FormKind::VoiceType:
+            return "VoiceType";
         case DynamicForms::FormKind::Outfit:
             return "Outfit";
         case DynamicForms::FormKind::ArmorType:
             return "ArmorType";
         case DynamicForms::FormKind::Armor:
             return "Armor";
+        case DynamicForms::FormKind::Book:
+            return "Book";
+        case DynamicForms::FormKind::Misc:
+            return "Misc";
+        case DynamicForms::FormKind::Key:
+            return "Key";
+        case DynamicForms::FormKind::SoulGem:
+            return "SoulGem";
+        case DynamicForms::FormKind::MaterialType:
+            return "MaterialType";
+        case DynamicForms::FormKind::Ammo:
+            return "Ammo";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -111,6 +133,15 @@ namespace {
         if (normalized == "keyword" || normalized == "kywd") {
             return DynamicForms::FormKind::Keyword;
         }
+        if (normalized == "formlist" || normalized == "flst") {
+            return DynamicForms::FormKind::FormList;
+        }
+        if (normalized == "equipslot" || normalized == "equp") {
+            return DynamicForms::FormKind::EquipSlot;
+        }
+        if (normalized == "voicetype" || normalized == "vtyp") {
+            return DynamicForms::FormKind::VoiceType;
+        }
         if (normalized == "outfit" || normalized == "otft") {
             return DynamicForms::FormKind::Outfit;
         }
@@ -119,6 +150,24 @@ namespace {
         }
         if (normalized == "armor" || normalized == "armo") {
             return DynamicForms::FormKind::Armor;
+        }
+        if (normalized == "book") {
+            return DynamicForms::FormKind::Book;
+        }
+        if (normalized == "misc" || normalized == "miscitem") {
+            return DynamicForms::FormKind::Misc;
+        }
+        if (normalized == "key" || normalized == "keym") {
+            return DynamicForms::FormKind::Key;
+        }
+        if (normalized == "soulgem" || normalized == "slgm") {
+            return DynamicForms::FormKind::SoulGem;
+        }
+        if (normalized == "materialtype" || normalized == "matt") {
+            return DynamicForms::FormKind::MaterialType;
+        }
+        if (normalized == "ammo") {
+            return DynamicForms::FormKind::Ammo;
         }
         if (normalized == "color" || normalized == "colorform" || normalized == "clfm") {
             return DynamicForms::FormKind::Color;
@@ -447,12 +496,30 @@ namespace {
         switch (kind) {
         case DynamicForms::FormKind::Keyword:
             return static_cast<std::uint32_t>(RE::FormType::Keyword);
+        case DynamicForms::FormKind::FormList:
+            return static_cast<std::uint32_t>(RE::FormType::FormList);
+        case DynamicForms::FormKind::EquipSlot:
+            return static_cast<std::uint32_t>(RE::FormType::EquipSlot);
+        case DynamicForms::FormKind::VoiceType:
+            return static_cast<std::uint32_t>(RE::FormType::VoiceType);
         case DynamicForms::FormKind::Outfit:
             return static_cast<std::uint32_t>(RE::FormType::Outfit);
         case DynamicForms::FormKind::ArmorType:
             return static_cast<std::uint32_t>(RE::FormType::Armature);
         case DynamicForms::FormKind::Armor:
             return static_cast<std::uint32_t>(RE::FormType::Armor);
+        case DynamicForms::FormKind::Book:
+            return static_cast<std::uint32_t>(RE::FormType::Book);
+        case DynamicForms::FormKind::Misc:
+            return static_cast<std::uint32_t>(RE::FormType::Misc);
+        case DynamicForms::FormKind::Key:
+            return static_cast<std::uint32_t>(RE::FormType::KeyMaster);
+        case DynamicForms::FormKind::SoulGem:
+            return static_cast<std::uint32_t>(RE::FormType::SoulGem);
+        case DynamicForms::FormKind::MaterialType:
+            return static_cast<std::uint32_t>(RE::FormType::MaterialType);
+        case DynamicForms::FormKind::Ammo:
+            return static_cast<std::uint32_t>(RE::FormType::Ammo);
         case DynamicForms::FormKind::Color:
             return static_cast<std::uint32_t>(RE::FormType::ColorForm);
         case DynamicForms::FormKind::ArtObject:
@@ -605,6 +672,197 @@ namespace {
             return current;
         }
         return resolved;
+    }
+
+    void ApplyKeywords(RE::BGSKeywordForm& keywordForm, const std::vector<DynamicForms::FormRef>& refs) {
+        std::vector<RE::BGSKeyword*> keywords;
+        for (const auto& keywordRef : refs) {
+            if (auto* keyword = ResolveAs<RE::BGSKeyword>(keywordRef)) {
+                keywords.push_back(keyword);
+            }
+        }
+        while (keywordForm.GetNumKeywords() > 0) {
+            keywordForm.RemoveKeyword(static_cast<std::uint32_t>(0));
+        }
+        keywordForm.AddKeywords(keywords);
+    }
+
+    void ApplyPickupPutdownSounds(RE::BGSPickupPutdownSounds& sounds, const DynamicForms::DynamicForm& form) {
+        sounds.pickupSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.pickupSound);
+        sounds.putdownSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.putdownSound);
+    }
+
+    void ApplyInventoryIcons(RE::TESIcon& inventoryIcon, RE::BGSMessageIcon& messageIcon, const DynamicForms::DynamicForm& form) {
+        SetIconIfPresent(inventoryIcon, form.inventoryIcon);
+        SetIconIfPresent(messageIcon.icon, form.messageIcon);
+    }
+
+    void ApplyMiscLikeItem(RE::TESObjectMISC& item, const DynamicForms::DynamicForm& form) {
+        item.SetFormEditorID(form.editorId.c_str());
+        item.fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        item.SetModel(form.modelPath.c_str());
+        item.value = form.itemValue;
+        item.weight = form.itemWeight;
+        ApplyInventoryIcons(static_cast<RE::TESIcon&>(item), static_cast<RE::BGSMessageIcon&>(item), form);
+        ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(item), form);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(item), form.keywords);
+    }
+
+    bool ConfigureFormList(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* list = tesForm ? tesForm->As<RE::BGSListForm>() : nullptr;
+        if (!list) {
+            logger::warn("Dynamic form '{}' is not a BGSListForm", form.editorId);
+            return false;
+        }
+
+        list->SetFormEditorID(form.editorId.c_str());
+        list->forms.clear();
+        for (const auto& itemRef : form.formListItems) {
+            if (auto* item = ResolveConfigForm(itemRef)) {
+                list->forms.push_back(item);
+            } else {
+                logger::warn("Form list '{}' item '{}' could not be resolved.", form.editorId, itemRef.Display());
+            }
+        }
+        logger::info("Configured form list '{}' with {} forms.", form.editorId, list->forms.size());
+        return true;
+    }
+
+    bool ConfigureEquipSlot(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* equipSlot = tesForm ? tesForm->As<RE::BGSEquipSlot>() : nullptr;
+        if (!equipSlot) {
+            logger::warn("Dynamic form '{}' is not a BGSEquipSlot", form.editorId);
+            return false;
+        }
+
+        equipSlot->SetFormEditorID(form.editorId.c_str());
+        equipSlot->flags = static_cast<RE::BGSEquipSlot::Flag>(form.equipSlotFlags);
+        equipSlot->parentSlots.clear();
+        for (const auto& parentRef : form.equipSlotParents) {
+            if (auto* parent = ResolveAs<RE::BGSEquipSlot>(parentRef)) {
+                equipSlot->parentSlots.push_back(parent);
+            }
+        }
+        return true;
+    }
+
+    bool ConfigureVoiceType(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* voiceType = tesForm ? tesForm->As<RE::BGSVoiceType>() : nullptr;
+        if (!voiceType) {
+            logger::warn("Dynamic form '{}' is not a BGSVoiceType", form.editorId);
+            return false;
+        }
+
+        voiceType->SetFormEditorID(form.editorId.c_str());
+        voiceType->data.flags = RE::VOICE_TYPE_DATA::Flag::kNone;
+        if (form.voiceTypeAllowDefaultDialogue) {
+            voiceType->data.flags.set(RE::VOICE_TYPE_DATA::Flag::kAllowDefaultDialogue);
+        }
+        if (form.voiceTypeFemale) {
+            voiceType->data.flags.set(RE::VOICE_TYPE_DATA::Flag::kFemale);
+        }
+        return true;
+    }
+
+    bool ConfigureMisc(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* misc = tesForm ? tesForm->As<RE::TESObjectMISC>() : nullptr;
+        if (!misc) {
+            logger::warn("Dynamic form '{}' is not a TESObjectMISC", form.editorId);
+            return false;
+        }
+        ApplyMiscLikeItem(*misc, form);
+        return true;
+    }
+
+    bool ConfigureKey(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* key = tesForm ? tesForm->As<RE::TESKey>() : nullptr;
+        if (!key) {
+            logger::warn("Dynamic form '{}' is not a TESKey", form.editorId);
+            return false;
+        }
+        ApplyMiscLikeItem(*key, form);
+        return true;
+    }
+
+    bool ConfigureSoulGem(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* soulGem = tesForm ? tesForm->As<RE::TESSoulGem>() : nullptr;
+        if (!soulGem) {
+            logger::warn("Dynamic form '{}' is not a TESSoulGem", form.editorId);
+            return false;
+        }
+        ApplyMiscLikeItem(*soulGem, form);
+        soulGem->linkedSoulGem = ResolveAs<RE::TESSoulGem>(form.linkedSoulGem);
+        soulGem->currentSoul = static_cast<RE::SOUL_LEVEL>(form.currentSoul);
+        soulGem->soulCapacity = static_cast<RE::SOUL_LEVEL>(form.soulCapacity);
+        return true;
+    }
+
+    bool ConfigureMaterialType(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* material = tesForm ? tesForm->As<RE::BGSMaterialType>() : nullptr;
+        if (!material) {
+            logger::warn("Dynamic form '{}' is not a BGSMaterialType", form.editorId);
+            return false;
+        }
+
+        material->SetFormEditorID(form.editorId.c_str());
+        material->parentType = ResolveAs<RE::BGSMaterialType>(form.materialParent);
+        material->materialName = form.materialName.empty() ? form.editorId.c_str() : form.materialName.c_str();
+        material->materialID = static_cast<RE::MATERIAL_ID>(form.materialId);
+        material->materialColor = RE::NiColor(form.red / 255.0F, form.green / 255.0F, form.blue / 255.0F);
+        material->buoyancy = form.buoyancy;
+        material->flags = static_cast<RE::BGSMaterialType::FLAG>(form.flags);
+        material->havokImpactDataSet = ResolveAs<RE::BGSImpactDataSet>(form.havokImpactDataSet);
+        return true;
+    }
+
+    bool ConfigureBook(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* book = tesForm ? tesForm->As<RE::TESObjectBOOK>() : nullptr;
+        if (!book) {
+            logger::warn("Dynamic form '{}' is not a TESObjectBOOK", form.editorId);
+            return false;
+        }
+
+        book->SetFormEditorID(form.editorId.c_str());
+        book->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        book->SetModel(form.modelPath.c_str());
+        book->value = form.itemValue;
+        book->weight = form.itemWeight;
+        book->data.flags = static_cast<RE::OBJ_BOOK::Flag>(form.bookFlags);
+        book->data.type = static_cast<RE::OBJ_BOOK::Type>(form.bookType);
+        if (!form.teachesSpell.empty()) {
+            book->data.teaches.spell = ResolveAs<RE::SpellItem>(form.teachesSpell);
+        } else {
+            book->data.teaches.actorValueToAdvance = static_cast<RE::ActorValue>(form.teachesActorValue);
+        }
+        ApplyInventoryIcons(static_cast<RE::TESIcon&>(*book), static_cast<RE::BGSMessageIcon&>(*book), form);
+        ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*book), form);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*book), form.keywords);
+        return true;
+    }
+
+    bool ConfigureAmmo(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* ammo = tesForm ? tesForm->As<RE::TESAmmo>() : nullptr;
+        if (!ammo) {
+            logger::warn("Dynamic form '{}' is not a TESAmmo", form.editorId);
+            return false;
+        }
+
+        ammo->SetFormEditorID(form.editorId.c_str());
+        ammo->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        ammo->SetModel(form.modelPath.c_str());
+        ammo->value = form.itemValue;
+        auto& data = ammo->GetRuntimeData().data;
+        data.projectile = ResolveAs<RE::BGSProjectile>(form.projectile);
+        data.damage = form.damage;
+        data.flags = static_cast<RE::AMMO_DATA::Flag>(form.ammoFlags);
+        ApplyInventoryIcons(static_cast<RE::TESIcon&>(*ammo), static_cast<RE::BGSMessageIcon&>(*ammo), form);
+        if (auto* sounds = ammo->AsPickupPutdownSoundsForm()) {
+            ApplyPickupPutdownSounds(*sounds, form);
+        }
+        if (auto* keywordForm = ammo->AsKeywordForm()) {
+            ApplyKeywords(*keywordForm, form.keywords);
+        }
+        return true;
     }
 
     bool ConfigureArmorType(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
@@ -1787,7 +2045,7 @@ namespace {
         SetAIDataBits(*npc, form);
 
         npc->aiPackages.packages.clear();
-        std::size_t packageIndex = 0;
+        RE::BSSimpleList<RE::TESPackage*>::size_type packageIndex = 0;
         for (const auto& packageRef : form.packages) {
             auto* package = ResolveAs<RE::TESPackage>(packageRef);
             if (!package) {
@@ -1991,6 +2249,15 @@ namespace {
         if (form.kind == DynamicForms::FormKind::Global) {
             return ConfigureGlobal(tesForm, form);
         }
+        if (form.kind == DynamicForms::FormKind::FormList) {
+            return ConfigureFormList(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::EquipSlot) {
+            return ConfigureEquipSlot(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::VoiceType) {
+            return ConfigureVoiceType(tesForm, form);
+        }
         if (form.kind == DynamicForms::FormKind::Outfit) {
             return ConfigureOutfit(tesForm, form);
         }
@@ -1999,6 +2266,24 @@ namespace {
         }
         if (form.kind == DynamicForms::FormKind::Armor) {
             return ConfigureArmor(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Book) {
+            return ConfigureBook(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Misc) {
+            return ConfigureMisc(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Key) {
+            return ConfigureKey(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::SoulGem) {
+            return ConfigureSoulGem(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::MaterialType) {
+            return ConfigureMaterialType(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Ammo) {
+            return ConfigureAmmo(tesForm, form);
         }
         if (form.kind == DynamicForms::FormKind::Color) {
             return ConfigureColor(tesForm, form);
@@ -2164,7 +2449,7 @@ namespace {
     }
 
     void ReadColorMembers(
-        const rapidjson::Value& doc,
+        const rapidjson::Document& doc,
         const char* prefix,
         std::uint8_t& red,
         std::uint8_t& green,
@@ -2449,18 +2734,14 @@ namespace {
         array.PushBack(item, allocator);
     }
 
-    bool ReadFormFile(const std::filesystem::path& path, DynamicForms::DynamicForm& out) {
-        std::ifstream stream(path);
-        if (!stream.is_open()) {
-            logger::warn("Could not open dynamic form file: {}", path.string());
-            return false;
-        }
-
-        rapidjson::IStreamWrapper wrapper(stream);
-        rapidjson::Document doc;
-        doc.ParseStream(wrapper);
-        if (doc.HasParseError() || !doc.IsObject()) {
-            logger::warn("Invalid dynamic form JSON: {}", path.string());
+    bool ReadFormDocument(
+        const rapidjson::Document& doc,
+        const std::string& sourceLabel,
+        const std::string& fallbackEditorId,
+        DynamicForms::DynamicForm& out)
+    {
+        if (!doc.IsObject()) {
+            logger::warn("Invalid dynamic form JSON: {}", sourceLabel);
             return false;
         }
 
@@ -2471,11 +2752,29 @@ namespace {
         if (doc.HasMember("editorId") && doc["editorId"].IsString()) {
             out.editorId = doc["editorId"].GetString();
         } else {
-            out.editorId = path.stem().string();
+            out.editorId = fallbackEditorId;
         }
 
         if (out.editorId.empty()) {
             return false;
+        }
+
+        if (doc.HasMember("packageName") && doc["packageName"].IsString()) {
+            out.packageName = doc["packageName"].GetString();
+        }
+        if (out.packageName.empty()) {
+            out.packageName = Manager::DEFAULT_PACKAGE_NAME;
+        }
+        if (doc.HasMember("basePackageName") && doc["basePackageName"].IsString()) {
+            out.basePackageName = doc["basePackageName"].GetString();
+        }
+        if (doc.HasMember("patchPackageNames") && doc["patchPackageNames"].IsArray()) {
+            out.patchPackageNames.clear();
+            for (const auto& package : doc["patchPackageNames"].GetArray()) {
+                if (package.IsString() && package.GetStringLength() > 0) {
+                    out.patchPackageNames.emplace_back(package.GetString());
+                }
+            }
         }
 
         const std::string_view rawKind = doc["formKind"].GetString();
@@ -2489,7 +2788,7 @@ namespace {
             out.kind = *sourceKind;
             if (!parsedKind || *parsedKind != *sourceKind) {
                 logger::warn("JSON '{}' has formKind '{}' but sourceSignature '{}'; using source signature kind '{}'.",
-                    path.string(),
+                    sourceLabel,
                     rawKind,
                     doc["sourceSignature"].GetString(),
                     ToString(*sourceKind));
@@ -2498,18 +2797,18 @@ namespace {
             out.kind = *parsedKind;
         } else if (LooksLikeEffectShaderJson(doc)) {
             logger::warn("JSON '{}' has unknown formKind '{}' but looks like an EffectShader; using EffectShader.",
-                path.string(),
+                sourceLabel,
                 rawKind);
             out.kind = DynamicForms::FormKind::EffectShader;
         } else {
             logger::warn("Unknown formKind '{}' in '{}'; skipping file to avoid rewriting it as Global.",
                 rawKind,
-                path.string());
+                sourceLabel);
             return false;
         }
 
         if (out.kind == DynamicForms::FormKind::Global && LooksLikeEffectShaderJson(doc)) {
-            logger::warn("JSON '{}' looks like an EffectShader but formKind is Global; using EffectShader.", path.string());
+            logger::warn("JSON '{}' looks like an EffectShader but formKind is Global; using EffectShader.", sourceLabel);
             out.kind = DynamicForms::FormKind::EffectShader;
         }
         if (doc.HasMember("globalType") && doc["globalType"].IsString()) {
@@ -2521,6 +2820,38 @@ namespace {
         if (doc.HasMember("localId") && doc["localId"].IsUint()) {
             out.localId = doc["localId"].GetUint();
         }
+        ReadFormRefArray(doc, "formListItems", out.formListItems);
+        ReadFormRefArray(doc, "equipSlotParents", out.equipSlotParents);
+        out.equipSlotFlags = ReadUInt32(doc, "equipSlotFlags", out.equipSlotFlags);
+        if (doc.HasMember("voiceTypeAllowDefaultDialogue") && doc["voiceTypeAllowDefaultDialogue"].IsBool()) {
+            out.voiceTypeAllowDefaultDialogue = doc["voiceTypeAllowDefaultDialogue"].GetBool();
+        }
+        if (doc.HasMember("voiceTypeFemale") && doc["voiceTypeFemale"].IsBool()) {
+            out.voiceTypeFemale = doc["voiceTypeFemale"].GetBool();
+        }
+        if (doc.HasMember("itemValue") && doc["itemValue"].IsInt()) {
+            out.itemValue = doc["itemValue"].GetInt();
+        }
+        out.itemWeight = ReadFloat(doc, "itemWeight", out.itemWeight);
+        ReadString(doc, "inventoryIcon", out.inventoryIcon);
+        ReadString(doc, "messageIcon", out.messageIcon);
+        ReadString(doc, "materialName", out.materialName);
+        ReadFormRef(doc, "materialParent", out.materialParent);
+        ReadFormRef(doc, "havokImpactDataSet", out.havokImpactDataSet);
+        out.materialId = ReadUInt32(doc, "materialId", out.materialId);
+        out.buoyancy = ReadFloat(doc, "buoyancy", out.buoyancy);
+        ReadFormRef(doc, "projectile", out.projectile);
+        out.damage = ReadFloat(doc, "damage", out.damage);
+        out.ammoFlags = ReadUInt32(doc, "ammoFlags", out.ammoFlags);
+        out.bookFlags = ReadUInt32(doc, "bookFlags", out.bookFlags);
+        out.bookType = ReadUInt32(doc, "bookType", out.bookType);
+        ReadFormRef(doc, "teachesSpell", out.teachesSpell);
+        if (doc.HasMember("teachesActorValue") && doc["teachesActorValue"].IsInt()) {
+            out.teachesActorValue = doc["teachesActorValue"].GetInt();
+        }
+        ReadFormRef(doc, "linkedSoulGem", out.linkedSoulGem);
+        out.currentSoul = ReadUInt32(doc, "currentSoul", out.currentSoul);
+        out.soulCapacity = ReadUInt32(doc, "soulCapacity", out.soulCapacity);
         if (doc.HasMember("outfitPieces") && doc["outfitPieces"].IsArray()) {
             out.outfitPieces.clear();
             for (const auto& piece : doc["outfitPieces"].GetArray()) {
@@ -2880,6 +3211,381 @@ namespace {
 
         return true;
     }
+
+    bool ReadFormPayload(const std::string& payload, const std::string& sourceLabel, const std::string& fallbackEditorId, DynamicForms::DynamicForm& out) {
+        rapidjson::Document doc;
+        doc.Parse(payload.c_str());
+        if (doc.HasParseError()) {
+            logger::warn("Invalid dynamic form payload: {}", sourceLabel);
+            return false;
+        }
+        return ReadFormDocument(doc, sourceLabel, fallbackEditorId, out);
+    }
+
+    bool ReadFormFile(const std::filesystem::path& path, DynamicForms::DynamicForm& out) {
+        std::ifstream stream(path);
+        if (!stream.is_open()) {
+            logger::warn("Could not open dynamic form file: {}", path.string());
+            return false;
+        }
+
+        rapidjson::IStreamWrapper wrapper(stream);
+        rapidjson::Document doc;
+        doc.ParseStream(wrapper);
+        if (doc.HasParseError()) {
+            logger::warn("Invalid dynamic form JSON: {}", path.string());
+            return false;
+        }
+        return ReadFormDocument(doc, path.string(), path.stem().string(), out);
+    }
+
+    std::string EffectivePackageName(const DynamicForms::DynamicForm& form) {
+        return form.packageName.empty() ? Manager::DEFAULT_PACKAGE_NAME : form.packageName;
+    }
+
+    std::string SanitizePackageFolder(std::string name) {
+        for (char& ch : name) {
+            const auto c = static_cast<unsigned char>(ch);
+            if (std::isalnum(c) == 0 && ch != '_' && ch != '-' && ch != '.') {
+                ch = '_';
+            }
+        }
+        return name.empty() ? "Local_Forms" : name;
+    }
+
+    std::filesystem::path PackageDirectory(const std::string_view packageName) {
+        return std::filesystem::path(Manager::PACKAGES_DIR) / SanitizePackageFolder(std::string(packageName));
+    }
+
+    std::filesystem::path PackageManifestPath(const std::string_view packageName) {
+        return PackageDirectory(packageName) / "manifest.json";
+    }
+
+    std::filesystem::path PackageDbPath(const std::string_view packageName) {
+        return PackageDirectory(packageName) / "package.db";
+    }
+
+    std::string JsonString(const rapidjson::Document& doc) {
+        rapidjson::StringBuffer buffer;
+        rapidjson::PrettyWriter writer(buffer);
+        doc.Accept(writer);
+        return buffer.GetString();
+    }
+
+    struct SqliteDb
+    {
+        sqlite3* handle{ nullptr };
+
+        ~SqliteDb()
+        {
+            if (handle) {
+                sqlite3_close(handle);
+            }
+        }
+    };
+
+    struct SqliteStatement
+    {
+        sqlite3_stmt* handle{ nullptr };
+
+        ~SqliteStatement()
+        {
+            if (handle) {
+                sqlite3_finalize(handle);
+            }
+        }
+    };
+
+    bool ExecSql(sqlite3* db, const char* sql, const std::string_view context) {
+        char* error = nullptr;
+        const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &error);
+        if (rc == SQLITE_OK) {
+            return true;
+        }
+
+        logger::warn("SQLite exec failed in '{}': {}", context, error ? error : sqlite3_errmsg(db));
+        sqlite3_free(error);
+        return false;
+    }
+
+    bool PrepareSql(sqlite3* db, const char* sql, SqliteStatement& statement, const std::string_view context) {
+        const int rc = sqlite3_prepare_v2(db, sql, -1, &statement.handle, nullptr);
+        if (rc == SQLITE_OK) {
+            return true;
+        }
+
+        logger::warn("SQLite prepare failed in '{}': {}", context, sqlite3_errmsg(db));
+        return false;
+    }
+
+    bool WritePackageManifest(const std::string_view packageName) {
+        std::error_code ec;
+        std::filesystem::create_directories(PackageDirectory(packageName), ec);
+        if (ec) {
+            logger::warn("Could not create package directory '{}': {}", PackageDirectory(packageName).string(), ec.message());
+            return false;
+        }
+
+        const auto manifestPath = PackageManifestPath(packageName);
+        if (std::filesystem::exists(manifestPath)) {
+            return true;
+        }
+
+        rapidjson::Document doc;
+        doc.SetObject();
+        auto& allocator = doc.GetAllocator();
+        doc.AddMember("schemaVersion", 1, allocator);
+        doc.AddMember("displayName", rapidjson::Value(std::string(packageName).c_str(), allocator), allocator);
+        doc.AddMember("enabled", true, allocator);
+        doc.AddMember("priority", 0, allocator);
+        doc.AddMember("database", "package.db", allocator);
+
+        std::ofstream stream(manifestPath);
+        if (!stream.is_open()) {
+            logger::warn("Could not write package manifest '{}'.", manifestPath.string());
+            return false;
+        }
+
+        rapidjson::OStreamWrapper wrapper(stream);
+        rapidjson::PrettyWriter writer(wrapper);
+        doc.Accept(writer);
+        return true;
+    }
+
+    bool OpenPackageDb(const std::string_view packageName, SqliteDb& db) {
+        if (!WritePackageManifest(packageName)) {
+            return false;
+        }
+
+        const auto dbPath = PackageDbPath(packageName);
+        const int rc = sqlite3_open_v2(dbPath.string().c_str(), &db.handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr);
+        if (rc != SQLITE_OK) {
+            logger::warn("Could not open package database '{}': {}", dbPath.string(), db.handle ? sqlite3_errmsg(db.handle) : "unknown error");
+            return false;
+        }
+
+        return ExecSql(db.handle, "PRAGMA journal_mode=WAL;", packageName) &&
+            ExecSql(db.handle, "PRAGMA synchronous=NORMAL;", packageName) &&
+            ExecSql(db.handle,
+                "CREATE TABLE IF NOT EXISTS forms ("
+                "editor_id TEXT PRIMARY KEY NOT NULL,"
+                "form_kind TEXT NOT NULL,"
+                "local_id INTEGER NOT NULL DEFAULT 0,"
+                "payload TEXT NOT NULL,"
+                "updated_at INTEGER NOT NULL DEFAULT (unixepoch())"
+                ");",
+                packageName) &&
+            ExecSql(db.handle,
+                "CREATE TABLE IF NOT EXISTS patches ("
+                "target_editor_id TEXT PRIMARY KEY NOT NULL,"
+                "target_package TEXT NOT NULL,"
+                "form_kind TEXT NOT NULL,"
+                "payload TEXT NOT NULL,"
+                "updated_at INTEGER NOT NULL DEFAULT (unixepoch())"
+                ");",
+                packageName);
+    }
+
+    bool PersistFormDocument(const DynamicForms::DynamicForm& form, const rapidjson::Document& doc) {
+        const bool saveAsPatch = !form.patchPackageNames.empty();
+        const std::string packageName = saveAsPatch ? form.patchPackageNames.back() : EffectivePackageName(form);
+
+        SqliteDb db;
+        if (!OpenPackageDb(packageName, db)) {
+            return false;
+        }
+
+        const auto payload = JsonString(doc);
+        SqliteStatement statement;
+        if (saveAsPatch) {
+            if (!PrepareSql(db.handle,
+                    "INSERT INTO patches(target_editor_id, target_package, form_kind, payload, updated_at) "
+                    "VALUES(?1, ?2, ?3, ?4, unixepoch()) "
+                    "ON CONFLICT(target_editor_id) DO UPDATE SET "
+                    "target_package=excluded.target_package, form_kind=excluded.form_kind, payload=excluded.payload, updated_at=excluded.updated_at;",
+                    statement,
+                    packageName)) {
+                return false;
+            }
+            sqlite3_bind_text(statement.handle, 1, form.editorId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(statement.handle, 2, EffectivePackageName(form).c_str(), -1, SQLITE_TRANSIENT);
+            const auto formKind = ToString(form.kind);
+            sqlite3_bind_text(statement.handle, 3, formKind.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(statement.handle, 4, payload.c_str(), -1, SQLITE_TRANSIENT);
+        } else {
+            if (!PrepareSql(db.handle,
+                    "INSERT INTO forms(editor_id, form_kind, local_id, payload, updated_at) "
+                    "VALUES(?1, ?2, ?3, ?4, unixepoch()) "
+                    "ON CONFLICT(editor_id) DO UPDATE SET "
+                    "form_kind=excluded.form_kind, local_id=excluded.local_id, payload=excluded.payload, updated_at=excluded.updated_at;",
+                    statement,
+                    packageName)) {
+                return false;
+            }
+            sqlite3_bind_text(statement.handle, 1, form.editorId.c_str(), -1, SQLITE_TRANSIENT);
+            const auto formKind = ToString(form.kind);
+            sqlite3_bind_text(statement.handle, 2, formKind.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(statement.handle, 3, form.localId);
+            sqlite3_bind_text(statement.handle, 4, payload.c_str(), -1, SQLITE_TRANSIENT);
+        }
+
+        const int rc = sqlite3_step(statement.handle);
+        if (rc == SQLITE_DONE) {
+            return true;
+        }
+
+        logger::warn("Could not persist dynamic form '{}' in package '{}': {}", form.editorId, packageName, sqlite3_errmsg(db.handle));
+        return false;
+    }
+
+    bool DeleteStoredForm(const DynamicForms::DynamicForm& form) {
+        bool ok = true;
+        std::vector<std::string> packages{ EffectivePackageName(form) };
+        packages.insert(packages.end(), form.patchPackageNames.begin(), form.patchPackageNames.end());
+
+        for (const auto& package : packages) {
+            SqliteDb db;
+            if (!OpenPackageDb(package, db)) {
+                ok = false;
+                continue;
+            }
+
+            SqliteStatement formStatement;
+            if (PrepareSql(db.handle, "DELETE FROM forms WHERE editor_id=?1;", formStatement, package)) {
+                sqlite3_bind_text(formStatement.handle, 1, form.editorId.c_str(), -1, SQLITE_TRANSIENT);
+                ok = sqlite3_step(formStatement.handle) == SQLITE_DONE && ok;
+            }
+
+            SqliteStatement patchStatement;
+            if (PrepareSql(db.handle, "DELETE FROM patches WHERE target_editor_id=?1;", patchStatement, package)) {
+                sqlite3_bind_text(patchStatement.handle, 1, form.editorId.c_str(), -1, SQLITE_TRANSIENT);
+                ok = sqlite3_step(patchStatement.handle) == SQLITE_DONE && ok;
+            }
+        }
+
+        return ok;
+    }
+
+    std::vector<std::string> DiscoverPackageNames() {
+        std::vector<std::string> packages;
+        packages.emplace_back(Manager::DEFAULT_PACKAGE_NAME);
+
+        std::error_code ec;
+        std::filesystem::create_directories(Manager::PACKAGES_DIR, ec);
+        if (ec) {
+            logger::warn("Could not create packages directory '{}': {}", Manager::PACKAGES_DIR, ec.message());
+            return packages;
+        }
+
+        for (const auto& entry : std::filesystem::directory_iterator(Manager::PACKAGES_DIR, ec)) {
+            if (ec) {
+                logger::warn("Could not enumerate packages directory '{}': {}", Manager::PACKAGES_DIR, ec.message());
+                break;
+            }
+            if (!entry.is_directory()) {
+                continue;
+            }
+
+            const auto manifestPath = entry.path() / "manifest.json";
+            if (!std::filesystem::exists(manifestPath)) {
+                continue;
+            }
+
+            std::ifstream stream(manifestPath);
+            rapidjson::IStreamWrapper wrapper(stream);
+            rapidjson::Document doc;
+            doc.ParseStream(wrapper);
+            if (doc.HasParseError() || !doc.IsObject()) {
+                continue;
+            }
+            if (doc.HasMember("enabled") && doc["enabled"].IsBool() && !doc["enabled"].GetBool()) {
+                continue;
+            }
+            if (doc.HasMember("displayName") && doc["displayName"].IsString()) {
+                const std::string displayName = doc["displayName"].GetString();
+                if (!displayName.empty() && std::ranges::find(packages, displayName) == packages.end()) {
+                    packages.push_back(displayName);
+                }
+            }
+        }
+
+        return packages;
+    }
+
+    void AddOrReplaceResolvedForm(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
+        if (form.packageName.empty()) {
+            form.packageName = sourcePackage;
+        }
+        const auto existing = std::ranges::find_if(forms, [&form](const DynamicForms::DynamicForm& current) {
+            return current.editorId == form.editorId;
+        });
+        if (existing == forms.end()) {
+            forms.push_back(std::move(form));
+            return;
+        }
+
+        const auto localId = existing->localId;
+        const auto packageName = existing->packageName;
+        auto patchPackageNames = existing->patchPackageNames;
+        if (!sourcePackage.empty() && sourcePackage != packageName && std::ranges::find(patchPackageNames, sourcePackage) == patchPackageNames.end()) {
+            patchPackageNames.push_back(sourcePackage);
+        }
+
+        form.localId = localId;
+        form.packageName = packageName;
+        form.patchPackageNames = std::move(patchPackageNames);
+        *existing = std::move(form);
+    }
+
+    void LoadPackageForms(const std::string& packageName) {
+        SqliteDb db;
+        if (!OpenPackageDb(packageName, db)) {
+            return;
+        }
+
+        SqliteStatement formsStatement;
+        if (PrepareSql(db.handle, "SELECT editor_id, payload FROM forms ORDER BY editor_id;", formsStatement, packageName)) {
+            while (sqlite3_step(formsStatement.handle) == SQLITE_ROW) {
+                const auto* editorText = reinterpret_cast<const char*>(sqlite3_column_text(formsStatement.handle, 0));
+                const auto* payloadText = reinterpret_cast<const char*>(sqlite3_column_text(formsStatement.handle, 1));
+                if (!editorText || !payloadText) {
+                    continue;
+                }
+
+                DynamicForms::DynamicForm form;
+                if (ReadFormPayload(payloadText, std::format("{}:{}", packageName, editorText), editorText, form)) {
+                    form.packageName = form.packageName.empty() ? packageName : form.packageName;
+                    AddOrReplaceResolvedForm(std::move(form), packageName);
+                }
+            }
+        }
+
+        SqliteStatement patchesStatement;
+        if (PrepareSql(db.handle, "SELECT target_editor_id, target_package, payload FROM patches ORDER BY target_editor_id;", patchesStatement, packageName)) {
+            while (sqlite3_step(patchesStatement.handle) == SQLITE_ROW) {
+                const auto* editorText = reinterpret_cast<const char*>(sqlite3_column_text(patchesStatement.handle, 0));
+                const auto* targetPackageText = reinterpret_cast<const char*>(sqlite3_column_text(patchesStatement.handle, 1));
+                const auto* payloadText = reinterpret_cast<const char*>(sqlite3_column_text(patchesStatement.handle, 2));
+                if (!editorText || !payloadText) {
+                    continue;
+                }
+
+                const auto existing = std::ranges::find_if(forms, [editorText](const DynamicForms::DynamicForm& current) {
+                    return current.editorId == editorText;
+                });
+                if (existing == forms.end()) {
+                    logger::warn("Patch '{}' in package '{}' was skipped because the target form does not exist.", editorText, packageName);
+                    continue;
+                }
+
+                DynamicForms::DynamicForm patch;
+                if (ReadFormPayload(payloadText, std::format("{} patch:{}", packageName, editorText), editorText, patch)) {
+                    patch.packageName = targetPackageText && targetPackageText[0] != '\0' ? targetPackageText : existing->packageName;
+                    AddOrReplaceResolvedForm(std::move(patch), packageName);
+                }
+            }
+        }
+    }
 }
 
 namespace Manager {
@@ -2890,13 +3596,17 @@ namespace Manager {
     void LoadForms() {
         forms.clear();
 
-        std::error_code ec;
-        std::filesystem::create_directories(FORMS_DIR, ec);
-        if (ec) {
-            logger::warn("Could not create forms directory '{}': {}", FORMS_DIR, ec.message());
+        const auto packageNames = DiscoverPackageNames();
+        for (const auto& packageName : packageNames) {
+            LoadPackageForms(packageName);
+        }
+
+        if (!forms.empty()) {
             return;
         }
 
+        std::error_code ec;
+        std::filesystem::create_directories(FORMS_DIR, ec);
         for (const auto& entry : std::filesystem::directory_iterator(FORMS_DIR, ec)) {
             if (ec) {
                 logger::warn("Could not enumerate forms directory '{}': {}", FORMS_DIR, ec.message());
@@ -2908,8 +3618,13 @@ namespace Manager {
 
             DynamicForms::DynamicForm form;
             if (ReadFormFile(entry.path(), form) && !HasEditorId(form.editorId)) {
+                form.packageName = Manager::DEFAULT_PACKAGE_NAME;
                 forms.push_back(std::move(form));
             }
+        }
+
+        for (const auto& form : forms) {
+            SaveForm(form);
         }
     }
 
@@ -2928,6 +3643,64 @@ namespace Manager {
         const auto formKind = ToString(form.kind);
         doc.AddMember("formKind", rapidjson::Value(formKind.c_str(), allocator), allocator);
         doc.AddMember("editorId", rapidjson::Value(form.editorId.c_str(), allocator), allocator);
+        AddString(doc, allocator, "packageName", EffectivePackageName(form));
+        AddString(doc, allocator, "basePackageName", form.basePackageName);
+        AddStringArray(doc, allocator, "patchPackageNames", form.patchPackageNames);
+        if (form.kind == DynamicForms::FormKind::FormList) {
+            AddFormRefArray(doc, allocator, "formListItems", form.formListItems);
+        }
+        if (form.kind == DynamicForms::FormKind::EquipSlot) {
+            AddFormRefArray(doc, allocator, "equipSlotParents", form.equipSlotParents);
+            doc.AddMember("equipSlotFlags", form.equipSlotFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::VoiceType) {
+            doc.AddMember("voiceTypeAllowDefaultDialogue", form.voiceTypeAllowDefaultDialogue, allocator);
+            doc.AddMember("voiceTypeFemale", form.voiceTypeFemale, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Book ||
+            form.kind == DynamicForms::FormKind::Misc ||
+            form.kind == DynamicForms::FormKind::Key ||
+            form.kind == DynamicForms::FormKind::SoulGem ||
+            form.kind == DynamicForms::FormKind::Ammo)
+        {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddString(doc, allocator, "modelPath", form.modelPath);
+            doc.AddMember("itemValue", form.itemValue, allocator);
+            doc.AddMember("itemWeight", form.itemWeight, allocator);
+            AddString(doc, allocator, "inventoryIcon", form.inventoryIcon);
+            AddString(doc, allocator, "messageIcon", form.messageIcon);
+            AddFormRef(doc, allocator, "pickupSound", form.pickupSound);
+            AddFormRef(doc, allocator, "putdownSound", form.putdownSound);
+            AddFormRefArray(doc, allocator, "keywords", form.keywords);
+        }
+        if (form.kind == DynamicForms::FormKind::Book) {
+            AddString(doc, allocator, "description", form.description);
+            doc.AddMember("bookFlags", form.bookFlags, allocator);
+            doc.AddMember("bookType", form.bookType, allocator);
+            AddFormRef(doc, allocator, "teachesSpell", form.teachesSpell);
+            doc.AddMember("teachesActorValue", form.teachesActorValue, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::SoulGem) {
+            AddFormRef(doc, allocator, "linkedSoulGem", form.linkedSoulGem);
+            doc.AddMember("currentSoul", form.currentSoul, allocator);
+            doc.AddMember("soulCapacity", form.soulCapacity, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::MaterialType) {
+            AddString(doc, allocator, "materialName", form.materialName);
+            AddFormRef(doc, allocator, "materialParent", form.materialParent);
+            AddFormRef(doc, allocator, "havokImpactDataSet", form.havokImpactDataSet);
+            doc.AddMember("materialId", form.materialId, allocator);
+            doc.AddMember("red", static_cast<unsigned>(form.red), allocator);
+            doc.AddMember("green", static_cast<unsigned>(form.green), allocator);
+            doc.AddMember("blue", static_cast<unsigned>(form.blue), allocator);
+            doc.AddMember("buoyancy", form.buoyancy, allocator);
+            doc.AddMember("flags", form.flags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Ammo) {
+            AddFormRef(doc, allocator, "projectile", form.projectile);
+            doc.AddMember("damage", form.damage, allocator);
+            doc.AddMember("ammoFlags", form.ammoFlags, allocator);
+        }
         if (form.kind == DynamicForms::FormKind::Global) {
             const auto globalType = ToString(form.globalType);
             doc.AddMember("globalType", rapidjson::Value(globalType.c_str(), allocator), allocator);
@@ -3242,16 +4015,7 @@ namespace Manager {
             doc.AddMember("localId", form.localId, allocator);
         }
 
-        std::ofstream stream(FormPath(form.editorId));
-        if (!stream.is_open()) {
-            logger::warn("Could not write dynamic form JSON for '{}'", form.editorId);
-            return false;
-        }
-
-        rapidjson::OStreamWrapper wrapper(stream);
-        rapidjson::PrettyWriter writer(wrapper);
-        doc.Accept(writer);
-        return true;
+        return PersistFormDocument(form, doc);
     }
 
     bool SaveForm(const std::size_t index, const bool dispatchUpdate) {
@@ -3347,10 +4111,8 @@ namespace Manager {
             return false;
         }
 
-        std::error_code ec;
-        std::filesystem::remove(FormPath(form.editorId), ec);
-        if (ec) {
-            logger::warn("Could not delete dynamic form JSON '{}': {}", FormPath(form.editorId).string(), ec.message());
+        if (!DeleteStoredForm(form)) {
+            logger::warn("Could not delete dynamic form '{}' from package storage.", form.editorId);
             return false;
         }
 
@@ -3359,6 +4121,51 @@ namespace Manager {
         DispatchEvent(UPDATED_EVENT, form.editorId, static_cast<float>(form.localId));
         logger::info("Deleted dynamic form '{}' localId {:06X}.", form.editorId, form.localId);
         return true;
+    }
+
+    bool AssignFormToPackage(const std::string_view editorId, const std::string_view packageName, const bool save) {
+        if (editorId.empty() || packageName.empty()) {
+            return false;
+        }
+
+        const auto found = std::ranges::find_if(forms, [editorId](const DynamicForms::DynamicForm& form) {
+            return form.editorId == editorId;
+        });
+        if (found == forms.end()) {
+            return false;
+        }
+
+        const auto oldForm = *found;
+        if (!DeleteStoredForm(oldForm)) {
+            logger::warn("Could not remove '{}' from its previous package before moving it.", found->editorId);
+            return false;
+        }
+
+        found->packageName = packageName;
+        found->basePackageName.clear();
+        found->patchPackageNames.clear();
+        found->dirty = true;
+        return !save || SaveForm(static_cast<std::size_t>(std::distance(forms.begin(), found)));
+    }
+
+    bool AddPatchLayer(const std::string_view editorId, const std::string_view packageName, const bool save) {
+        if (editorId.empty() || packageName.empty()) {
+            return false;
+        }
+
+        const auto found = std::ranges::find_if(forms, [editorId](const DynamicForms::DynamicForm& form) {
+            return form.editorId == editorId;
+        });
+        if (found == forms.end() || EffectivePackageName(*found) == packageName) {
+            return false;
+        }
+
+        if (std::ranges::find(found->patchPackageNames, packageName) == found->patchPackageNames.end()) {
+            found->patchPackageNames.emplace_back(packageName);
+        }
+        found->basePackageName = EffectivePackageName(*found);
+        found->dirty = true;
+        return !save || SaveForm(static_cast<std::size_t>(std::distance(forms.begin(), found)));
     }
 
     bool AddFormToPlayerInventory(const std::size_t index) {

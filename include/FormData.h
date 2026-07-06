@@ -10,9 +10,18 @@ namespace DynamicForms {
     {
         Global,
         Keyword,
+        FormList,
+        EquipSlot,
+        VoiceType,
         Outfit,
         ArmorType,
         Armor,
+        Book,
+        Misc,
+        Key,
+        SoulGem,
+        MaterialType,
+        Ammo,
         Color,
         ArtObject,
         Perk,
@@ -140,11 +149,21 @@ namespace DynamicForms {
     {
         FormKind kind{ FormKind::Global };
         std::string editorId;
+        std::string packageName{ "Local Forms" };
+        std::string basePackageName;
+        std::vector<std::string> patchPackageNames;
         GlobalType globalType{ GlobalType::Float };
         float defaultValue{ 0.0F };
+        std::vector<FormRef> formListItems;
+        std::vector<FormRef> equipSlotParents;
+        std::uint32_t equipSlotFlags{ 0 };
+        bool voiceTypeAllowDefaultDialogue{ true };
+        bool voiceTypeFemale{ false };
         std::vector<FormRef> outfitPieces;
         std::uint32_t bipedSlots{ 0 };
         std::uint32_t armorType{ 2 };
+        std::int32_t itemValue{ 0 };
+        float itemWeight{ 0.0F };
         std::int32_t armorValue{ 0 };
         float armorWeight{ 0.0F };
         float armorRating{ 0.0F };
@@ -166,6 +185,22 @@ namespace DynamicForms {
         FormRef altBlockMaterialType;
         std::vector<FormRef> armorAddons;
         std::vector<FormRef> keywords;
+        std::string inventoryIcon;
+        std::string messageIcon;
+        FormRef materialParent;
+        FormRef havokImpactDataSet;
+        std::string materialName;
+        std::uint32_t materialId{ 0 };
+        float buoyancy{ 0.0F };
+        FormRef projectile;
+        std::uint32_t ammoFlags{ 0 };
+        std::uint32_t bookFlags{ 0 };
+        std::uint32_t bookType{ 0 };
+        FormRef teachesSpell;
+        std::int32_t teachesActorValue{ -1 };
+        FormRef linkedSoulGem;
+        std::uint32_t currentSoul{ 0 };
+        std::uint32_t soulCapacity{ 0 };
         FormRef maleSkinTexture;
         FormRef femaleSkinTexture;
         FormRef maleSkinTextureSwapList;

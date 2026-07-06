@@ -194,6 +194,18 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     PopulateList<RE::TESObjectBOOK>("Book", [](RE::TESObjectBOOK* book) -> bool {
         return book != nullptr;
     });
+    PopulateList<RE::TESObjectMISC>("MiscItem", [](RE::TESObjectMISC* misc) -> bool {
+        return misc != nullptr;
+    });
+    PopulateList<RE::TESKey>("Key", [](RE::TESKey* key) -> bool {
+        return key != nullptr;
+    });
+    PopulateList<RE::TESSoulGem>("SoulGem", [](RE::TESSoulGem* soulGem) -> bool {
+        return soulGem != nullptr;
+    });
+    PopulateList<RE::TESAmmo>("Ammo", [](RE::TESAmmo* ammo) -> bool {
+        return ammo != nullptr;
+    });
 
     PopulateList<RE::TESGlobal>("Global", [](RE::TESGlobal* global) -> bool {
         return global != nullptr;

@@ -9,6 +9,8 @@
 namespace Manager {
     constexpr const char* MOD_DIR = "Data/Viny Mods/Dynamic Forms Generator";
     constexpr const char* FORMS_DIR = "Data/Viny Mods/Dynamic Forms Generator/Forms";
+    constexpr const char* PACKAGES_DIR = "Data/Viny Mods/Dynamic Forms Generator/Packages";
+    constexpr const char* DEFAULT_PACKAGE_NAME = "Local Forms";
     constexpr const char* LANG_PATH = "Data/Viny Mods/Dynamic Forms Generator/Language.json";
     constexpr const char* DPF_OWNER = "DynamicFormsGenerator";
 
@@ -20,6 +22,8 @@ namespace Manager {
     bool AddForm(const DynamicForms::DynamicForm& form);
     bool UpdateForm(std::size_t index, const DynamicForms::DynamicForm& form);
     bool DeleteForm(std::size_t index);
+    bool AssignFormToPackage(std::string_view editorId, std::string_view packageName, bool save = true);
+    bool AddPatchLayer(std::string_view editorId, std::string_view packageName, bool save = true);
     bool AddFormToPlayerInventory(std::size_t index);
     bool SpawnFormAtPlayer(std::size_t index);
     bool SpawnLydiaForDebug();

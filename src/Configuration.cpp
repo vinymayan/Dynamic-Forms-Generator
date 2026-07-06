@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <miniz.h>
 #include <optional>
 #include <rapidjson/document.h>
@@ -62,20 +63,71 @@ namespace {
     bool requestDeletePopup = false;
     bool deleteSelectionMode = false;
     bool requestBatchDeletePopup = false;
+    bool requestCreateFormPopup = false;
+    bool requestCreatePatchPopup = false;
     std::set<std::string> selectedDeleteForms;
     std::set<std::string> selectedExportForms;
+    std::set<std::string> selectedPatchForms;
     std::array<char, 128> exportPackageName{ 'D', 'F', 'G', '_', 'E', 'x', 'p', 'o', 'r', 't', '\0' };
+    std::array<char, 128> workingPackageName{ 'D', 'F', 'G', '_', 'O', 'v', 'e', 'r', 'r', 'i', 'd', 'e', 's', '\0' };
+    std::array<char, 128> newPackageName{};
+    std::array<char, 128> filterPackageNameBuffer{};
+    std::array<char, 128> patchFilterPackageNameBuffer{};
+    std::array<char, 128> patchFilterEditorIdBuffer{};
+    int selectedPatchFilterKind = 0;
+    std::vector<std::string> previewPackages{ "Local Forms", "DFG_Overrides" };
+    std::unordered_map<std::string, std::string> previewFormPackages;
+    std::unordered_map<std::string, std::vector<std::string>> previewPatchPackages;
+    int selectedPackageFilter = 0;
     std::string exportMessage;
     bool lastExportSucceeded = true;
+    bool showSourceDetails = true;
+    bool showOnlyOverrideDrafts = false;
+
+    struct PickerType
+    {
+        const char* typeName;
+        const char* label;
+    };
 
     constexpr auto DELETE_POPUP_ID = "Delete Form##dynamic_forms_delete_popup";
     constexpr auto BATCH_DELETE_POPUP_ID = "Delete Selected Forms##dynamic_forms_batch_delete_popup";
+    constexpr auto CREATE_PATCH_POPUP_ID = "Create Patch##dynamic_forms_create_patch_popup";
     constexpr auto EXPORT_DIR = "Data/Viny Mods/Dynamic Forms Generator/Export";
     const ImGui::ImVec4 DIRTY_COLOR{ 1.0F, 0.72F, 0.2F, 1.0F };
     const ImGui::ImVec4 SUCCESS_COLOR{ 0.45F, 0.9F, 0.55F, 1.0F };
     const ImGui::ImVec4 ERROR_COLOR{ 1.0F, 0.35F, 0.35F, 1.0F };
-    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Outfit", "Armor Type", "Armor", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
-    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Outfit", "Armor Type", "Armor", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    const ImGui::ImVec4 INHERITED_COLOR{ 0.6F, 0.78F, 1.0F, 1.0F };
+    const ImGui::ImVec4 OVERRIDE_COLOR{ 1.0F, 0.62F, 0.22F, 1.0F };
+    const ImGui::ImVec4 LOCAL_COLOR{ 0.55F, 0.9F, 0.65F, 1.0F };
+    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FORM_KIND_TREE_ORDER{
+        DynamicForms::FormKind::Global,
+        DynamicForms::FormKind::Keyword,
+        DynamicForms::FormKind::FormList,
+        DynamicForms::FormKind::EquipSlot,
+        DynamicForms::FormKind::VoiceType,
+        DynamicForms::FormKind::Outfit,
+        DynamicForms::FormKind::ArmorType,
+        DynamicForms::FormKind::Armor,
+        DynamicForms::FormKind::Book,
+        DynamicForms::FormKind::Misc,
+        DynamicForms::FormKind::Key,
+        DynamicForms::FormKind::SoulGem,
+        DynamicForms::FormKind::MaterialType,
+        DynamicForms::FormKind::Ammo,
+        DynamicForms::FormKind::Color,
+        DynamicForms::FormKind::ArtObject,
+        DynamicForms::FormKind::Perk,
+        DynamicForms::FormKind::HeadPart,
+        DynamicForms::FormKind::SoundDescriptor,
+        DynamicForms::FormKind::Light,
+        DynamicForms::FormKind::Explosion,
+        DynamicForms::FormKind::Activator,
+        DynamicForms::FormKind::EffectShader,
+        DynamicForms::FormKind::NPC
+    };
     constexpr std::array GLOBAL_TYPE_ITEMS{ "short", "long", "float" };
     constexpr std::array ART_TYPE_ITEMS{ "MagicCasting", "MagicHitEffect", "MagicEnchantEffect" };
     constexpr std::array HEAD_PART_TYPE_ITEMS{ "Misc", "Face", "Eyes", "Hair", "FacialHair", "Scar", "Eyebrows" };
@@ -96,6 +148,34 @@ namespace {
     constexpr std::array NPC_FACE_PART_NAMES{ "Nose", "Unknown", "Eyes", "Mouth" };
     constexpr std::array HEAD_PART_FILTER_ITEMS{ "All", "Hair", "Facial Hair", "Eye Brows", "Eye", "Face", "Misc", "Scar" };
     constexpr std::array ARMOR_TYPE_ITEMS{ "Light Armor", "Heavy Armor", "Clothing" };
+    constexpr std::array SOUL_LEVEL_ITEMS{ "None", "Petty", "Lesser", "Common", "Greater", "Grand" };
+    constexpr std::array BOOK_TYPE_ITEMS{ "Book/Tome", "Note/Scroll" };
+    constexpr std::array FORM_REFERENCE_PICKER_TYPES{
+        PickerType{ "Global", "Global" },
+        PickerType{ "Keyword", "Keyword" },
+        PickerType{ "FormList", "Form List" },
+        PickerType{ "EquipSlot", "Equip Slot" },
+        PickerType{ "Voice", "Voice Type" },
+        PickerType{ "Outfit", "Outfit" },
+        PickerType{ "ArmorType", "Armor Type" },
+        PickerType{ "Armor", "Armor" },
+        PickerType{ "Book", "Book" },
+        PickerType{ "MiscItem", "Misc Item" },
+        PickerType{ "Key", "Key" },
+        PickerType{ "SoulGem", "Soul Gem" },
+        PickerType{ "MaterialType", "Material Type" },
+        PickerType{ "Ammo", "Ammo" },
+        PickerType{ "Color", "Color" },
+        PickerType{ "ArtObject", "Art Object" },
+        PickerType{ "Perk", "Perk" },
+        PickerType{ "HeadPart", "Head Part" },
+        PickerType{ "SoundDescriptor", "Sound Descriptor" },
+        PickerType{ "Light", "Light" },
+        PickerType{ "Explosion", "Explosion" },
+        PickerType{ "Activator", "Activator" },
+        PickerType{ "EffectShader", "Effect Shader" },
+        PickerType{ "NPC", "NPC" }
+    };
     constexpr std::array BIPED_SLOT_ITEMS{
         "Head", "Hair", "Body", "Hands", "Forearms", "Amulet", "Ring", "Feet",
         "Calves", "Shield", "Tail", "Long Hair", "Circlet", "Ears", "Mod Mouth", "Mod Neck",
@@ -150,30 +230,48 @@ namespace {
         case 1:
             return DynamicForms::FormKind::Keyword;
         case 2:
-            return DynamicForms::FormKind::Outfit;
+            return DynamicForms::FormKind::FormList;
         case 3:
-            return DynamicForms::FormKind::ArmorType;
+            return DynamicForms::FormKind::EquipSlot;
         case 4:
-            return DynamicForms::FormKind::Armor;
+            return DynamicForms::FormKind::VoiceType;
         case 5:
-            return DynamicForms::FormKind::Color;
+            return DynamicForms::FormKind::Outfit;
         case 6:
-            return DynamicForms::FormKind::ArtObject;
+            return DynamicForms::FormKind::ArmorType;
         case 7:
-            return DynamicForms::FormKind::Perk;
+            return DynamicForms::FormKind::Armor;
         case 8:
-            return DynamicForms::FormKind::HeadPart;
+            return DynamicForms::FormKind::Book;
         case 9:
-            return DynamicForms::FormKind::SoundDescriptor;
+            return DynamicForms::FormKind::Misc;
         case 10:
-            return DynamicForms::FormKind::Light;
+            return DynamicForms::FormKind::Key;
         case 11:
-            return DynamicForms::FormKind::Explosion;
+            return DynamicForms::FormKind::SoulGem;
         case 12:
-            return DynamicForms::FormKind::Activator;
+            return DynamicForms::FormKind::MaterialType;
         case 13:
-            return DynamicForms::FormKind::EffectShader;
+            return DynamicForms::FormKind::Ammo;
         case 14:
+            return DynamicForms::FormKind::Color;
+        case 15:
+            return DynamicForms::FormKind::ArtObject;
+        case 16:
+            return DynamicForms::FormKind::Perk;
+        case 17:
+            return DynamicForms::FormKind::HeadPart;
+        case 18:
+            return DynamicForms::FormKind::SoundDescriptor;
+        case 19:
+            return DynamicForms::FormKind::Light;
+        case 20:
+            return DynamicForms::FormKind::Explosion;
+        case 21:
+            return DynamicForms::FormKind::Activator;
+        case 22:
+            return DynamicForms::FormKind::EffectShader;
+        case 23:
             return DynamicForms::FormKind::NPC;
         case 0:
         default:
@@ -248,12 +346,30 @@ namespace {
         switch (kind) {
         case DynamicForms::FormKind::Keyword:
             return "Keyword";
+        case DynamicForms::FormKind::FormList:
+            return "Form List";
+        case DynamicForms::FormKind::EquipSlot:
+            return "Equip Slot";
+        case DynamicForms::FormKind::VoiceType:
+            return "Voice Type";
         case DynamicForms::FormKind::Outfit:
             return "Outfit";
         case DynamicForms::FormKind::ArmorType:
             return "Armor Type";
         case DynamicForms::FormKind::Armor:
             return "Armor";
+        case DynamicForms::FormKind::Book:
+            return "Book";
+        case DynamicForms::FormKind::Misc:
+            return "Misc Item";
+        case DynamicForms::FormKind::Key:
+            return "Key";
+        case DynamicForms::FormKind::SoulGem:
+            return "Soul Gem";
+        case DynamicForms::FormKind::MaterialType:
+            return "Material Type";
+        case DynamicForms::FormKind::Ammo:
+            return "Ammo";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -288,6 +404,16 @@ namespace {
             }
         }
         return name.empty() ? "DFG_Export" : name;
+    }
+
+    std::string SanitizePackageFolder(std::string name) {
+        for (char& ch : name) {
+            const auto c = static_cast<unsigned char>(ch);
+            if (std::isalnum(c) == 0 && ch != '_' && ch != '-' && ch != '.') {
+                ch = '_';
+            }
+        }
+        return name.empty() ? "Local_Forms" : name;
     }
 
     std::filesystem::path FormJsonPath(const std::string& editorId) {
@@ -340,10 +466,28 @@ namespace {
 
         bool ok = true;
         std::set<std::string> addedPaths;
-        for (const auto& editorId : editorIds) {
-            const auto source = FormJsonPath(editorId);
-            const auto internalPath = std::format("Viny Mods/Dynamic Forms Generator/Forms/{}.json", editorId);
-            ok = AddFileToZipOnce(zip, addedPaths, source, internalPath) && ok;
+        std::set<std::string> packageNames;
+        for (const auto& form : forms) {
+            if (!editorIds.contains(form.editorId)) {
+                continue;
+            }
+            packageNames.insert(form.packageName.empty() ? Manager::DEFAULT_PACKAGE_NAME : form.packageName);
+            packageNames.insert(form.patchPackageNames.begin(), form.patchPackageNames.end());
+        }
+
+        for (const auto& package : packageNames) {
+            const auto folder = SanitizePackageFolder(package);
+            const auto sourceDir = std::filesystem::path(Manager::PACKAGES_DIR) / folder;
+            ok = AddFileToZipOnce(
+                zip,
+                addedPaths,
+                sourceDir / "manifest.json",
+                std::format("Viny Mods/Dynamic Forms Generator/Packages/{}/manifest.json", folder)) && ok;
+            ok = AddFileToZipOnce(
+                zip,
+                addedPaths,
+                sourceDir / "package.db",
+                std::format("Viny Mods/Dynamic Forms Generator/Packages/{}/package.db", folder)) && ok;
         }
 
         if (!mz_zip_writer_finalize_archive(&zip)) {
@@ -495,40 +639,10 @@ namespace {
     }
 
     std::optional<DynamicForms::FormKind> FormKindFromFilterIndex(const int kindFilter) {
-        switch (kindFilter) {
-        case 1:
-            return DynamicForms::FormKind::Global;
-        case 2:
-            return DynamicForms::FormKind::Keyword;
-        case 3:
-            return DynamicForms::FormKind::Outfit;
-        case 4:
-            return DynamicForms::FormKind::ArmorType;
-        case 5:
-            return DynamicForms::FormKind::Armor;
-        case 6:
-            return DynamicForms::FormKind::Color;
-        case 7:
-            return DynamicForms::FormKind::ArtObject;
-        case 8:
-            return DynamicForms::FormKind::Perk;
-        case 9:
-            return DynamicForms::FormKind::HeadPart;
-        case 10:
-            return DynamicForms::FormKind::SoundDescriptor;
-        case 11:
-            return DynamicForms::FormKind::Light;
-        case 12:
-            return DynamicForms::FormKind::Explosion;
-        case 13:
-            return DynamicForms::FormKind::Activator;
-        case 14:
-            return DynamicForms::FormKind::EffectShader;
-        case 15:
-            return DynamicForms::FormKind::NPC;
-        default:
+        if (kindFilter <= 0 || kindFilter > static_cast<int>(FORM_KIND_TREE_ORDER.size())) {
             return std::nullopt;
         }
+        return FORM_KIND_TREE_ORDER[static_cast<std::size_t>(kindFilter - 1)];
     }
 
     bool MatchesFilterValues(const DynamicForms::DynamicForm& form, const int kindFilter, const std::string_view editorIdFilter) {
@@ -555,15 +669,588 @@ namespace {
 
     bool CanAddToInventory(const DynamicForms::FormKind kind) {
         return kind == DynamicForms::FormKind::Armor ||
+            kind == DynamicForms::FormKind::Book ||
+            kind == DynamicForms::FormKind::Misc ||
+            kind == DynamicForms::FormKind::Key ||
+            kind == DynamicForms::FormKind::SoulGem ||
+            kind == DynamicForms::FormKind::Ammo ||
             kind == DynamicForms::FormKind::Light;
     }
 
     bool CanSpawnInWorld(const DynamicForms::FormKind kind) {
         return kind == DynamicForms::FormKind::Armor ||
+            kind == DynamicForms::FormKind::Book ||
+            kind == DynamicForms::FormKind::Misc ||
+            kind == DynamicForms::FormKind::Key ||
+            kind == DynamicForms::FormKind::SoulGem ||
+            kind == DynamicForms::FormKind::Ammo ||
             kind == DynamicForms::FormKind::Light ||
             kind == DynamicForms::FormKind::Explosion ||
             kind == DynamicForms::FormKind::Activator ||
             kind == DynamicForms::FormKind::NPC;
+    }
+
+    std::vector<const char*> PackageComboItems(const bool includeAll) {
+        std::vector<const char*> items;
+        if (includeAll) {
+            items.push_back("All packages");
+        }
+        for (const auto& package : previewPackages) {
+            items.push_back(package.c_str());
+        }
+        return items;
+    }
+
+    bool HasPreviewPackage(const std::string_view name) {
+        return std::ranges::any_of(previewPackages, [name](const std::string& package) {
+            return package == name;
+        });
+    }
+
+    void SetWorkingPackage(const std::string& name) {
+        if (name.empty()) {
+            return;
+        }
+        std::snprintf(workingPackageName.data(), workingPackageName.size(), "%s", name.c_str());
+    }
+
+    bool CreatePreviewPackage(const std::string& name) {
+        if (!IsValidEditorId(name) || HasPreviewPackage(name)) {
+            return false;
+        }
+        previewPackages.push_back(name);
+        SetWorkingPackage(name);
+        return true;
+    }
+
+    const char* ActiveWorkingPackageName() {
+        const auto* name = workingPackageName.data();
+        return name[0] != '\0' ? name : "DFG_Overrides";
+    }
+
+    const char* SourcePackageLabel(const DynamicForms::DynamicForm& form) {
+        const auto found = previewFormPackages.find(form.editorId);
+        if (found != previewFormPackages.end()) {
+            return found->second.c_str();
+        }
+        if (!form.packageName.empty()) {
+            return form.packageName.c_str();
+        }
+        return form.localId != 0 ? "Local Forms" : "Unsaved Draft";
+    }
+
+    std::string PatchPackageLabel(const DynamicForms::DynamicForm& form) {
+        std::string label;
+        for (const auto& package : form.patchPackageNames) {
+            if (!label.empty()) {
+                label += " + ";
+            }
+            label += package;
+        }
+
+        const auto found = previewPatchPackages.find(form.editorId);
+        if (found == previewPatchPackages.end() || found->second.empty()) {
+            return label.empty() ? ActiveWorkingPackageName() : label;
+        }
+
+        for (const auto& package : found->second) {
+            if (!label.empty()) {
+                label += " + ";
+            }
+            label += package;
+        }
+        return label;
+    }
+
+    bool HasPatchLayer(const DynamicForms::DynamicForm& form, const std::string_view package) {
+        if (std::ranges::find(form.patchPackageNames, package) != form.patchPackageNames.end()) {
+            return true;
+        }
+        const auto found = previewPatchPackages.find(form.editorId);
+        return found != previewPatchPackages.end() &&
+            std::ranges::find(found->second, package) != found->second.end();
+    }
+
+    bool HasAnyPatchLayer(const DynamicForms::DynamicForm& form) {
+        if (!form.patchPackageNames.empty()) {
+            return true;
+        }
+        const auto found = previewPatchPackages.find(form.editorId);
+        return found != previewPatchPackages.end() && !found->second.empty();
+    }
+
+    bool HasOverrideDraft(std::size_t index);
+
+    bool MatchesPackageFilter(const DynamicForms::DynamicForm& form) {
+        if (selectedPackageFilter <= 0) {
+            return true;
+        }
+        const auto packageIndex = static_cast<std::size_t>(selectedPackageFilter - 1);
+        if (packageIndex >= previewPackages.size()) {
+            return true;
+        }
+        const auto& package = previewPackages[packageIndex];
+        return SourcePackageLabel(form) == package ||
+            HasPatchLayer(form, package);
+    }
+
+    bool MatchesPackageNameFilter(const std::string_view package) {
+        const std::string filter = filterPackageNameBuffer.data();
+        return filter.empty() || ToLower(std::string(package)).find(ToLower(filter)) != std::string::npos;
+    }
+
+    bool FormBelongsToPackage(const DynamicForms::DynamicForm& form, const std::string_view package) {
+        if (SourcePackageLabel(form) == package) {
+            return true;
+        }
+        return HasPatchLayer(form, package);
+    }
+
+    bool MatchesVisibleFormFilters(const std::size_t index, const DynamicForms::DynamicForm& form) {
+        return MatchesFilters(form) &&
+            MatchesPackageFilter(form) &&
+            (!showOnlyOverrideDrafts || HasOverrideDraft(index));
+    }
+
+    std::size_t CountVisibleFormsInPackage(const std::string_view package) {
+        std::size_t count = 0;
+        const auto& forms = Manager::GetForms();
+        for (std::size_t i = 0; i < forms.size(); ++i) {
+            if (FormBelongsToPackage(forms[i], package) && MatchesVisibleFormFilters(i, forms[i])) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    std::size_t CountVisibleFormsInPackageKind(const std::string_view package, const DynamicForms::FormKind kind) {
+        std::size_t count = 0;
+        const auto& forms = Manager::GetForms();
+        for (std::size_t i = 0; i < forms.size(); ++i) {
+            if (forms[i].kind == kind && FormBelongsToPackage(forms[i], package) && MatchesVisibleFormFilters(i, forms[i])) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    bool MatchesPatchPopupFilters(const DynamicForms::DynamicForm& form, const std::string_view package) {
+        if (SourcePackageLabel(form) != package || package == ActiveWorkingPackageName()) {
+            return false;
+        }
+
+        const auto kind = FormKindFromFilterIndex(selectedPatchFilterKind);
+        if (kind && form.kind != *kind) {
+            return false;
+        }
+
+        const std::string packageFilter = patchFilterPackageNameBuffer.data();
+        if (!packageFilter.empty() && ToLower(std::string(package)).find(ToLower(packageFilter)) == std::string::npos) {
+            return false;
+        }
+
+        const std::string editorFilter = patchFilterEditorIdBuffer.data();
+        return editorFilter.empty() || ToLower(form.editorId).find(ToLower(editorFilter)) != std::string::npos;
+    }
+
+    std::vector<std::size_t> VisibleFormRows(const std::string_view package, std::optional<DynamicForms::FormKind> kind = std::nullopt) {
+        std::vector<std::size_t> rows;
+        const auto& forms = Manager::GetForms();
+        for (std::size_t i = 0; i < forms.size(); ++i) {
+            if (kind && forms[i].kind != *kind) {
+                continue;
+            }
+            if (FormBelongsToPackage(forms[i], package) && MatchesVisibleFormFilters(i, forms[i])) {
+                rows.push_back(i);
+            }
+        }
+        return rows;
+    }
+
+    bool AllRowsSelectedForDelete(const std::vector<std::size_t>& rows) {
+        if (rows.empty()) {
+            return false;
+        }
+        const auto& forms = Manager::GetForms();
+        return std::ranges::all_of(rows, [&forms](const std::size_t row) {
+            return row < forms.size() && selectedDeleteForms.contains(forms[row].editorId);
+        });
+    }
+
+    void SetRowsSelectedForDelete(const std::vector<std::size_t>& rows, const bool selected) {
+        auto& forms = Manager::GetForms();
+        for (const auto row : rows) {
+            if (row >= forms.size()) {
+                continue;
+            }
+            if (selected) {
+                selectedDeleteForms.insert(forms[row].editorId);
+            } else {
+                selectedDeleteForms.erase(forms[row].editorId);
+            }
+        }
+    }
+
+    void AssignFormToWorkingPackage(const DynamicForms::DynamicForm& form) {
+        previewFormPackages[form.editorId] = ActiveWorkingPackageName();
+        previewPatchPackages.erase(form.editorId);
+        if (!HasPreviewPackage(ActiveWorkingPackageName())) {
+            previewPackages.emplace_back(ActiveWorkingPackageName());
+        }
+        Manager::AssignFormToPackage(form.editorId, ActiveWorkingPackageName());
+    }
+
+    void MarkFormAsPatchInWorkingPackage(const DynamicForms::DynamicForm& form) {
+        auto& layers = previewPatchPackages[form.editorId];
+        const std::string package = ActiveWorkingPackageName();
+        if (std::ranges::find(layers, package) == layers.end()) {
+            layers.push_back(package);
+        }
+        if (!HasPreviewPackage(ActiveWorkingPackageName())) {
+            previewPackages.emplace_back(ActiveWorkingPackageName());
+        }
+        Manager::AddPatchLayer(form.editorId, ActiveWorkingPackageName());
+    }
+
+    bool HasOverrideDraft(const std::size_t index) {
+        const auto& forms = Manager::GetForms();
+        if (index >= forms.size()) {
+            return false;
+        }
+        return Manager::IsDirty(index) || HasAnyPatchLayer(forms[index]);
+    }
+
+    void DrawStatusBadge(const char* text, const ImGui::ImVec4& color) {
+        ImGui::TextColored(color, "[%s]", text);
+    }
+
+    void RenderPackageWorkspaceHeader() {
+        ImGui::TextColored(INHERITED_COLOR, "%s", Configuration::GetLoc("menu.package_workspace", "Package workspace"));
+
+        ImGui::SetNextItemWidth(220.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.new_package", "New package"), newPackageName.data(), newPackageName.size());
+        ImGui::SameLine();
+        const std::string packageToCreate = newPackageName.data();
+        const bool canCreatePackage = IsValidEditorId(packageToCreate) && !HasPreviewPackage(packageToCreate);
+        if (!canCreatePackage) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(Configuration::GetLoc("menu.create_package", "Create package"))) {
+            if (CreatePreviewPackage(packageToCreate)) {
+                newPackageName.fill('\0');
+            }
+        }
+        if (!canCreatePackage) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", Configuration::GetLoc("menu.package_name_hint", "Use letters, numbers and underscore."));
+
+        auto workingItems = PackageComboItems(false);
+        int workingIndex = 0;
+        for (std::size_t i = 0; i < previewPackages.size(); ++i) {
+            if (previewPackages[i] == ActiveWorkingPackageName()) {
+                workingIndex = static_cast<int>(i);
+                break;
+            }
+        }
+        ImGui::SetNextItemWidth(260.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.working_package_select", "Working package"), &workingIndex, workingItems.data(), static_cast<int>(workingItems.size()))) {
+            if (workingIndex >= 0 && static_cast<std::size_t>(workingIndex) < previewPackages.size()) {
+                SetWorkingPackage(previewPackages[static_cast<std::size_t>(workingIndex)]);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.create_form", "Create form"))) {
+            createError.clear();
+            requestCreateFormPopup = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.create_patch", "Create patch"))) {
+            selectedPatchForms.clear();
+            requestCreatePatchPopup = true;
+        }
+
+        auto filterItems = PackageComboItems(true);
+        ImGui::SetNextItemWidth(210.0F);
+        ImGui::Combo(Configuration::GetLoc("menu.package_filter", "Package"), &selectedPackageFilter, filterItems.data(), static_cast<int>(filterItems.size()));
+        ImGui::SameLine();
+        SetStableComboWidth(FILTER_KIND_ITEMS, 180.0F);
+        ImGui::Combo(Configuration::GetLoc("menu.filter_type", "Type"), &selectedFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(220.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.filter_package_name", "Package name"), filterPackageNameBuffer.data(), filterPackageNameBuffer.size());
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(240.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "EditorID"), filterEditorIdBuffer.data(), filterEditorIdBuffer.size());
+
+        ImGui::Checkbox(Configuration::GetLoc("menu.show_sources", "Show sources"), &showSourceDetails);
+        ImGui::SameLine();
+        ImGui::Checkbox(Configuration::GetLoc("menu.only_override_drafts", "Only override drafts"), &showOnlyOverrideDrafts);
+
+        ImGui::Text("%s: %s", Configuration::GetLoc("menu.edit_target", "Edit target"), ActiveWorkingPackageName());
+        ImGui::TextDisabled("%s", Configuration::GetLoc(
+            "menu.package_flow_hint",
+            "Preview mode: edits still save as current JSON forms, but dirty forms are shown as override drafts for the selected package."));
+    }
+
+    void RenderResolvedFormPanel(const DynamicForms::DynamicForm& form, const std::size_t index) {
+        if (!showSourceDetails) {
+            return;
+        }
+
+        const bool overrideDraft = HasOverrideDraft(index);
+        if (!ImGui::CollapsingHeader(Configuration::GetLoc("menu.resolved_form", "Resolved form"))) {
+            return;
+        }
+
+        ImGui::Indent();
+        ImGui::Text("%s: %s", Configuration::GetLoc("menu.source_package", "Source package"), SourcePackageLabel(form));
+        ImGui::Text("%s: %s%s%s",
+            Configuration::GetLoc("menu.final_layers", "Final layers"),
+            SourcePackageLabel(form),
+            overrideDraft ? " + " : "",
+            overrideDraft ? PatchPackageLabel(form).c_str() : "");
+        ImGui::Text("%s: ", Configuration::GetLoc("menu.form_state", "State"));
+        ImGui::SameLine();
+        if (overrideDraft) {
+            DrawStatusBadge(Configuration::GetLoc("menu.override_draft", "override draft"), OVERRIDE_COLOR);
+        } else if (form.localId == 0) {
+            DrawStatusBadge(Configuration::GetLoc("menu.new_local", "new local"), LOCAL_COLOR);
+        } else {
+            DrawStatusBadge(Configuration::GetLoc("menu.inherited_clean", "inherited clean"), INHERITED_COLOR);
+        }
+
+        if (overrideDraft) {
+            ImGui::TextDisabled("%s", Configuration::GetLoc(
+                "menu.override_draft_hint",
+                "Saving now writes the whole JSON form; future patch storage would persist only the changed fields in the working package."));
+        }
+
+        const bool isInWorkingPackage = SourcePackageLabel(form) == ActiveWorkingPackageName();
+        const char* moveButtonLabel = isInWorkingPackage ?
+            Configuration::GetLoc("menu.form_in_working_package", "In working package") :
+            Configuration::GetLoc("menu.move_to_working_package", "Move to working package");
+        if (isInWorkingPackage) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(moveButtonLabel)) {
+            AssignFormToWorkingPackage(form);
+        }
+        if (isInWorkingPackage) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        const bool canCreatePatchLayer = SourcePackageLabel(form) != ActiveWorkingPackageName() && !HasPatchLayer(form, ActiveWorkingPackageName());
+        if (!canCreatePatchLayer) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(Configuration::GetLoc("menu.create_patch_layer", "Create patch layer"))) {
+            MarkFormAsPatchInWorkingPackage(form);
+        }
+        if (!canCreatePatchLayer) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        const bool canRemoveFromPackage = previewFormPackages.contains(form.editorId);
+        if (!canRemoveFromPackage) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(Configuration::GetLoc("menu.remove_from_package", "Remove from package"))) {
+            previewFormPackages.erase(form.editorId);
+        }
+        if (!canRemoveFromPackage) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.clear_package_preview", "Clear preview"))) {
+            previewFormPackages.erase(form.editorId);
+            previewPatchPackages.erase(form.editorId);
+        }
+        ImGui::Unindent();
+    }
+
+    bool RenderGlobalEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderFormListEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderEquipSlotEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderVoiceTypeEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderOutfitEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderArmorTypeEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderArmorEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderBookEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderSimpleItemEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderSoulGemEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderMaterialTypeEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderAmmoEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderColorEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderArtObjectEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderPerkEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderHeadPartEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderSoundDescriptorEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderLightEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderExplosionEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderActivatorEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderEffectShaderEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderNPCEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool FlagCheckbox(const char* label, std::uint32_t& flags, std::uint32_t bit);
+
+    void RenderFormTreeItem(const std::size_t index, DynamicForms::DynamicForm& form) {
+        ImGui::PushID(form.editorId.c_str());
+        const bool isDirty = Manager::IsDirty(index);
+        if (deleteSelectionMode) {
+            bool selected = selectedDeleteForms.contains(form.editorId);
+            if (ImGui::Checkbox("##selectDelete", &selected)) {
+                if (selected) {
+                    selectedDeleteForms.insert(form.editorId);
+                } else {
+                    selectedDeleteForms.erase(form.editorId);
+                }
+            }
+            ImGui::SameLine();
+        }
+
+        std::string headerLabel = form.editorId;
+        if (isDirty || HasAnyPatchLayer(form)) {
+            headerLabel += " [Override draft]";
+            ImGui::PushStyleColor(ImGui::ImGuiCol_Header, { 0.4F, 0.3F, 0.1F, 1.0F });
+        } else if (form.localId != 0) {
+            headerLabel += " [Inherited]";
+        } else {
+            headerLabel += " [New local]";
+        }
+        headerLabel += "###";
+        headerLabel += form.editorId;
+
+        if (ImGui::CollapsingHeader(headerLabel.c_str())) {
+            if (isDirty || HasAnyPatchLayer(form)) {
+                ImGui::PopStyleColor();
+            }
+            ImGui::Indent();
+            if (isDirty) {
+                ImGui::TextColored(DIRTY_COLOR, "%s", Configuration::GetLoc("menu.unsaved_form", "Unsaved changes"));
+            }
+            ImGui::Text("%s: %s", Configuration::GetLoc("menu.form_type", "Form type"), FormKindLabel(form.kind));
+            ImGui::Text("%s: %u", Configuration::GetLoc("menu.local_id", "Local ID"), form.localId);
+            RenderResolvedFormPanel(form, index);
+            if (CanAddToInventory(form.kind)) {
+                if (ImGui::Button(Configuration::GetLoc("menu.add_to_inventory", "Add to inventory"))) {
+                    if (Manager::AddFormToPlayerInventory(index)) {
+                        lastTestActionSucceeded = true;
+                        testActionMessage = std::format("{} {}", form.editorId, Configuration::GetLoc("menu.added_to_inventory", "added to inventory."));
+                    } else {
+                        lastTestActionSucceeded = false;
+                        testActionMessage = std::format("{} {}", Configuration::GetLoc("menu.add_to_inventory_failed", "Could not add to inventory:"), form.editorId);
+                    }
+                }
+            }
+            if (CanSpawnInWorld(form.kind)) {
+                if (CanAddToInventory(form.kind)) {
+                    ImGui::SameLine();
+                }
+                if (ImGui::Button(Configuration::GetLoc("menu.spawn_at_player", "Spawn at player"))) {
+                    if (Manager::SpawnFormAtPlayer(index)) {
+                        lastTestActionSucceeded = true;
+                        testActionMessage = std::format("{} {}", form.editorId, Configuration::GetLoc("menu.spawned_at_player", "spawned at player."));
+                    } else {
+                        lastTestActionSucceeded = false;
+                        testActionMessage = std::format("{} {}", Configuration::GetLoc("menu.spawn_at_player_failed", "Could not spawn:"), form.editorId);
+                    }
+                }
+                if (form.kind == DynamicForms::FormKind::NPC) {
+                    ImGui::SameLine();
+                    if (ImGui::Button(Configuration::GetLoc("menu.spawn_lydia_debug", "Spawn Lydia debug"))) {
+                        if (Manager::SpawnLydiaForDebug()) {
+                            lastTestActionSucceeded = true;
+                            testActionMessage = Configuration::GetLoc("menu.spawned_lydia_debug", "Lydia debug spawned.");
+                        } else {
+                            lastTestActionSucceeded = false;
+                            testActionMessage = Configuration::GetLoc("menu.spawn_lydia_debug_failed", "Could not spawn Lydia debug.");
+                        }
+                    }
+                }
+            }
+            if (!testActionMessage.empty()) {
+                ImGui::TextColored(lastTestActionSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", testActionMessage.c_str());
+            }
+            if (form.kind == DynamicForms::FormKind::Global) {
+                RenderGlobalEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::FormList) {
+                RenderFormListEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::EquipSlot) {
+                RenderEquipSlotEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::VoiceType) {
+                RenderVoiceTypeEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Outfit) {
+                RenderOutfitEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::ArmorType) {
+                RenderArmorTypeEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Armor) {
+                RenderArmorEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Book) {
+                RenderBookEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Misc || form.kind == DynamicForms::FormKind::Key) {
+                RenderSimpleItemEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::SoulGem) {
+                RenderSoulGemEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::MaterialType) {
+                RenderMaterialTypeEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Ammo) {
+                RenderAmmoEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Color) {
+                RenderColorEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::ArtObject) {
+                RenderArtObjectEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Perk) {
+                RenderPerkEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::HeadPart) {
+                RenderHeadPartEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::SoundDescriptor) {
+                RenderSoundDescriptorEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Light) {
+                RenderLightEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Explosion) {
+                RenderExplosionEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Activator) {
+                RenderActivatorEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::EffectShader) {
+                RenderEffectShaderEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::NPC) {
+                RenderNPCEditor(index, form);
+            } else {
+                ImGui::Text("%s", Configuration::GetLoc("menu.no_editable_fields", "No editable fields for this form type yet."));
+            }
+
+            if (isDirty) {
+                ImGui::PushStyleColor(ImGui::ImGuiCol_Button, DIRTY_COLOR);
+                ImGui::PushStyleColor(ImGui::ImGuiCol_ButtonHovered, { 1.0F, 0.82F, 0.35F, 1.0F });
+                ImGui::PushStyleColor(ImGui::ImGuiCol_ButtonActive, { 0.9F, 0.58F, 0.12F, 1.0F });
+            }
+            const char* saveButtonLabel = isDirty ?
+                Configuration::GetLoc("menu.save_override_draft", "Save override draft") :
+                Configuration::GetLoc("menu.save", "Save");
+            if (ImGui::Button(saveButtonLabel)) {
+                if (Manager::SaveForm(index)) {
+                    lastSaveSucceeded = true;
+                    saveMessage = std::format("{} {}", form.editorId, Configuration::GetLoc("menu.save_success_suffix", "saved."));
+                } else {
+                    lastSaveSucceeded = false;
+                    saveMessage = std::format("{} {}", Configuration::GetLoc("menu.save_failed_prefix", "Could not save"), form.editorId);
+                }
+            }
+            if (isDirty) {
+                ImGui::PopStyleColor(3);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(Configuration::GetLoc("menu.delete", "Delete"))) {
+                pendingDeleteIndex = static_cast<int>(index);
+                deleteError.clear();
+                requestDeletePopup = true;
+            }
+            ImGui::Unindent();
+        } else if (isDirty || HasAnyPatchLayer(form)) {
+            ImGui::PopStyleColor();
+        }
+        ImGui::PopID();
     }
 
     void ResetCreateState() {
@@ -636,151 +1323,41 @@ namespace {
         return false;
     }
 
-    bool RenderCreatePopup(const std::string& editorId) {
+    bool RenderCreatePopup() {
         bool created = false;
-        bool open = true;
-        if (!ImGui::BeginPopupModal(Configuration::GetLoc("menu.create_popup", "Create Form"), &open)) {
+        if (!ImGui::BeginPopup(Configuration::GetLoc("menu.create_popup", "Create Form"))) {
             return false;
+        }
+
+        std::string editorId = editorIdBuffer.data();
+        const bool validEditorId = IsValidEditorId(editorId);
+        const bool duplicateEditorId = validEditorId && Manager::HasEditorId(editorId);
+
+        ImGui::SetNextItemWidth(280.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.editor_id", "EditorID"), editorIdBuffer.data(), editorIdBuffer.size());
+        editorId = editorIdBuffer.data();
+
+        if (editorId.empty()) {
+            ImGui::TextColored({ 1.0F, 0.75F, 0.35F, 1.0F }, "%s", Configuration::GetLoc("menu.editor_id_required", "EditorID is required."));
+        } else if (!validEditorId) {
+            ImGui::TextColored({ 1.0F, 0.35F, 0.35F, 1.0F }, "%s", Configuration::GetLoc("menu.editor_id_invalid", "Use only letters, numbers and underscore."));
+        } else if (duplicateEditorId) {
+            ImGui::TextColored({ 1.0F, 0.35F, 0.35F, 1.0F }, "%s", Configuration::GetLoc("menu.editor_id_duplicate", "A form with this EditorID already exists."));
         }
 
         ImGui::Text("%s", Configuration::GetLoc("menu.form_type", "Form type"));
         SetStableComboWidth(FORM_KIND_ITEMS, 220.0F);
         ImGui::Combo("##formType", &selectedFormKind, FORM_KIND_ITEMS.data(), static_cast<int>(FORM_KIND_ITEMS.size()));
 
-        if (SelectedFormKind() == DynamicForms::FormKind::Global) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.global_settings", "Global settings"));
-            SetStableComboWidth(GLOBAL_TYPE_ITEMS, 220.0F);
-            ImGui::Combo(Configuration::GetLoc("menu.global_type", "Global type"), &selectedGlobalType, GLOBAL_TYPE_ITEMS.data(), static_cast<int>(GLOBAL_TYPE_ITEMS.size()));
-
-            ImGui::SetNextItemWidth(220.0F);
-            if (SelectedGlobalType() == DynamicForms::GlobalType::Float) {
-                ImGui::InputFloat(Configuration::GetLoc("menu.default_value", "Default value"), &defaultFloatValue);
-            } else {
-                ImGui::InputInt(Configuration::GetLoc("menu.default_value", "Default value"), &defaultIntValue);
-            }
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::Color) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.color_settings", "Color settings"));
-            ImGui::SetNextItemWidth(260.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
-            auto red = static_cast<std::uint8_t>(std::clamp(createColor[0], 0, 255));
-            auto green = static_cast<std::uint8_t>(std::clamp(createColor[1], 0, 255));
-            auto blue = static_cast<std::uint8_t>(std::clamp(createColor[2], 0, 255));
-            auto alpha = static_cast<std::uint8_t>(std::clamp(createColor[3], 0, 255));
-            if (DrawRGBAColorEditor("RGBA", red, green, blue, alpha)) {
-                createColor[0] = red;
-                createColor[1] = green;
-                createColor[2] = blue;
-                createColor[3] = alpha;
-            }
-            ImGui::Checkbox(Configuration::GetLoc("menu.playable", "Playable"), &createPlayable);
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::ArtObject) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.art_object_settings", "Art Object settings"));
-            ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.model_path", "Model path"), createModelBuffer.data(), createModelBuffer.size());
-            SetStableComboWidth(ART_TYPE_ITEMS, 260.0F);
-            ImGui::Combo(Configuration::GetLoc("menu.art_type", "Art type"), &selectedArtType, ART_TYPE_ITEMS.data(), static_cast<int>(ART_TYPE_ITEMS.size()));
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::ArmorType ||
-            SelectedFormKind() == DynamicForms::FormKind::Armor) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.armor_settings", "Armor settings"));
-            if (SelectedFormKind() == DynamicForms::FormKind::Armor) {
-                ImGui::SetNextItemWidth(260.0F);
-                ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
-            }
-            ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.model_path", "Male world model"), createModelBuffer.data(), createModelBuffer.size());
-            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.meshes_path_hint", "Meshes paths are relative to Data/Meshes."));
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::Perk) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.perk_settings", "Perk settings"));
-            ImGui::SetNextItemWidth(260.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
-            ImGui::Checkbox(Configuration::GetLoc("menu.playable", "Playable"), &createPlayable);
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::HeadPart) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.headpart_settings", "HeadPart settings"));
-            ImGui::SetNextItemWidth(260.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
-            ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.model_path", "Model path"), createModelBuffer.data(), createModelBuffer.size());
-            SetStableComboWidth(HEAD_PART_TYPE_ITEMS, 220.0F);
-            ImGui::Combo(Configuration::GetLoc("menu.head_part_type", "Head part type"), &selectedHeadPartType, HEAD_PART_TYPE_ITEMS.data(), static_cast<int>(HEAD_PART_TYPE_ITEMS.size()));
-            ImGui::Checkbox(Configuration::GetLoc("menu.playable", "Playable"), &createPlayable);
-            ImGui::SameLine();
-            ImGui::Checkbox(Configuration::GetLoc("menu.male", "Male"), &createHeadPartMale);
-            ImGui::SameLine();
-            ImGui::Checkbox(Configuration::GetLoc("menu.female", "Female"), &createHeadPartFemale);
-            ImGui::Checkbox(Configuration::GetLoc("menu.is_extra_part", "Is extra part"), &createHeadPartIsExtraPart);
-            ImGui::SameLine();
-            ImGui::Checkbox(Configuration::GetLoc("menu.use_solid_tint", "Use solid tint"), &createHeadPartUseSolidTint);
-            ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.race_morph", "Race Morph"), createRaceMorphBuffer.data(), createRaceMorphBuffer.size());
-            ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.tri", "Tri"), createDefaultMorphBuffer.data(), createDefaultMorphBuffer.size());
-            ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.chargen_morph", "Chargen Morph"), createChargenMorphBuffer.data(), createChargenMorphBuffer.size());
-            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.meshes_path_hint", "Meshes paths are relative to Data/Meshes."));
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::SoundDescriptor) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.sound_description_settings", "Sound Description settings"));
-            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.sound_files_hint", "Add sound files after creation."));
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::EffectShader) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.effect_shader_settings", "Effect Shader settings"));
-            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.texture_paths_hint", "Texture paths are relative to Data/Textures and can be edited after creation."));
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::Light ||
-            SelectedFormKind() == DynamicForms::FormKind::Explosion ||
-            SelectedFormKind() == DynamicForms::FormKind::Activator) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.base_settings", "Base settings"));
-            ImGui::SetNextItemWidth(260.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
-            ImGui::SetNextItemWidth(360.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.model_path", "Model path"), createModelBuffer.data(), createModelBuffer.size());
-            if (SelectedFormKind() == DynamicForms::FormKind::Light) {
-                auto red = static_cast<std::uint8_t>(std::clamp(createColor[0], 0, 255));
-                auto green = static_cast<std::uint8_t>(std::clamp(createColor[1], 0, 255));
-                auto blue = static_cast<std::uint8_t>(std::clamp(createColor[2], 0, 255));
-                if (DrawRGBColorEditor(Configuration::GetLoc("menu.rgb", "RGB"), red, green, blue)) {
-                    createColor[0] = red;
-                    createColor[1] = green;
-                    createColor[2] = blue;
-                }
-            }
-        }
-        if (SelectedFormKind() == DynamicForms::FormKind::NPC) {
-            ImGui::Separator();
-            ImGui::Text("%s", Configuration::GetLoc("menu.npc_settings", "NPC settings"));
-            ImGui::SetNextItemWidth(260.0F);
-            ImGui::InputText(Configuration::GetLoc("menu.full_name", "Name"), createNameBuffer.data(), createNameBuffer.size());
-            auto red = static_cast<std::uint8_t>(std::clamp(createColor[0], 0, 255));
-            auto green = static_cast<std::uint8_t>(std::clamp(createColor[1], 0, 255));
-            auto blue = static_cast<std::uint8_t>(std::clamp(createColor[2], 0, 255));
-            auto alpha = static_cast<std::uint8_t>(std::clamp(createColor[3], 0, 255));
-            if (DrawRGBAColorEditor(Configuration::GetLoc("menu.body_tint", "Body tint"), red, green, blue, alpha)) {
-                createColor[0] = red;
-                createColor[1] = green;
-                createColor[2] = blue;
-                createColor[3] = alpha;
-            }
-        }
-
         ImGui::Separator();
+        if (!validEditorId || duplicateEditorId) {
+            ImGui::BeginDisabled();
+        }
         if (ImGui::Button(Configuration::GetLoc("menu.confirm", "Confirm"))) {
             DynamicForms::DynamicForm form;
             form.editorId = editorId;
             form.kind = SelectedFormKind();
+            form.packageName = ActiveWorkingPackageName();
             form.globalType = SelectedGlobalType();
             form.defaultValue = SelectedDefaultValue();
             form.fullName = createNameBuffer.data();
@@ -790,6 +1367,25 @@ namespace {
             form.blue = static_cast<std::uint8_t>(createColor[2]);
             form.alpha = static_cast<std::uint8_t>(createColor[3]);
             form.modelPath = createModelBuffer.data();
+            if (form.kind == DynamicForms::FormKind::Book ||
+                form.kind == DynamicForms::FormKind::Misc ||
+                form.kind == DynamicForms::FormKind::SoulGem)
+            {
+                form.itemWeight = 1.0F;
+            }
+            if (form.kind == DynamicForms::FormKind::MaterialType) {
+                form.materialName = editorId;
+                form.red = 255;
+                form.green = 255;
+                form.blue = 255;
+                form.alpha = 255;
+            }
+            if (form.kind == DynamicForms::FormKind::Ammo) {
+                form.damage = 10.0F;
+            }
+            if (form.kind == DynamicForms::FormKind::SoulGem) {
+                form.soulCapacity = 5;
+            }
             if (form.kind == DynamicForms::FormKind::ArmorType || form.kind == DynamicForms::FormKind::Armor) {
                 form.maleWorldModel = createModelBuffer.data();
             }
@@ -831,12 +1427,18 @@ namespace {
                 form.skillOffsets.fill(0);
             }
             if (Manager::AddForm(form)) {
+                if (auto& forms = Manager::GetForms(); !forms.empty()) {
+                    AssignFormToWorkingPackage(forms.back());
+                }
                 ResetCreateState();
                 ImGui::CloseCurrentPopup();
                 created = true;
             } else {
                 createError = Configuration::GetLoc("menu.create_failed", "Could not create form. Check if DPF is available.");
             }
+        }
+        if (!validEditorId || duplicateEditorId) {
+            ImGui::EndDisabled();
         }
 
         ImGui::SameLine();
@@ -850,6 +1452,119 @@ namespace {
 
         ImGui::EndPopup();
         return created;
+    }
+
+    bool RenderCreatePatchPopup() {
+        bool patched = false;
+        if (!ImGui::BeginPopup(CREATE_PATCH_POPUP_ID)) {
+            return false;
+        }
+
+        ImGui::Text("%s: %s", Configuration::GetLoc("menu.patch_target_package", "Patch target package"), ActiveWorkingPackageName());
+
+        ImGui::SetNextItemWidth(220.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.filter_package_name", "Package name"), patchFilterPackageNameBuffer.data(), patchFilterPackageNameBuffer.size());
+        ImGui::SameLine();
+        SetStableComboWidth(FILTER_KIND_ITEMS, 180.0F);
+        ImGui::Combo(Configuration::GetLoc("menu.filter_type", "Type"), &selectedPatchFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(240.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "EditorID"), patchFilterEditorIdBuffer.data(), patchFilterEditorIdBuffer.size());
+
+        auto& forms = Manager::GetForms();
+        ImGui::BeginChild("##createPatchForms", { 760.0F, 460.0F }, true);
+        std::size_t visibleCount = 0;
+        for (const auto& package : previewPackages) {
+            std::vector<std::size_t> packageRows;
+            for (std::size_t i = 0; i < forms.size(); ++i) {
+                if (FormBelongsToPackage(forms[i], package) && MatchesPatchPopupFilters(forms[i], package)) {
+                    packageRows.push_back(i);
+                }
+            }
+            if (packageRows.empty()) {
+                continue;
+            }
+
+            visibleCount += packageRows.size();
+            const auto packageHeader = std::format("{} ({})###patch_package_{}", package, packageRows.size(), package);
+            if (!ImGui::CollapsingHeader(packageHeader.c_str())) {
+                continue;
+            }
+
+            ImGui::Indent();
+            for (const auto kind : FORM_KIND_TREE_ORDER) {
+                std::vector<std::size_t> kindRows;
+                for (const auto row : packageRows) {
+                    if (forms[row].kind == kind) {
+                        kindRows.push_back(row);
+                    }
+                }
+                if (kindRows.empty()) {
+                    continue;
+                }
+
+                const auto kindHeader = std::format("{} ({})###patch_package_{}_kind_{}", FormKindLabel(kind), kindRows.size(), package, static_cast<int>(kind));
+                if (!ImGui::CollapsingHeader(kindHeader.c_str())) {
+                    continue;
+                }
+
+                ImGui::Indent();
+                for (const auto row : kindRows) {
+                    auto& form = forms[row];
+                    ImGui::PushID(form.editorId.c_str());
+                    bool selected = selectedPatchForms.contains(form.editorId);
+                    if (ImGui::Checkbox("##patchSelect", &selected)) {
+                        if (selected) {
+                            selectedPatchForms.insert(form.editorId);
+                        } else {
+                            selectedPatchForms.erase(form.editorId);
+                        }
+                    }
+                    ImGui::SameLine();
+                    ImGui::Text("%s", form.editorId.c_str());
+                    if (HasAnyPatchLayer(form)) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(OVERRIDE_COLOR, "[%s]", PatchPackageLabel(form).c_str());
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::Unindent();
+            }
+            ImGui::Unindent();
+        }
+        if (visibleCount == 0) {
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.no_forms_match_filters", "No forms match the current filters."));
+        }
+        ImGui::EndChild();
+
+        ImGui::Text(Configuration::GetLoc("menu.forms_selected_count", "%zu form(s) selected."), selectedPatchForms.size());
+        if (selectedPatchForms.empty()) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(Configuration::GetLoc("menu.create_patch", "Create patch"))) {
+            for (const auto& editorId : selectedPatchForms) {
+                const auto found = std::ranges::find_if(forms, [&editorId](const DynamicForms::DynamicForm& form) {
+                    return form.editorId == editorId;
+                });
+                if (found != forms.end()) {
+                    MarkFormAsPatchInWorkingPackage(*found);
+                }
+            }
+            selectedPatchForms.clear();
+            ImGui::CloseCurrentPopup();
+            patched = true;
+        }
+        if (selectedPatchForms.empty()) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.cancel", "Cancel"))) {
+            selectedPatchForms.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+        return patched;
     }
 
     bool RenderGlobalEditor(std::size_t index, DynamicForms::DynamicForm& form) {
@@ -1112,6 +1827,255 @@ namespace {
             value = ref.Display();
         }
         return changed;
+    }
+
+    bool DrawAnyFormReferencePicker(const char* label, DynamicForms::FormRef& value) {
+        bool changed = false;
+        auto& filter = formPickerFilters[std::string(label) + ":Any"];
+        auto previewText = value.empty() ? std::string(Configuration::GetLoc("common.select", "Select")) : value.Display();
+
+        SetAvailableComboWidth(360.0F);
+        SetFixedComboPopupWidth(520.0F);
+        if (ImGui::BeginCombo(label, previewText.c_str())) {
+            const bool listsReady = ListManager::GetSingleton()->IsPopulated();
+            char searchBuf[256]{};
+            strcpy_s(searchBuf, filter.c_str());
+            ImGui::SetNextItemWidth(-1.0F);
+            if (ImGui::InputText("##filter", searchBuf, sizeof(searchBuf))) {
+                filter = searchBuf;
+            }
+            ImGui::Separator();
+
+            if (ImGui::Selectable(Configuration::GetLoc("common.none", "None"), value.empty())) {
+                value = {};
+                filter.clear();
+                changed = true;
+            }
+
+            if (!listsReady) {
+                ImGui::TextDisabled("%s", Configuration::GetLoc("menu.dpf_lists_unavailable", "DPF is not available yet."));
+            } else if (ImGui::BeginTabBar("##anyFormTabs")) {
+                const auto search = ToLower(filter);
+                for (const auto& pickerType : FORM_REFERENCE_PICKER_TYPES) {
+                    if (!ImGui::BeginTabItem(pickerType.label)) {
+                        continue;
+                    }
+
+                    std::vector<const InternalFormInfo*> rows;
+                    for (const auto& info : ListManager::GetSingleton()->GetList(pickerType.typeName)) {
+                        const auto id = MakeFormRef(info);
+                        if (id.empty()) {
+                            continue;
+                        }
+                        const auto labelText = ReferenceLabel(info);
+                        if (!search.empty() && ToLower(labelText).find(search) == std::string::npos && ToLower(id.Display()).find(search) == std::string::npos) {
+                            continue;
+                        }
+                        rows.push_back(&info);
+                    }
+
+                    ImGui::Text("%s: %zu", Configuration::GetLoc("menu.available", "Available"), rows.size());
+                    ImGui::BeginChild("##anyFormRows", { 0.0F, 220.0F }, false);
+                    auto* clipper = ImGui::ImGuiListClipperManager::Create();
+                    ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
+                    while (ImGui::ImGuiListClipperManager::Step(clipper)) {
+                        for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
+                            const auto& info = *rows[static_cast<std::size_t>(rowIndex)];
+                            const auto id = MakeFormRef(info);
+                            const auto labelText = ReferenceLabel(info);
+                            if (ImGui::Selectable(labelText.c_str(), SameFormRef(value, id))) {
+                                value = id;
+                                filter.clear();
+                                changed = true;
+                            }
+                        }
+                    }
+                    ImGui::ImGuiListClipperManager::End(clipper);
+                    ImGui::ImGuiListClipperManager::Destroy(clipper);
+                    ImGui::EndChild();
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
+            ImGui::EndCombo();
+        }
+
+        return changed;
+    }
+
+    bool DrawReferenceArrayEditor(const char* label, const char* typeName, std::vector<DynamicForms::FormRef>& refs) {
+        bool changed = false;
+        ImGui::Text("%s: %zu", label, refs.size());
+        for (std::size_t i = 0; i < refs.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::Text("%s", refs[i].Display().c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton(Configuration::GetLoc("menu.remove", "Remove"))) {
+                refs.erase(refs.begin() + static_cast<std::ptrdiff_t>(i));
+                changed = true;
+                ImGui::PopID();
+                break;
+            }
+            ImGui::PopID();
+        }
+
+        DynamicForms::FormRef selected;
+        ImGui::PushID(label);
+        const bool picked = typeName ? DrawFormReferencePicker(Configuration::GetLoc("menu.add_form", "Add form"), typeName, selected) : DrawAnyFormReferencePicker(Configuration::GetLoc("menu.add_form", "Add form"), selected);
+        ImGui::PopID();
+        if (picked && !selected.empty() && !HasReference(refs, selected)) {
+            refs.push_back(selected);
+            changed = true;
+        }
+        return changed;
+    }
+
+    bool DrawCommonItemFields(DynamicForms::DynamicForm& edited, const bool includeWeight = true) {
+        bool changed = false;
+        changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
+        changed |= InputString(Configuration::GetLoc("menu.model_path", "Model path"), edited.modelPath, 420.0F);
+        ImGui::SetNextItemWidth(180.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.value", "Value"), &edited.itemValue)) {
+            changed = true;
+        }
+        if (includeWeight) {
+            ImGui::SetNextItemWidth(180.0F);
+            if (ImGui::InputFloat(Configuration::GetLoc("menu.weight", "Weight"), &edited.itemWeight)) {
+                changed = true;
+            }
+        }
+        changed |= InputString(Configuration::GetLoc("menu.inventory_icon", "Inventory icon"), edited.inventoryIcon, 420.0F);
+        changed |= InputString(Configuration::GetLoc("menu.message_icon", "Message icon"), edited.messageIcon, 420.0F);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.pickup_sound", "Pickup sound"), "SoundDescriptor", edited.pickupSound);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.putdown_sound", "Putdown sound"), "SoundDescriptor", edited.putdownSound);
+        changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.keywords", "Keywords"), "Keyword", edited.keywords);
+        return changed;
+    }
+
+    bool CommitEditedForm(const std::size_t index, DynamicForms::DynamicForm& form, const DynamicForms::DynamicForm& edited, const bool changed) {
+        if (changed && Manager::UpdateForm(index, edited)) {
+            form = Manager::GetForms()[index];
+            return true;
+        }
+        return false;
+    }
+
+    bool RenderFormListEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        auto edited = form;
+        const bool changed = DrawReferenceArrayEditor(Configuration::GetLoc("menu.form_list_items", "Forms"), nullptr, edited.formListItems);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderEquipSlotEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        ImGui::TextUnformatted(Configuration::GetLoc("menu.flags", "Flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_use_all_parents", "Use All Parents"), edited.equipSlotFlags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_parents_optional", "Parents Optional"), edited.equipSlotFlags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_item_slot", "Item Slot"), edited.equipSlotFlags, 1u << 2);
+        changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.parent_slots", "Parent slots"), "EquipSlot", edited.equipSlotParents);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderVoiceTypeEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.allow_default_dialogue", "Allow default dialogue"), &edited.voiceTypeAllowDefaultDialogue)) {
+            changed = true;
+        }
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.female", "Female"), &edited.voiceTypeFemale)) {
+            changed = true;
+        }
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderSimpleItemEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        auto edited = form;
+        const bool changed = DrawCommonItemFields(edited);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderBookEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        changed |= DrawCommonItemFields(edited);
+        changed |= InputString(Configuration::GetLoc("menu.description", "Description"), edited.description, 520.0F);
+        ImGui::TextUnformatted(Configuration::GetLoc("menu.book_flags", "Book flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_teaches_skill", "Teaches Skill"), edited.bookFlags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_cant_take", "Can't be taken"), edited.bookFlags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_teaches_spell", "Teaches Spell"), edited.bookFlags, 1u << 2);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_has_been_read", "Has Been Read"), edited.bookFlags, 1u << 3);
+        int typeIndex = edited.bookType == std::numeric_limits<std::uint32_t>::max() ? 1 : 0;
+        SetStableComboWidth(BOOK_TYPE_ITEMS, 180.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.book_type", "Book type"), &typeIndex, BOOK_TYPE_ITEMS.data(), static_cast<int>(BOOK_TYPE_ITEMS.size()))) {
+            edited.bookType = typeIndex == 1 ? std::numeric_limits<std::uint32_t>::max() : 0u;
+            changed = true;
+        }
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.teaches_spell", "Teaches spell"), "Spell", edited.teachesSpell);
+        ImGui::SetNextItemWidth(180.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.teaches_actor_value", "Teaches actor value"), &edited.teachesActorValue)) {
+            changed = true;
+        }
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderSoulGemEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        changed |= DrawCommonItemFields(edited);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.linked_soul_gem", "Linked soul gem"), "SoulGem", edited.linkedSoulGem);
+        int currentSoul = static_cast<int>(edited.currentSoul);
+        SetStableComboWidth(SOUL_LEVEL_ITEMS, 180.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.current_soul", "Current soul"), &currentSoul, SOUL_LEVEL_ITEMS.data(), static_cast<int>(SOUL_LEVEL_ITEMS.size()))) {
+            edited.currentSoul = static_cast<std::uint32_t>(std::clamp(currentSoul, 0, static_cast<int>(SOUL_LEVEL_ITEMS.size() - 1)));
+            changed = true;
+        }
+        int capacity = static_cast<int>(edited.soulCapacity);
+        SetStableComboWidth(SOUL_LEVEL_ITEMS, 180.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.soul_capacity", "Soul capacity"), &capacity, SOUL_LEVEL_ITEMS.data(), static_cast<int>(SOUL_LEVEL_ITEMS.size()))) {
+            edited.soulCapacity = static_cast<std::uint32_t>(std::clamp(capacity, 0, static_cast<int>(SOUL_LEVEL_ITEMS.size() - 1)));
+            changed = true;
+        }
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderMaterialTypeEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        changed |= InputString(Configuration::GetLoc("menu.material_name", "Material name"), edited.materialName);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.parent_material", "Parent material"), "MaterialType", edited.materialParent);
+        int materialId = static_cast<int>(edited.materialId);
+        ImGui::SetNextItemWidth(180.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.material_id", "Material ID"), &materialId)) {
+            edited.materialId = static_cast<std::uint32_t>(std::max(materialId, 0));
+            changed = true;
+        }
+        changed |= DrawRGBAColorEditor(Configuration::GetLoc("menu.color", "Color"), edited.red, edited.green, edited.blue, edited.alpha);
+        ImGui::SetNextItemWidth(180.0F);
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.buoyancy", "Buoyancy"), &edited.buoyancy)) {
+            changed = true;
+        }
+        ImGui::TextUnformatted(Configuration::GetLoc("menu.flags", "Flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_stairs", "Stairs"), edited.flags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_arrows_stick", "Arrows Stick"), edited.flags, 1u << 1);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.impact_data_set", "Impact data set"), "ImpactDataSet", edited.havokImpactDataSet);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderAmmoEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        changed |= DrawCommonItemFields(edited, false);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.projectile", "Projectile"), "Projectile", edited.projectile);
+        ImGui::SetNextItemWidth(180.0F);
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.damage", "Damage"), &edited.damage)) {
+            changed = true;
+        }
+        ImGui::TextUnformatted(Configuration::GetLoc("menu.ammo_flags", "Ammo flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_normal_weapon_resistance", "Ignores Normal Weapon Resistance"), edited.ammoFlags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_non_playable", "Non-Playable"), edited.ammoFlags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_non_bolt", "Non-Bolt"), edited.ammoFlags, 1u << 2);
+        return CommitEditedForm(index, form, edited, changed);
     }
 
     bool RenderOutfitEditor(std::size_t index, DynamicForms::DynamicForm& form) {
@@ -2673,9 +3637,9 @@ namespace Configuration {
         LoadLanguage();
         LoadForms();
 
-        SKSEMenuFramework::SetSection(GetLoc("menu.section", "Dynamic Forms Generator"));
-        SKSEMenuFramework::AddSectionItem(GetLoc("menu.forms", "Forms"), RenderFormsMenu);
-        SKSEMenuFramework::AddSectionItem(GetLoc("menu.export", "Export"), RenderExportMenu);
+        SKSEMenuFramework::SetSection(Configuration::GetLoc("menu.section", "Dynamic Forms Generator"));
+        SKSEMenuFramework::AddSectionItem(Configuration::GetLoc("menu.forms", "Forms"), RenderFormsMenu);
+        SKSEMenuFramework::AddSectionItem(Configuration::GetLoc("menu.export", "Export"), RenderExportMenu);
     }
 
     void LoadLanguage() {
@@ -2807,42 +3771,23 @@ namespace Configuration {
     }
 
     void RenderFormsMenu() {
-        std::string editorId = editorIdBuffer.data();
-        const bool validEditorId = IsValidEditorId(editorId);
-        const bool duplicateEditorId = validEditorId && Manager::HasEditorId(editorId);
-
-        ImGui::SetNextItemWidth(280.0F);
-        ImGui::InputText(GetLoc("menu.editor_id", "EditorID"), editorIdBuffer.data(), editorIdBuffer.size());
-        editorId = editorIdBuffer.data();
-
-        if (editorId.empty()) {
-            ImGui::TextColored({ 1.0F, 0.75F, 0.35F, 1.0F }, "%s", GetLoc("menu.editor_id_required", "EditorID is required."));
-        } else if (!validEditorId) {
-            ImGui::TextColored({ 1.0F, 0.35F, 0.35F, 1.0F }, "%s", GetLoc("menu.editor_id_invalid", "Use only letters, numbers and underscore."));
-        } else if (duplicateEditorId) {
-            ImGui::TextColored({ 1.0F, 0.35F, 0.35F, 1.0F }, "%s", GetLoc("menu.editor_id_duplicate", "A form with this EditorID already exists."));
+        RenderPackageWorkspaceHeader();
+        if (requestCreateFormPopup) {
+            requestCreateFormPopup = false;
+            ImGui::OpenPopup(Configuration::GetLoc("menu.create_popup", "Create Form"));
         }
-
-        if (!validEditorId || duplicateEditorId) {
-            ImGui::BeginDisabled();
+        if (requestCreatePatchPopup) {
+            requestCreatePatchPopup = false;
+            ImGui::OpenPopup(CREATE_PATCH_POPUP_ID);
         }
-
-        if (ImGui::Button(GetLoc("menu.create", "Create"))) {
-            ImGui::OpenPopup(GetLoc("menu.create_popup", "Create Form"));
-        }
-
-        if (!validEditorId || duplicateEditorId) {
-            ImGui::EndDisabled();
-        }
-
-        RenderCreatePopup(editorId);
-
+        RenderCreatePopup();
+        RenderCreatePatchPopup();
         ImGui::Separator();
-        ImGui::TextColored({ 0.6F, 0.8F, 1.0F, 1.0F }, "%s", GetLoc("menu.saved_forms", "Saved forms"));
+        ImGui::TextColored({ 0.6F, 0.8F, 1.0F, 1.0F }, "%s", Configuration::GetLoc("menu.saved_forms", "Saved forms"));
 
         const bool hasDirtyForms = Manager::HasDirtyForms();
         if (hasDirtyForms) {
-            ImGui::TextColored(DIRTY_COLOR, "%s", GetLoc("menu.unsaved_changes", "There are unsaved changes."));
+            ImGui::TextColored(DIRTY_COLOR, "%s", Configuration::GetLoc("menu.unsaved_changes", "There are unsaved changes."));
         }
 
         if (hasDirtyForms) {
@@ -2850,13 +3795,13 @@ namespace Configuration {
             ImGui::PushStyleColor(ImGui::ImGuiCol_ButtonHovered, { 1.0F, 0.82F, 0.35F, 1.0F });
             ImGui::PushStyleColor(ImGui::ImGuiCol_ButtonActive, { 0.9F, 0.58F, 0.12F, 1.0F });
         }
-        if (ImGui::Button(GetLoc("menu.save_all", "Save all"))) {
+        if (ImGui::Button(Configuration::GetLoc("menu.save_all", "Save all"))) {
             if (Manager::SaveAllForms()) {
                 lastSaveSucceeded = true;
-                saveMessage = GetLoc("menu.save_all_success", "All forms saved.");
+                saveMessage = Configuration::GetLoc("menu.save_all_success", "All forms saved.");
             } else {
                 lastSaveSucceeded = false;
-                saveMessage = GetLoc("menu.save_all_failed", "Could not save all forms. Check the log.");
+                saveMessage = Configuration::GetLoc("menu.save_all_failed", "Could not save all forms. Check the log.");
             }
         }
         if (hasDirtyForms) {
@@ -2868,7 +3813,7 @@ namespace Configuration {
             ImGui::TextColored(lastSaveSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", saveMessage.c_str());
         }
 
-        if (ImGui::Button(deleteSelectionMode ? GetLoc("menu.cancel_delete_selection", "Cancel delete selection") : GetLoc("menu.select_to_delete", "Select to delete"))) {
+        if (ImGui::Button(deleteSelectionMode ? Configuration::GetLoc("menu.cancel_delete_selection", "Cancel delete selection") : Configuration::GetLoc("menu.select_to_delete", "Select to delete"))) {
             deleteSelectionMode = !deleteSelectionMode;
             selectedDeleteForms.clear();
             deleteError.clear();
@@ -2878,7 +3823,7 @@ namespace Configuration {
             if (selectedDeleteForms.empty()) {
                 ImGui::BeginDisabled();
             }
-            if (ImGui::Button(std::format("{} ({})", GetLoc("menu.confirm_delete", "Confirm delete"), selectedDeleteForms.size()).c_str())) {
+            if (ImGui::Button(std::format("{} ({})", Configuration::GetLoc("menu.confirm_delete", "Confirm delete"), selectedDeleteForms.size()).c_str())) {
                 deleteError.clear();
                 requestBatchDeletePopup = true;
             }
@@ -2886,15 +3831,10 @@ namespace Configuration {
                 ImGui::EndDisabled();
             }
             ImGui::SameLine();
-            if (ImGui::Button(GetLoc("menu.clear_selected", "Clear selected"))) {
+            if (ImGui::Button(Configuration::GetLoc("menu.clear_selected", "Clear selected"))) {
                 selectedDeleteForms.clear();
             }
         }
-
-        SetStableComboWidth(FILTER_KIND_ITEMS, 220.0F);
-        ImGui::Combo(GetLoc("menu.filter_type", "Filter by type"), &selectedFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
-        ImGui::SetNextItemWidth(280.0F);
-        ImGui::InputText(GetLoc("menu.filter_editor_id", "Filter EditorID"), filterEditorIdBuffer.data(), filterEditorIdBuffer.size());
 
         auto& forms = Manager::GetForms();
         std::set<std::string> existingEditorIds;
@@ -2909,142 +3849,64 @@ namespace Configuration {
             }
         }
 
-        for (std::size_t i = 0; i < forms.size(); ++i) {
-            auto& form = forms[i];
-            if (!MatchesFilters(form)) {
+        std::size_t renderedPackageCount = 0;
+        for (const auto& package : previewPackages) {
+            if (!MatchesPackageNameFilter(package)) {
                 continue;
             }
 
-            ImGui::PushID(form.editorId.c_str());
-            const bool isDirty = Manager::IsDirty(i);
+            const auto packageRows = VisibleFormRows(package);
+            if (packageRows.empty()) {
+                continue;
+            }
+
+            ++renderedPackageCount;
             if (deleteSelectionMode) {
-                bool selected = selectedDeleteForms.contains(form.editorId);
-                if (ImGui::Checkbox("##selectDelete", &selected)) {
-                    if (selected) {
-                        selectedDeleteForms.insert(form.editorId);
-                    } else {
-                        selectedDeleteForms.erase(form.editorId);
-                    }
+                bool packageSelected = AllRowsSelectedForDelete(packageRows);
+                ImGui::PushID(std::format("delete_package_{}", package).c_str());
+                if (ImGui::Checkbox("##selectPackageDelete", &packageSelected)) {
+                    SetRowsSelectedForDelete(packageRows, packageSelected);
                 }
+                ImGui::PopID();
                 ImGui::SameLine();
             }
-            std::string headerLabel = form.editorId;
-            if (isDirty) {
-                headerLabel += " (Need save)";
-                ImGui::PushStyleColor(ImGui::ImGuiCol_Header, { 0.4F, 0.3F, 0.1F, 1.0F });
+            const auto packageHeader = std::format("{} ({})###package_{}", package, packageRows.size(), package);
+            if (!ImGui::CollapsingHeader(packageHeader.c_str())) {
+                continue;
             }
-            headerLabel += "###";
-            headerLabel += form.editorId;
-            if (ImGui::CollapsingHeader(headerLabel.c_str())) {
-                if (isDirty) {
-                    ImGui::PopStyleColor();
-                }
-                ImGui::Indent();
-                if (isDirty) {
-                    ImGui::TextColored(DIRTY_COLOR, "%s", GetLoc("menu.unsaved_form", "Unsaved changes"));
-                }
-                ImGui::Text("%s: %s", GetLoc("menu.form_type", "Form type"), FormKindLabel(form.kind));
-                ImGui::Text("%s: %u", GetLoc("menu.local_id", "Local ID"), form.localId);
-                if (CanAddToInventory(form.kind)) {
-                    if (ImGui::Button(GetLoc("menu.add_to_inventory", "Add to inventory"))) {
-                        if (Manager::AddFormToPlayerInventory(i)) {
-                            lastTestActionSucceeded = true;
-                            testActionMessage = std::format("{} {}", form.editorId, GetLoc("menu.added_to_inventory", "added to inventory."));
-                        } else {
-                            lastTestActionSucceeded = false;
-                            testActionMessage = std::format("{} {}", GetLoc("menu.add_to_inventory_failed", "Could not add to inventory:"), form.editorId);
-                        }
-                    }
-                }
-                if (CanSpawnInWorld(form.kind)) {
-                    if (CanAddToInventory(form.kind)) {
-                        ImGui::SameLine();
-                    }
-                    if (ImGui::Button(GetLoc("menu.spawn_at_player", "Spawn at player"))) {
-                        if (Manager::SpawnFormAtPlayer(i)) {
-                            lastTestActionSucceeded = true;
-                            testActionMessage = std::format("{} {}", form.editorId, GetLoc("menu.spawned_at_player", "spawned at player."));
-                        } else {
-                            lastTestActionSucceeded = false;
-                            testActionMessage = std::format("{} {}", GetLoc("menu.spawn_at_player_failed", "Could not spawn:"), form.editorId);
-                        }
-                    }
-                    if (form.kind == DynamicForms::FormKind::NPC) {
-                        ImGui::SameLine();
-                        if (ImGui::Button(GetLoc("menu.spawn_lydia_debug", "Spawn Lydia debug"))) {
-                            if (Manager::SpawnLydiaForDebug()) {
-                                lastTestActionSucceeded = true;
-                                testActionMessage = GetLoc("menu.spawned_lydia_debug", "Lydia debug spawned.");
-                            } else {
-                                lastTestActionSucceeded = false;
-                                testActionMessage = GetLoc("menu.spawn_lydia_debug_failed", "Could not spawn Lydia debug.");
-                            }
-                        }
-                    }
-                }
-                if (!testActionMessage.empty()) {
-                    ImGui::TextColored(lastTestActionSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", testActionMessage.c_str());
-                }
-                if (form.kind == DynamicForms::FormKind::Global) {
-                    RenderGlobalEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::Outfit) {
-                    RenderOutfitEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::ArmorType) {
-                    RenderArmorTypeEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::Armor) {
-                    RenderArmorEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::Color) {
-                    RenderColorEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::ArtObject) {
-                    RenderArtObjectEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::Perk) {
-                    RenderPerkEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::HeadPart) {
-                    RenderHeadPartEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::SoundDescriptor) {
-                    RenderSoundDescriptorEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::Light) {
-                    RenderLightEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::Explosion) {
-                    RenderExplosionEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::Activator) {
-                    RenderActivatorEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::EffectShader) {
-                    RenderEffectShaderEditor(i, form);
-                } else if (form.kind == DynamicForms::FormKind::NPC) {
-                    RenderNPCEditor(i, form);
-                } else {
-                    ImGui::Text("%s", GetLoc("menu.no_editable_fields", "No editable fields for this form type yet."));
+
+            ImGui::Indent();
+            for (const auto kind : FORM_KIND_TREE_ORDER) {
+                const auto kindRows = VisibleFormRows(package, kind);
+                if (kindRows.empty()) {
+                    continue;
                 }
 
-                if (isDirty) {
-                    ImGui::PushStyleColor(ImGui::ImGuiCol_Button, DIRTY_COLOR);
-                    ImGui::PushStyleColor(ImGui::ImGuiCol_ButtonHovered, { 1.0F, 0.82F, 0.35F, 1.0F });
-                    ImGui::PushStyleColor(ImGui::ImGuiCol_ButtonActive, { 0.9F, 0.58F, 0.12F, 1.0F });
-                }
-                if (ImGui::Button(GetLoc("menu.save", "Save"))) {
-                    if (Manager::SaveForm(i)) {
-                        lastSaveSucceeded = true;
-                        saveMessage = std::format("{} {}", form.editorId, GetLoc("menu.save_success_suffix", "saved."));
-                    } else {
-                        lastSaveSucceeded = false;
-                        saveMessage = std::format("{} {}", GetLoc("menu.save_failed_prefix", "Could not save"), form.editorId);
+                if (deleteSelectionMode) {
+                    bool kindSelected = AllRowsSelectedForDelete(kindRows);
+                    ImGui::PushID(std::format("delete_package_{}_kind_{}", package, static_cast<int>(kind)).c_str());
+                    if (ImGui::Checkbox("##selectKindDelete", &kindSelected)) {
+                        SetRowsSelectedForDelete(kindRows, kindSelected);
                     }
+                    ImGui::PopID();
+                    ImGui::SameLine();
                 }
-                if (isDirty) {
-                    ImGui::PopStyleColor(3);
+                const auto kindHeader = std::format("{} ({})###package_{}_kind_{}", FormKindLabel(kind), kindRows.size(), package, static_cast<int>(kind));
+                if (!ImGui::CollapsingHeader(kindHeader.c_str())) {
+                    continue;
                 }
-                ImGui::SameLine();
-                if (ImGui::Button(GetLoc("menu.delete", "Delete"))) {
-                    pendingDeleteIndex = static_cast<int>(i);
-                    deleteError.clear();
-                    requestDeletePopup = true;
+
+                ImGui::Indent();
+                for (const auto row : kindRows) {
+                    RenderFormTreeItem(row, forms[row]);
                 }
                 ImGui::Unindent();
-            } else if (isDirty) {
-                ImGui::PopStyleColor();
             }
-            ImGui::PopID();
+            ImGui::Unindent();
+        }
+
+        if (renderedPackageCount == 0) {
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.no_forms_match_filters", "No forms match the current filters."));
         }
 
         if (requestDeletePopup) {
