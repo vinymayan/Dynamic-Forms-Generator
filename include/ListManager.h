@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <map>
@@ -19,6 +20,7 @@ struct InternalFormInfo {
     std::string editorID;
     std::string name;
     std::string pluginName;
+    std::string normalizedFormID;
     std::string formType;
     std::string description;
     std::string nextPerkId;
@@ -42,6 +44,7 @@ public:
 
     bool PopulateAllLists(bool forceRefresh = false);
     [[nodiscard]] bool IsPopulated() const { return _isPopulated; }
+    [[nodiscard]] std::uint64_t GetGeneration() const { return _generation; }
 
     static std::string ToUTF8(std::string_view a_str);
     const std::vector<InternalFormInfo>& GetList(const std::string& typeName);
@@ -62,6 +65,7 @@ private:
     void PopulateList(const std::string& a_typeName, std::function<bool(T*)> a_filter = nullptr);
 
     bool _isPopulated = false;
+    std::uint64_t _generation = 0;
     std::map<std::string, std::vector<InternalFormInfo>> _dataStore;
     std::vector<std::function<void()>> _readyCallbacks;
 };

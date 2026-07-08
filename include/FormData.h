@@ -22,6 +22,9 @@ namespace DynamicForms {
         SoulGem,
         MaterialType,
         Ammo,
+        Weapon,
+        AlchemyItem,
+        Ingredient,
         Color,
         ArtObject,
         Perk,
@@ -134,6 +137,15 @@ namespace DynamicForms {
         std::int32_t rank{ 0 };
     };
 
+    struct MagicEffectEntry
+    {
+        FormRef effectSetting;
+        float magnitude{ 0.0F };
+        std::uint32_t area{ 0 };
+        std::uint32_t duration{ 0 };
+        float cost{ 0.0F };
+    };
+
     struct TintLayer
     {
         std::uint16_t index{ 0 };
@@ -194,6 +206,40 @@ namespace DynamicForms {
         float buoyancy{ 0.0F };
         FormRef projectile;
         std::uint32_t ammoFlags{ 0 };
+        std::uint32_t weaponType{ 1 };
+        std::uint32_t weaponFlags{ 0 };
+        std::uint32_t weaponFlags2{ 0 };
+        std::uint32_t weaponSkill{ 6 };
+        std::uint32_t weaponResist{ 24 };
+        std::uint32_t weaponCritFlags{ 0 };
+        std::uint32_t weaponCritDamage{ 0 };
+        float weaponSpeed{ 1.0F };
+        float weaponReach{ 1.0F };
+        float weaponMinRange{ 0.0F };
+        float weaponMaxRange{ 0.0F };
+        float weaponStagger{ 0.0F };
+        float weaponCritMult{ 1.0F };
+        FormRef templateWeapon;
+        FormRef critEffect;
+        FormRef attackSound;
+        FormRef attackSound2D;
+        FormRef attackLoopSound;
+        FormRef attackFailSound;
+        FormRef idleSound;
+        FormRef equipSound;
+        FormRef unequipSound;
+        FormRef firstPersonModelObject;
+        std::uint32_t alchemyFlags{ 0 };
+        std::int32_t alchemyCostOverride{ 0 };
+        FormRef addictionItem;
+        float addictionChance{ 0.0F };
+        FormRef consumptionSound;
+        std::uint32_t ingredientFlags{ 0 };
+        std::int32_t ingredientCostOverride{ 0 };
+        std::uint16_t knownEffectFlags{ 0 };
+        std::uint16_t playerUses{ 0 };
+        bool magicEffectsOverride{ false };
+        std::vector<MagicEffectEntry> magicEffects;
         std::uint32_t bookFlags{ 0 };
         std::uint32_t bookType{ 0 };
         FormRef teachesSpell;

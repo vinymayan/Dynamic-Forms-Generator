@@ -90,6 +90,22 @@ namespace {
         const char* label;
     };
 
+    struct PickerRow
+    {
+        DynamicForms::FormRef ref;
+        std::string label;
+        std::string searchText;
+    };
+
+    struct PickerRowCache
+    {
+        std::uint64_t generation{ 0 };
+        std::string search;
+        std::vector<PickerRow> rows;
+    };
+
+    std::unordered_map<std::string, PickerRowCache> pickerRowCaches;
+
     constexpr auto DELETE_POPUP_ID = "Delete Form##dynamic_forms_delete_popup";
     constexpr auto BATCH_DELETE_POPUP_ID = "Delete Selected Forms##dynamic_forms_batch_delete_popup";
     constexpr auto CREATE_PATCH_POPUP_ID = "Create Patch##dynamic_forms_create_patch_popup";
@@ -100,8 +116,8 @@ namespace {
     const ImGui::ImVec4 INHERITED_COLOR{ 0.6F, 0.78F, 1.0F, 1.0F };
     const ImGui::ImVec4 OVERRIDE_COLOR{ 1.0F, 0.62F, 0.22F, 1.0F };
     const ImGui::ImVec4 LOCAL_COLOR{ 0.55F, 0.9F, 0.65F, 1.0F };
-    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
-    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
     constexpr std::array FORM_KIND_TREE_ORDER{
         DynamicForms::FormKind::Global,
         DynamicForms::FormKind::Keyword,
@@ -117,6 +133,9 @@ namespace {
         DynamicForms::FormKind::SoulGem,
         DynamicForms::FormKind::MaterialType,
         DynamicForms::FormKind::Ammo,
+        DynamicForms::FormKind::Weapon,
+        DynamicForms::FormKind::AlchemyItem,
+        DynamicForms::FormKind::Ingredient,
         DynamicForms::FormKind::Color,
         DynamicForms::FormKind::ArtObject,
         DynamicForms::FormKind::Perk,
@@ -150,6 +169,13 @@ namespace {
     constexpr std::array ARMOR_TYPE_ITEMS{ "Light Armor", "Heavy Armor", "Clothing" };
     constexpr std::array SOUL_LEVEL_ITEMS{ "None", "Petty", "Lesser", "Common", "Greater", "Grand" };
     constexpr std::array BOOK_TYPE_ITEMS{ "Book/Tome", "Note/Scroll" };
+    constexpr std::array WEAPON_TYPE_ITEMS{ "Hand to Hand", "One-Hand Sword", "One-Hand Dagger", "One-Hand Axe", "One-Hand Mace", "Two-Hand Sword", "Two-Hand Axe", "Bow", "Staff", "Crossbow" };
+    constexpr std::array ACTOR_VALUE_ITEMS{ "One-Handed", "Two-Handed", "Archery", "Block", "Smithing", "Heavy Armor", "Light Armor", "Pickpocket", "Lockpicking", "Sneak", "Alchemy", "Speech", "Alteration", "Conjuration", "Destruction", "Illusion", "Restoration", "Enchanting", "Health", "Magicka", "Stamina", "Heal Rate", "Magicka Rate", "Stamina Rate", "None" };
+    constexpr std::array<std::uint32_t, ACTOR_VALUE_ITEMS.size()> ACTOR_VALUE_IDS{
+        6u, 7u, 8u, 9u, 10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u,
+        18u, 19u, 20u, 21u, 22u, 23u, 24u, 25u, 26u, 27u, 28u, 29u,
+        std::numeric_limits<std::uint32_t>::max()
+    };
     constexpr std::array FORM_REFERENCE_PICKER_TYPES{
         PickerType{ "Global", "Global" },
         PickerType{ "Keyword", "Keyword" },
@@ -165,6 +191,9 @@ namespace {
         PickerType{ "SoulGem", "Soul Gem" },
         PickerType{ "MaterialType", "Material Type" },
         PickerType{ "Ammo", "Ammo" },
+        PickerType{ "Weapon", "Weapon" },
+        PickerType{ "AlchemyItem", "Alchemy Item" },
+        PickerType{ "Ingredient", "Ingredient" },
         PickerType{ "Color", "Color" },
         PickerType{ "ArtObject", "Art Object" },
         PickerType{ "Perk", "Perk" },
@@ -254,24 +283,30 @@ namespace {
         case 13:
             return DynamicForms::FormKind::Ammo;
         case 14:
-            return DynamicForms::FormKind::Color;
+            return DynamicForms::FormKind::Weapon;
         case 15:
-            return DynamicForms::FormKind::ArtObject;
+            return DynamicForms::FormKind::AlchemyItem;
         case 16:
-            return DynamicForms::FormKind::Perk;
+            return DynamicForms::FormKind::Ingredient;
         case 17:
-            return DynamicForms::FormKind::HeadPart;
+            return DynamicForms::FormKind::Color;
         case 18:
-            return DynamicForms::FormKind::SoundDescriptor;
+            return DynamicForms::FormKind::ArtObject;
         case 19:
-            return DynamicForms::FormKind::Light;
+            return DynamicForms::FormKind::Perk;
         case 20:
-            return DynamicForms::FormKind::Explosion;
+            return DynamicForms::FormKind::HeadPart;
         case 21:
-            return DynamicForms::FormKind::Activator;
+            return DynamicForms::FormKind::SoundDescriptor;
         case 22:
-            return DynamicForms::FormKind::EffectShader;
+            return DynamicForms::FormKind::Light;
         case 23:
+            return DynamicForms::FormKind::Explosion;
+        case 24:
+            return DynamicForms::FormKind::Activator;
+        case 25:
+            return DynamicForms::FormKind::EffectShader;
+        case 26:
             return DynamicForms::FormKind::NPC;
         case 0:
         default:
@@ -370,6 +405,12 @@ namespace {
             return "Material Type";
         case DynamicForms::FormKind::Ammo:
             return "Ammo";
+        case DynamicForms::FormKind::Weapon:
+            return "Weapon";
+        case DynamicForms::FormKind::AlchemyItem:
+            return "Alchemy Item";
+        case DynamicForms::FormKind::Ingredient:
+            return "Ingredient";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -674,6 +715,9 @@ namespace {
             kind == DynamicForms::FormKind::Key ||
             kind == DynamicForms::FormKind::SoulGem ||
             kind == DynamicForms::FormKind::Ammo ||
+            kind == DynamicForms::FormKind::Weapon ||
+            kind == DynamicForms::FormKind::AlchemyItem ||
+            kind == DynamicForms::FormKind::Ingredient ||
             kind == DynamicForms::FormKind::Light;
     }
 
@@ -684,6 +728,9 @@ namespace {
             kind == DynamicForms::FormKind::Key ||
             kind == DynamicForms::FormKind::SoulGem ||
             kind == DynamicForms::FormKind::Ammo ||
+            kind == DynamicForms::FormKind::Weapon ||
+            kind == DynamicForms::FormKind::AlchemyItem ||
+            kind == DynamicForms::FormKind::Ingredient ||
             kind == DynamicForms::FormKind::Light ||
             kind == DynamicForms::FormKind::Explosion ||
             kind == DynamicForms::FormKind::Activator ||
@@ -1082,6 +1129,9 @@ namespace {
     bool RenderSoulGemEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderMaterialTypeEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderAmmoEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderWeaponEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderAlchemyItemEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderIngredientEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderColorEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderArtObjectEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderPerkEditor(std::size_t index, DynamicForms::DynamicForm& form);
@@ -1196,6 +1246,12 @@ namespace {
                 RenderMaterialTypeEditor(index, form);
             } else if (form.kind == DynamicForms::FormKind::Ammo) {
                 RenderAmmoEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Weapon) {
+                RenderWeaponEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::AlchemyItem) {
+                RenderAlchemyItemEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Ingredient) {
+                RenderIngredientEditor(index, form);
             } else if (form.kind == DynamicForms::FormKind::Color) {
                 RenderColorEditor(index, form);
             } else if (form.kind == DynamicForms::FormKind::ArtObject) {
@@ -1369,7 +1425,10 @@ namespace {
             form.modelPath = createModelBuffer.data();
             if (form.kind == DynamicForms::FormKind::Book ||
                 form.kind == DynamicForms::FormKind::Misc ||
-                form.kind == DynamicForms::FormKind::SoulGem)
+                form.kind == DynamicForms::FormKind::SoulGem ||
+                form.kind == DynamicForms::FormKind::Weapon ||
+                form.kind == DynamicForms::FormKind::AlchemyItem ||
+                form.kind == DynamicForms::FormKind::Ingredient)
             {
                 form.itemWeight = 1.0F;
             }
@@ -1382,6 +1441,14 @@ namespace {
             }
             if (form.kind == DynamicForms::FormKind::Ammo) {
                 form.damage = 10.0F;
+            }
+            if (form.kind == DynamicForms::FormKind::Weapon) {
+                form.damage = 8.0F;
+                form.weaponSpeed = 1.0F;
+                form.weaponReach = 1.0F;
+                form.weaponType = 1;
+                form.weaponSkill = 6;
+                form.weaponResist = 24;
             }
             if (form.kind == DynamicForms::FormKind::SoulGem) {
                 form.soulCapacity = 5;
@@ -1628,7 +1695,7 @@ namespace {
     DynamicForms::FormRef MakeFormRef(const InternalFormInfo& info) {
         DynamicForms::FormRef ref;
         ref.editorID = info.editorID;
-        ref.formID = FormUtil::NormalizeFormID(RE::TESForm::LookupByID(info.formID));
+        ref.formID = info.normalizedFormID;
         return ref;
     }
 
@@ -1639,6 +1706,44 @@ namespace {
             label += " - " + info.name;
         }
         return label;
+    }
+
+    const std::vector<PickerRow>& CachedPickerRows(const char* typeName, const std::string& search) {
+        auto* manager = ListManager::GetSingleton();
+        const auto generation = manager->GetGeneration();
+        static std::uint64_t cachedGeneration = 0;
+        if (cachedGeneration != generation) {
+            pickerRowCaches.clear();
+            cachedGeneration = generation;
+        }
+        const std::string cacheKey = std::format("{}\x1F{}", typeName, search);
+        auto& cache = pickerRowCaches[cacheKey];
+        if (cache.generation == generation && cache.search == search) {
+            return cache.rows;
+        }
+
+        cache.generation = generation;
+        cache.search = search;
+        cache.rows.clear();
+        const auto& list = manager->GetList(typeName);
+        cache.rows.reserve(search.empty() ? list.size() : std::min<std::size_t>(list.size(), 512));
+        for (const auto& info : list) {
+            const auto ref = MakeFormRef(info);
+            if (ref.empty()) {
+                continue;
+            }
+
+            auto label = ReferenceLabel(info);
+            auto searchText = ToLower(label);
+            searchText += ' ';
+            searchText += ToLower(ref.Display());
+            if (!search.empty() && searchText.find(search) == std::string::npos) {
+                continue;
+            }
+
+            cache.rows.push_back(PickerRow{ ref, std::move(label), std::move(searchText) });
+        }
+        return cache.rows;
     }
 
     bool SameFormRef(const DynamicForms::FormRef& lhs, const DynamicForms::FormRef& rhs) {
@@ -1661,20 +1766,15 @@ namespace {
         return HasReference(form.outfitPieces, pieceId);
     }
 
-    std::vector<const InternalFormInfo*> BuildPieceRows(const char* typeName, const DynamicForms::DynamicForm& edited, const std::string& search) {
-        std::vector<const InternalFormInfo*> rows;
-        for (const auto& info : ListManager::GetSingleton()->GetList(typeName)) {
-            const auto pieceId = MakeFormRef(info);
-            if (pieceId.empty() || HasPiece(edited, pieceId)) {
+    std::vector<const PickerRow*> BuildPieceRows(const char* typeName, const DynamicForms::DynamicForm& edited, const std::string& search) {
+        std::vector<const PickerRow*> rows;
+        const auto& cachedRows = CachedPickerRows(typeName, search);
+        rows.reserve(cachedRows.size());
+        for (const auto& row : cachedRows) {
+            if (HasPiece(edited, row.ref)) {
                 continue;
             }
-
-            const auto labelText = ReferenceLabel(info);
-            if (!search.empty() && ToLower(labelText).find(search) == std::string::npos && ToLower(pieceId.Display()).find(search) == std::string::npos) {
-                continue;
-            }
-
-            rows.push_back(&info);
+            rows.push_back(&row);
         }
         return rows;
     }
@@ -1701,11 +1801,9 @@ namespace {
         ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
         while (ImGui::ImGuiListClipperManager::Step(clipper)) {
             for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
-                const auto& info = *rows[static_cast<std::size_t>(rowIndex)];
-                const auto pieceId = MakeFormRef(info);
-                const auto labelText = ReferenceLabel(info);
-                if (ImGui::Selectable(labelText.c_str(), false)) {
-                    edited.outfitPieces.push_back(pieceId);
+                const auto& row = *rows[static_cast<std::size_t>(rowIndex)];
+                if (ImGui::Selectable(row.label.c_str(), false)) {
+                    edited.outfitPieces.push_back(row.ref);
                     changed = true;
                 }
             }
@@ -1777,19 +1875,8 @@ namespace {
             if (!listsReady) {
                 ImGui::TextDisabled("%s", Configuration::GetLoc("menu.dpf_lists_unavailable", "DPF is not available yet."));
             } else {
-                std::vector<const InternalFormInfo*> rows;
                 const auto search = ToLower(filter);
-                for (const auto& info : ListManager::GetSingleton()->GetList(typeName)) {
-                    const auto id = MakeFormRef(info);
-                    if (id.empty()) {
-                        continue;
-                    }
-                    const auto labelText = ReferenceLabel(info);
-                    if (!search.empty() && ToLower(labelText).find(search) == std::string::npos && ToLower(id.Display()).find(search) == std::string::npos) {
-                        continue;
-                    }
-                    rows.push_back(&info);
-                }
+                const auto& rows = CachedPickerRows(typeName, search);
 
                 if (ImGui::Selectable(Configuration::GetLoc("common.none", "None"), value.empty())) {
                     value = {};
@@ -1801,11 +1888,9 @@ namespace {
                 ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
                 while (ImGui::ImGuiListClipperManager::Step(clipper)) {
                     for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
-                        const auto& info = *rows[static_cast<std::size_t>(rowIndex)];
-                        const auto id = MakeFormRef(info);
-                        const auto labelText = ReferenceLabel(info);
-                        if (ImGui::Selectable(labelText.c_str(), SameFormRef(value, id))) {
-                            value = id;
+                        const auto& row = rows[static_cast<std::size_t>(rowIndex)];
+                        if (ImGui::Selectable(row.label.c_str(), SameFormRef(value, row.ref))) {
+                            value = row.ref;
                             filter.clear();
                             changed = true;
                         }
@@ -1861,18 +1946,7 @@ namespace {
                         continue;
                     }
 
-                    std::vector<const InternalFormInfo*> rows;
-                    for (const auto& info : ListManager::GetSingleton()->GetList(pickerType.typeName)) {
-                        const auto id = MakeFormRef(info);
-                        if (id.empty()) {
-                            continue;
-                        }
-                        const auto labelText = ReferenceLabel(info);
-                        if (!search.empty() && ToLower(labelText).find(search) == std::string::npos && ToLower(id.Display()).find(search) == std::string::npos) {
-                            continue;
-                        }
-                        rows.push_back(&info);
-                    }
+                    const auto& rows = CachedPickerRows(pickerType.typeName, search);
 
                     ImGui::Text("%s: %zu", Configuration::GetLoc("menu.available", "Available"), rows.size());
                     ImGui::BeginChild("##anyFormRows", { 0.0F, 220.0F }, false);
@@ -1880,11 +1954,9 @@ namespace {
                     ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
                     while (ImGui::ImGuiListClipperManager::Step(clipper)) {
                         for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
-                            const auto& info = *rows[static_cast<std::size_t>(rowIndex)];
-                            const auto id = MakeFormRef(info);
-                            const auto labelText = ReferenceLabel(info);
-                            if (ImGui::Selectable(labelText.c_str(), SameFormRef(value, id))) {
-                                value = id;
+                            const auto& row = rows[static_cast<std::size_t>(rowIndex)];
+                            if (ImGui::Selectable(row.label.c_str(), SameFormRef(value, row.ref))) {
+                                value = row.ref;
                                 filter.clear();
                                 changed = true;
                             }
@@ -1930,13 +2002,15 @@ namespace {
         return changed;
     }
 
-    bool DrawCommonItemFields(DynamicForms::DynamicForm& edited, const bool includeWeight = true) {
+    bool DrawCommonItemFields(DynamicForms::DynamicForm& edited, const bool includeWeight = true, const bool includeValue = true, const bool includeMessageIcon = true) {
         bool changed = false;
         changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
         changed |= InputString(Configuration::GetLoc("menu.model_path", "Model path"), edited.modelPath, 420.0F);
-        ImGui::SetNextItemWidth(180.0F);
-        if (ImGui::InputInt(Configuration::GetLoc("menu.value", "Value"), &edited.itemValue)) {
-            changed = true;
+        if (includeValue) {
+            ImGui::SetNextItemWidth(180.0F);
+            if (ImGui::InputInt(Configuration::GetLoc("menu.value", "Value"), &edited.itemValue)) {
+                changed = true;
+            }
         }
         if (includeWeight) {
             ImGui::SetNextItemWidth(180.0F);
@@ -1945,7 +2019,9 @@ namespace {
             }
         }
         changed |= InputString(Configuration::GetLoc("menu.inventory_icon", "Inventory icon"), edited.inventoryIcon, 420.0F);
-        changed |= InputString(Configuration::GetLoc("menu.message_icon", "Message icon"), edited.messageIcon, 420.0F);
+        if (includeMessageIcon) {
+            changed |= InputString(Configuration::GetLoc("menu.message_icon", "Message icon"), edited.messageIcon, 420.0F);
+        }
         changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.pickup_sound", "Pickup sound"), "SoundDescriptor", edited.pickupSound);
         changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.putdown_sound", "Putdown sound"), "SoundDescriptor", edited.putdownSound);
         changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.keywords", "Keywords"), "Keyword", edited.keywords);
@@ -2075,6 +2151,248 @@ namespace {
         changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_normal_weapon_resistance", "Ignores Normal Weapon Resistance"), edited.ammoFlags, 1u << 0);
         changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_non_playable", "Non-Playable"), edited.ammoFlags, 1u << 1);
         changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_non_bolt", "Non-Bolt"), edited.ammoFlags, 1u << 2);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    int ActorValueIndex(const std::uint32_t actorValue) {
+        for (std::size_t i = 0; i < ACTOR_VALUE_IDS.size(); ++i) {
+            if (ACTOR_VALUE_IDS[i] == actorValue) {
+                return static_cast<int>(i);
+            }
+        }
+        return static_cast<int>(ACTOR_VALUE_IDS.size() - 1);
+    }
+
+    bool DrawActorValueCombo(const char* label, std::uint32_t& actorValue) {
+        int index = ActorValueIndex(actorValue);
+        SetStableComboWidth(ACTOR_VALUE_ITEMS, 220.0F);
+        if (ImGui::Combo(label, &index, ACTOR_VALUE_ITEMS.data(), static_cast<int>(ACTOR_VALUE_ITEMS.size()))) {
+            actorValue = ACTOR_VALUE_IDS[static_cast<std::size_t>(std::clamp(index, 0, static_cast<int>(ACTOR_VALUE_IDS.size() - 1)))];
+            return true;
+        }
+        return false;
+    }
+
+    bool RenderWeaponEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##weaponTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                changed |= DrawCommonItemFields(edited);
+                int weaponType = static_cast<int>(std::clamp(edited.weaponType, 0u, static_cast<std::uint32_t>(WEAPON_TYPE_ITEMS.size() - 1)));
+                SetStableComboWidth(WEAPON_TYPE_ITEMS, 220.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.weapon_type", "Weapon type"), &weaponType, WEAPON_TYPE_ITEMS.data(), static_cast<int>(WEAPON_TYPE_ITEMS.size()))) {
+                    edited.weaponType = static_cast<std::uint32_t>(weaponType);
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.damage", "Damage"), &edited.damage)) {
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.speed", "Speed"), &edited.weaponSpeed)) {
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.reach", "Reach"), &edited.weaponReach)) {
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.min_range", "Min range"), &edited.weaponMinRange)) {
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.max_range", "Max range"), &edited.weaponMaxRange)) {
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.stagger", "Stagger"), &edited.weaponStagger)) {
+                    changed = true;
+                }
+                changed |= DrawActorValueCombo(Configuration::GetLoc("menu.skill", "Skill"), edited.weaponSkill);
+                changed |= DrawActorValueCombo(Configuration::GetLoc("menu.resist", "Resist"), edited.weaponResist);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.flags", "Flags"))) {
+                ImGui::TextUnformatted(Configuration::GetLoc("menu.weapon_flags", "Weapon flags"));
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignores_normal_weapon_resistance", "Ignores Normal Weapon Resistance"), edited.weaponFlags, 1u << 0);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_automatic", "Automatic"), edited.weaponFlags, 1u << 1);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_has_scope", "Has Scope"), edited.weaponFlags, 1u << 2);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_cant_drop", "Can't Drop"), edited.weaponFlags, 1u << 3);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_hide_backpack", "Hide Backpack"), edited.weaponFlags, 1u << 4);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_embedded_weapon", "Embedded Weapon"), edited.weaponFlags, 1u << 5);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_dont_use_first_person_is_anim", "Don't Use First Person IS Anim"), edited.weaponFlags, 1u << 6);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_non_playable", "Non-Playable"), edited.weaponFlags, 1u << 7);
+                ImGui::Separator();
+                ImGui::TextUnformatted(Configuration::GetLoc("menu.weapon_flags2", "Weapon flags 2"));
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_player_only", "Player Only"), edited.weaponFlags2, 1u << 0);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_npcs_use_ammo", "NPCs Use Ammo"), edited.weaponFlags2, 1u << 1);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_jam_after_reload", "No Jam After Reload"), edited.weaponFlags2, 1u << 2);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_minor_crime", "Minor Crime"), edited.weaponFlags2, 1u << 4);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_range_fixed", "Range Fixed"), edited.weaponFlags2, 1u << 5);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_not_used_in_normal_combat", "Not Used In Normal Combat"), edited.weaponFlags2, 1u << 6);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_overrides_condition_damage", "Overrides Condition Damage"), edited.weaponFlags2, 1u << 7);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_dont_use_3rd_person_is_anim", "Don't Use 3rd Person IS Anim"), edited.weaponFlags2, 1u << 8);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_burst_shot", "Burst Shot"), edited.weaponFlags2, 1u << 9);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_rumble_alternate", "Rumble Alternate"), edited.weaponFlags2, 1u << 10);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_long_bursts", "Long Bursts"), edited.weaponFlags2, 1u << 11);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_non_hostile", "Non-Hostile"), edited.weaponFlags2, 1u << 12);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_bound_weapon", "Bound Weapon"), edited.weaponFlags2, 1u << 13);
+                ImGui::Separator();
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_critical_on_death", "Critical On Death"), edited.weaponCritFlags, 1u << 0);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.references", "References"))) {
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.equip_slot", "Equip slot"), "EquipSlot", edited.equipSlot);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.enchantment", "Enchantment"), "Enchantment", edited.enchantment);
+                int enchantmentAmount = edited.enchantmentAmount;
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.enchantment_amount", "Enchantment amount"), &enchantmentAmount)) {
+                    edited.enchantmentAmount = static_cast<std::uint16_t>(std::clamp(enchantmentAmount, 0, 65535));
+                    changed = true;
+                }
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.template_weapon", "Template weapon"), "Weapon", edited.templateWeapon);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.crit_effect", "Critical effect"), "Spell", edited.critEffect);
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.crit_mult", "Critical mult"), &edited.weaponCritMult)) {
+                    changed = true;
+                }
+                int critDamage = static_cast<int>(edited.weaponCritDamage);
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.crit_damage", "Critical damage"), &critDamage)) {
+                    edited.weaponCritDamage = static_cast<std::uint32_t>(std::clamp(critDamage, 0, 65535));
+                    changed = true;
+                }
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.block_bash_impact_data_set", "Block bash impact data set"), "ImpactDataSet", edited.blockBashImpactDataSet);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.alt_block_material_type", "Alt block material type"), "MaterialType", edited.altBlockMaterialType);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.impact_data_set", "Impact data set"), "ImpactDataSet", edited.impactDataSet);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.first_person_model_object", "1st person model object"), "Static", edited.firstPersonModelObject);
+                ImGui::Separator();
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.attack_sound", "Attack sound"), "SoundDescriptor", edited.attackSound);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.attack_sound_2d", "Attack sound 2D"), "SoundDescriptor", edited.attackSound2D);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.attack_loop_sound", "Attack loop sound"), "SoundDescriptor", edited.attackLoopSound);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.attack_fail_sound", "Attack fail sound"), "SoundDescriptor", edited.attackFailSound);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.idle_sound", "Idle sound"), "SoundDescriptor", edited.idleSound);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.equip_sound", "Equip sound"), "SoundDescriptor", edited.equipSound);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.unequip_sound", "Unequip sound"), "SoundDescriptor", edited.unequipSound);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool DrawMagicEffectsEditor(DynamicForms::DynamicForm& edited) {
+        bool changed = false;
+        if (ImGui::Checkbox(Configuration::GetLoc("menu.use_custom_magic_effects", "Use custom magic effects"), &edited.magicEffectsOverride)) {
+            changed = true;
+        }
+
+        if (!edited.magicEffectsOverride) {
+            return changed;
+        }
+
+        ImGui::Text("%s: %zu", Configuration::GetLoc("menu.magic_effects", "Magic effects"), edited.magicEffects.size());
+        for (std::size_t i = 0; i < edited.magicEffects.size(); ++i) {
+            auto& entry = edited.magicEffects[i];
+            ImGui::PushID(static_cast<int>(i));
+            const auto header = std::format("{} {}##magicEffect", Configuration::GetLoc("menu.effect", "Effect"), i + 1);
+            if (ImGui::CollapsingHeader(header.c_str(), ImGui::ImGuiTreeNodeFlags_DefaultOpen)) {
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.magic_effect", "Magic effect"), "MagicEffect", entry.effectSetting);
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.magnitude", "Magnitude"), &entry.magnitude)) {
+                    changed = true;
+                }
+                int area = static_cast<int>(entry.area);
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.area", "Area"), &area)) {
+                    entry.area = static_cast<std::uint32_t>(std::max(area, 0));
+                    changed = true;
+                }
+                int duration = static_cast<int>(entry.duration);
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputInt(Configuration::GetLoc("menu.duration", "Duration"), &duration)) {
+                    entry.duration = static_cast<std::uint32_t>(std::max(duration, 0));
+                    changed = true;
+                }
+                ImGui::SetNextItemWidth(160.0F);
+                if (ImGui::InputFloat(Configuration::GetLoc("menu.cost", "Cost"), &entry.cost)) {
+                    changed = true;
+                }
+                if (ImGui::SmallButton(Configuration::GetLoc("menu.remove", "Remove"))) {
+                    edited.magicEffects.erase(edited.magicEffects.begin() + static_cast<std::ptrdiff_t>(i));
+                    changed = true;
+                    ImGui::PopID();
+                    break;
+                }
+            }
+            ImGui::PopID();
+        }
+        if (ImGui::Button(Configuration::GetLoc("menu.add_magic_effect", "Add magic effect"))) {
+            edited.magicEffects.emplace_back();
+            changed = true;
+        }
+        return changed;
+    }
+
+    bool RenderAlchemyItemEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        changed |= DrawCommonItemFields(edited, true, false, true);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.equip_slot", "Equip slot"), "EquipSlot", edited.equipSlot);
+        int costOverride = edited.alchemyCostOverride;
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.cost_override", "Cost override"), &costOverride)) {
+            edited.alchemyCostOverride = costOverride;
+            changed = true;
+        }
+        ImGui::TextUnformatted(Configuration::GetLoc("menu.alchemy_flags", "Alchemy flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_cost_override", "Cost Override"), edited.alchemyFlags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_food_item", "Food Item"), edited.alchemyFlags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_extend_duration", "Extend Duration"), edited.alchemyFlags, 1u << 3);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_medicine", "Medicine"), edited.alchemyFlags, 1u << 16);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_poison", "Poison"), edited.alchemyFlags, 1u << 17);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.addiction_item", "Addiction item"), "Spell", edited.addictionItem);
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.addiction_chance", "Addiction chance"), &edited.addictionChance)) {
+            changed = true;
+        }
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.consumption_sound", "Consumption sound"), "SoundDescriptor", edited.consumptionSound);
+        changed |= DrawMagicEffectsEditor(edited);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderIngredientEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        changed |= DrawCommonItemFields(edited, true, true, false);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.equip_slot", "Equip slot"), "EquipSlot", edited.equipSlot);
+        int costOverride = edited.ingredientCostOverride;
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.cost_override", "Cost override"), &costOverride)) {
+            edited.ingredientCostOverride = costOverride;
+            changed = true;
+        }
+        ImGui::TextUnformatted(Configuration::GetLoc("menu.ingredient_flags", "Ingredient flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_cost_override", "Cost Override"), edited.ingredientFlags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_food_item", "Food Item"), edited.ingredientFlags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_extend_duration", "Extend Duration"), edited.ingredientFlags, 1u << 3);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_references_persist", "References Persist"), edited.ingredientFlags, 1u << 8);
+        int knownEffectFlags = edited.knownEffectFlags;
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.known_effect_flags", "Known effect flags"), &knownEffectFlags)) {
+            edited.knownEffectFlags = static_cast<std::uint16_t>(std::clamp(knownEffectFlags, 0, 65535));
+            changed = true;
+        }
+        int playerUses = edited.playerUses;
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.player_uses", "Player uses"), &playerUses)) {
+            edited.playerUses = static_cast<std::uint16_t>(std::clamp(playerUses, 0, 65535));
+            changed = true;
+        }
+        changed |= DrawMagicEffectsEditor(edited);
         return CommitEditedForm(index, form, edited, changed);
     }
 
@@ -3144,28 +3462,23 @@ namespace {
                 ImGui::TextDisabled("%s", Configuration::GetLoc("menu.dpf_lists_unavailable", "DPF is not available yet."));
             } else {
                 const auto search = ToLower(filter);
-                std::vector<const InternalFormInfo*> rows;
-                for (const auto& info : ListManager::GetSingleton()->GetList("HeadPart")) {
-                    const auto id = MakeFormRef(info);
-                    if (id.empty() || HasReference(edited.extraParts, id)) {
+                std::vector<const PickerRow*> rows;
+                const auto& cachedRows = CachedPickerRows("HeadPart", search);
+                rows.reserve(cachedRows.size());
+                for (const auto& row : cachedRows) {
+                    if (HasReference(edited.extraParts, row.ref)) {
                         continue;
                     }
-                    const auto labelText = ReferenceLabel(info);
-                    if (!search.empty() && ToLower(labelText).find(search) == std::string::npos && ToLower(id.Display()).find(search) == std::string::npos) {
-                        continue;
-                    }
-                    rows.push_back(&info);
+                    rows.push_back(&row);
                 }
 
                 auto* clipper = ImGui::ImGuiListClipperManager::Create();
                 ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
                 while (ImGui::ImGuiListClipperManager::Step(clipper)) {
                     for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
-                        const auto& info = *rows[static_cast<std::size_t>(rowIndex)];
-                        const auto id = MakeFormRef(info);
-                        const auto labelText = ReferenceLabel(info);
-                        if (ImGui::Selectable(labelText.c_str(), false)) {
-                            edited.extraParts.push_back(id);
+                        const auto& row = *rows[static_cast<std::size_t>(rowIndex)];
+                        if (ImGui::Selectable(row.label.c_str(), false)) {
+                            edited.extraParts.push_back(row.ref);
                             filter.clear();
                             changed = true;
                         }

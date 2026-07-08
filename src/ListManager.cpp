@@ -187,6 +187,7 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     logger::info("Iniciando escaneamento de FormTypes...");
 
     _dataStore.clear();
+    ++_generation;
     PopulateList<RE::BGSPerk>("Perk", [](RE::BGSPerk* perk) -> bool {
         return perk != nullptr;
     });
@@ -205,6 +206,15 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     });
     PopulateList<RE::TESAmmo>("Ammo", [](RE::TESAmmo* ammo) -> bool {
         return ammo != nullptr;
+    });
+    PopulateList<RE::TESObjectWEAP>("Weapon", [](RE::TESObjectWEAP* weapon) -> bool {
+        return weapon != nullptr;
+    });
+    PopulateList<RE::AlchemyItem>("AlchemyItem", [](RE::AlchemyItem* item) -> bool {
+        return item != nullptr;
+    });
+    PopulateList<RE::IngredientItem>("Ingredient", [](RE::IngredientItem* item) -> bool {
+        return item != nullptr;
     });
 
     PopulateList<RE::TESGlobal>("Global", [](RE::TESGlobal* global) -> bool {
@@ -225,6 +235,10 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
 
     PopulateList<RE::TESObjectARMA>("ArmorType", [](RE::TESObjectARMA* armorType) -> bool {
         return armorType != nullptr;
+    });
+
+    PopulateList<RE::TESObjectSTAT>("Static", [](RE::TESObjectSTAT* stat) -> bool {
+        return stat != nullptr;
     });
 
     PopulateList<RE::TESLevItem>("LeveledItem", [](RE::TESLevItem* leveledItem) -> bool {
@@ -341,6 +355,12 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
 
     PopulateList<RE::EnchantmentItem>("Enchantment", [](RE::EnchantmentItem* enchantment) -> bool {
         return enchantment != nullptr;
+    });
+    PopulateList<RE::EffectSetting>("MagicEffect", [](RE::EffectSetting* effect) -> bool {
+        return effect != nullptr;
+    });
+    PopulateList<RE::EffectSetting>("EffectSetting", [](RE::EffectSetting* effect) -> bool {
+        return effect != nullptr;
     });
 
     PopulateList<RE::BGSEquipSlot>("EquipSlot", [](RE::BGSEquipSlot* equipSlot) -> bool {
@@ -493,6 +513,7 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
             info.formID = currentID;
             info.formType = a_typeName;
             info.pluginName = ToUTF8(currentPlugin);
+            info.normalizedFormID = FormUtil::NormalizeFormID(form);
 
             std::string rawEditorID = clib_util::editorID::get_editorID(form);
             info.editorID = ToUTF8(rawEditorID);

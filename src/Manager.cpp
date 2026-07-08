@@ -15,6 +15,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -88,6 +89,12 @@ namespace {
             return "MaterialType";
         case DynamicForms::FormKind::Ammo:
             return "Ammo";
+        case DynamicForms::FormKind::Weapon:
+            return "Weapon";
+        case DynamicForms::FormKind::AlchemyItem:
+            return "AlchemyItem";
+        case DynamicForms::FormKind::Ingredient:
+            return "Ingredient";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -168,6 +175,15 @@ namespace {
         }
         if (normalized == "ammo") {
             return DynamicForms::FormKind::Ammo;
+        }
+        if (normalized == "weapon" || normalized == "weap") {
+            return DynamicForms::FormKind::Weapon;
+        }
+        if (normalized == "alchemyitem" || normalized == "alchemy" || normalized == "alch" || normalized == "potion") {
+            return DynamicForms::FormKind::AlchemyItem;
+        }
+        if (normalized == "ingredient" || normalized == "ingr") {
+            return DynamicForms::FormKind::Ingredient;
         }
         if (normalized == "color" || normalized == "colorform" || normalized == "clfm") {
             return DynamicForms::FormKind::Color;
@@ -447,6 +463,133 @@ namespace {
         object.AddMember(rapidjson::Value(key, allocator), array, allocator);
     }
 
+    std::uint32_t ReadUInt32(const rapidjson::Value& doc, const char* key, std::uint32_t fallback);
+    float ReadFloat(const rapidjson::Value& doc, const char* key, float fallback);
+
+    void ReadMagicEffectArray(const rapidjson::Value& doc, const char* key, std::vector<DynamicForms::MagicEffectEntry>& target) {
+        if (!doc.HasMember(key) || !doc[key].IsArray()) {
+            return;
+        }
+
+        target.clear();
+        for (const auto& item : doc[key].GetArray()) {
+            if (!item.IsObject()) {
+                continue;
+            }
+
+            DynamicForms::MagicEffectEntry entry;
+            if (item.HasMember("effectSetting")) {
+                entry.effectSetting = ReadFormRefValue(item["effectSetting"]);
+            } else if (item.HasMember("effect")) {
+                entry.effectSetting = ReadFormRefValue(item["effect"]);
+            }
+            entry.magnitude = ReadFloat(item, "magnitude", entry.magnitude);
+            entry.area = ReadUInt32(item, "area", entry.area);
+            entry.duration = ReadUInt32(item, "duration", entry.duration);
+            entry.cost = ReadFloat(item, "cost", entry.cost);
+            if (!entry.effectSetting.empty()) {
+                target.push_back(std::move(entry));
+            }
+        }
+    }
+
+    std::string ToSignature(const DynamicForms::FormKind kind) {
+        switch (kind) {
+        case DynamicForms::FormKind::Global:
+            return "GLOB";
+        case DynamicForms::FormKind::Keyword:
+            return "KYWD";
+        case DynamicForms::FormKind::FormList:
+            return "FLST";
+        case DynamicForms::FormKind::EquipSlot:
+            return "EQUP";
+        case DynamicForms::FormKind::VoiceType:
+            return "VTYP";
+        case DynamicForms::FormKind::Outfit:
+            return "OTFT";
+        case DynamicForms::FormKind::ArmorType:
+            return "ARMA";
+        case DynamicForms::FormKind::Armor:
+            return "ARMO";
+        case DynamicForms::FormKind::Book:
+            return "BOOK";
+        case DynamicForms::FormKind::Misc:
+            return "MISC";
+        case DynamicForms::FormKind::Key:
+            return "KEYM";
+        case DynamicForms::FormKind::SoulGem:
+            return "SLGM";
+        case DynamicForms::FormKind::MaterialType:
+            return "MATT";
+        case DynamicForms::FormKind::Ammo:
+            return "AMMO";
+        case DynamicForms::FormKind::Weapon:
+            return "WEAP";
+        case DynamicForms::FormKind::AlchemyItem:
+            return "ALCH";
+        case DynamicForms::FormKind::Ingredient:
+            return "INGR";
+        case DynamicForms::FormKind::Color:
+            return "CLFM";
+        case DynamicForms::FormKind::ArtObject:
+            return "ARTO";
+        case DynamicForms::FormKind::Perk:
+            return "PERK";
+        case DynamicForms::FormKind::HeadPart:
+            return "HDPT";
+        case DynamicForms::FormKind::SoundDescriptor:
+            return "SNDR";
+        case DynamicForms::FormKind::Light:
+            return "LIGH";
+        case DynamicForms::FormKind::Explosion:
+            return "EXPL";
+        case DynamicForms::FormKind::Activator:
+            return "ACTI";
+        case DynamicForms::FormKind::EffectShader:
+            return "EFSH";
+        case DynamicForms::FormKind::NPC:
+            return "NPC_";
+        default:
+            return ToString(kind);
+        }
+    }
+
+    std::string JoinSignatures(const std::set<std::string>& signatures) {
+        std::string joined;
+        for (const auto& signature : signatures) {
+            if (!joined.empty()) {
+                joined += ",";
+            }
+            joined += signature;
+        }
+        return joined;
+    }
+
+    void AddMagicEffectArray(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::vector<DynamicForms::MagicEffectEntry>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& value : values) {
+            if (value.effectSetting.empty()) {
+                continue;
+            }
+
+            rapidjson::Value item(rapidjson::kObjectType);
+            rapidjson::Value effectRef(rapidjson::kObjectType);
+            if (!value.effectSetting.editorID.empty()) {
+                effectRef.AddMember("editorID", rapidjson::Value(value.effectSetting.editorID.c_str(), allocator), allocator);
+            }
+            if (!value.effectSetting.formID.empty()) {
+                effectRef.AddMember("formID", rapidjson::Value(value.effectSetting.formID.c_str(), allocator), allocator);
+            }
+            item.AddMember("effectSetting", effectRef, allocator);
+            item.AddMember("magnitude", value.magnitude, allocator);
+            item.AddMember("area", value.area, allocator);
+            item.AddMember("duration", value.duration, allocator);
+            item.AddMember("cost", value.cost, allocator);
+            array.PushBack(item, allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
     void ReadRankedFormRefArray(const rapidjson::Value& doc, const char* key, std::vector<DynamicForms::RankedFormRef>& target) {
         if (!doc.HasMember(key) || !doc[key].IsArray()) {
             return;
@@ -520,6 +663,12 @@ namespace {
             return static_cast<std::uint32_t>(RE::FormType::MaterialType);
         case DynamicForms::FormKind::Ammo:
             return static_cast<std::uint32_t>(RE::FormType::Ammo);
+        case DynamicForms::FormKind::Weapon:
+            return static_cast<std::uint32_t>(RE::FormType::Weapon);
+        case DynamicForms::FormKind::AlchemyItem:
+            return static_cast<std::uint32_t>(RE::FormType::AlchemyItem);
+        case DynamicForms::FormKind::Ingredient:
+            return static_cast<std::uint32_t>(RE::FormType::Ingredient);
         case DynamicForms::FormKind::Color:
             return static_cast<std::uint32_t>(RE::FormType::ColorForm);
         case DynamicForms::FormKind::ArtObject:
@@ -697,6 +846,30 @@ namespace {
         SetIconIfPresent(messageIcon.icon, form.messageIcon);
     }
 
+    void ApplyMagicEffects(RE::MagicItem& magicItem, const DynamicForms::DynamicForm& form) {
+        if (!form.magicEffectsOverride) {
+            return;
+        }
+
+        magicItem.effects.clear();
+        for (const auto& entry : form.magicEffects) {
+            auto* effectSetting = ResolveAs<RE::EffectSetting>(entry.effectSetting);
+            if (!effectSetting) {
+                logger::warn("Magic item '{}' effect '{}' could not be resolved.", form.editorId, entry.effectSetting.Display());
+                continue;
+            }
+
+            auto* effect = new RE::Effect();
+            effect->baseEffect = effectSetting;
+            effect->effectItem.magnitude = entry.magnitude;
+            effect->effectItem.area = entry.area;
+            effect->effectItem.duration = entry.duration;
+            effect->cost = entry.cost;
+            magicItem.effects.push_back(effect);
+        }
+        logger::info("Configured magic item '{}' with {} custom effects.", form.editorId, magicItem.effects.size());
+    }
+
     void ApplyMiscLikeItem(RE::TESObjectMISC& item, const DynamicForms::DynamicForm& form) {
         item.SetFormEditorID(form.editorId.c_str());
         item.fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
@@ -862,6 +1035,103 @@ namespace {
         if (auto* keywordForm = ammo->AsKeywordForm()) {
             ApplyKeywords(*keywordForm, form.keywords);
         }
+        return true;
+    }
+
+    bool ConfigureWeapon(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* weapon = tesForm ? tesForm->As<RE::TESObjectWEAP>() : nullptr;
+        if (!weapon) {
+            logger::warn("Dynamic form '{}' is not a TESObjectWEAP", form.editorId);
+            return false;
+        }
+
+        weapon->SetFormEditorID(form.editorId.c_str());
+        weapon->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        weapon->SetModel(form.modelPath.c_str());
+        weapon->value = form.itemValue;
+        weapon->weight = form.itemWeight;
+        weapon->attackDamage = static_cast<std::uint16_t>(std::clamp(static_cast<int>(std::lround(form.damage)), 0, 65535));
+        weapon->formEnchanting = ResolveAs<RE::EnchantmentItem>(form.enchantment);
+        weapon->amountofEnchantment = form.enchantmentAmount;
+        weapon->SetEquipSlot(ResolveAs<RE::BGSEquipSlot>(form.equipSlot));
+        weapon->templateWeapon = ResolveAs<RE::TESObjectWEAP>(form.templateWeapon);
+        weapon->blockBashImpactDataSet = ResolveAs<RE::BGSImpactDataSet>(form.blockBashImpactDataSet);
+        weapon->altBlockMaterialType = ResolveAs<RE::BGSMaterialType>(form.altBlockMaterialType);
+        weapon->impactDataSet = ResolveAs<RE::BGSImpactDataSet>(form.impactDataSet);
+        weapon->firstPersonModelObject = ResolveAs<RE::TESObjectSTAT>(form.firstPersonModelObject);
+        weapon->attackSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.attackSound);
+        weapon->attackSound2D = ResolveAs<RE::BGSSoundDescriptorForm>(form.attackSound2D);
+        weapon->attackLoopSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.attackLoopSound);
+        weapon->attackFailSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.attackFailSound);
+        weapon->idleSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.idleSound);
+        weapon->equipSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.equipSound);
+        weapon->unequipSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.unequipSound);
+        ApplyInventoryIcons(static_cast<RE::TESIcon&>(*weapon), static_cast<RE::BGSMessageIcon&>(*weapon), form);
+        ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*weapon), form);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*weapon), form.keywords);
+
+        weapon->weaponData.speed = form.weaponSpeed;
+        weapon->weaponData.reach = form.weaponReach;
+        weapon->weaponData.minRange = form.weaponMinRange;
+        weapon->weaponData.maxRange = form.weaponMaxRange;
+        weapon->weaponData.staggerValue = form.weaponStagger;
+        weapon->weaponData.animationType = static_cast<RE::WEAPON_TYPE>(std::clamp(form.weaponType, 0u, 9u));
+        weapon->weaponData.flags = static_cast<RE::TESObjectWEAP::Data::Flag>(form.weaponFlags);
+        weapon->weaponData.flags2 = static_cast<RE::TESObjectWEAP::Data::Flag2>(form.weaponFlags2);
+        weapon->weaponData.skill = static_cast<RE::ActorValue>(form.weaponSkill);
+        weapon->weaponData.resistance = static_cast<RE::ActorValue>(form.weaponResist);
+        weapon->criticalData.prcntMult = form.weaponCritMult;
+        weapon->criticalData.damage = static_cast<std::uint16_t>(std::clamp(form.weaponCritDamage, 0u, 65535u));
+        weapon->criticalData.flags = static_cast<RE::TESObjectWEAP::CriticalData::Flag>(form.weaponCritFlags);
+        weapon->criticalData.effect = ResolveAs<RE::SpellItem>(form.critEffect);
+        return true;
+    }
+
+    bool ConfigureAlchemyItem(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* item = tesForm ? tesForm->As<RE::AlchemyItem>() : nullptr;
+        if (!item) {
+            logger::warn("Dynamic form '{}' is not an AlchemyItem", form.editorId);
+            return false;
+        }
+
+        item->SetFormEditorID(form.editorId.c_str());
+        item->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        item->SetModel(form.modelPath.c_str());
+        item->weight = form.itemWeight;
+        item->SetEquipSlot(ResolveAs<RE::BGSEquipSlot>(form.equipSlot));
+        item->data.costOverride = form.alchemyCostOverride;
+        item->data.flags = static_cast<RE::AlchemyItem::AlchemyFlag>(form.alchemyFlags);
+        item->data.addictionItem = ResolveAs<RE::SpellItem>(form.addictionItem);
+        item->data.addictionChance = form.addictionChance;
+        item->data.consumptionSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.consumptionSound);
+        ApplyInventoryIcons(static_cast<RE::TESIcon&>(*item), static_cast<RE::BGSMessageIcon&>(*item), form);
+        ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*item), form);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*item), form.keywords);
+        ApplyMagicEffects(static_cast<RE::MagicItem&>(*item), form);
+        return true;
+    }
+
+    bool ConfigureIngredient(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* item = tesForm ? tesForm->As<RE::IngredientItem>() : nullptr;
+        if (!item) {
+            logger::warn("Dynamic form '{}' is not an IngredientItem", form.editorId);
+            return false;
+        }
+
+        item->SetFormEditorID(form.editorId.c_str());
+        item->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        item->SetModel(form.modelPath.c_str());
+        item->value = form.itemValue;
+        item->weight = form.itemWeight;
+        item->SetEquipSlot(ResolveAs<RE::BGSEquipSlot>(form.equipSlot));
+        item->data.costOverride = form.ingredientCostOverride;
+        item->data.flags = static_cast<RE::IngredientItem::IngredientFlag>(form.ingredientFlags);
+        item->gamedata.knownEffectFlags = form.knownEffectFlags;
+        item->gamedata.playerUses = form.playerUses;
+        SetIconIfPresent(static_cast<RE::TESIcon&>(*item), form.inventoryIcon);
+        ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*item), form);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*item), form.keywords);
+        ApplyMagicEffects(static_cast<RE::MagicItem&>(*item), form);
         return true;
     }
 
@@ -2285,6 +2555,15 @@ namespace {
         if (form.kind == DynamicForms::FormKind::Ammo) {
             return ConfigureAmmo(tesForm, form);
         }
+        if (form.kind == DynamicForms::FormKind::Weapon) {
+            return ConfigureWeapon(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::AlchemyItem) {
+            return ConfigureAlchemyItem(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Ingredient) {
+            return ConfigureIngredient(tesForm, form);
+        }
         if (form.kind == DynamicForms::FormKind::Color) {
             return ConfigureColor(tesForm, form);
         }
@@ -2843,6 +3122,49 @@ namespace {
         ReadFormRef(doc, "projectile", out.projectile);
         out.damage = ReadFloat(doc, "damage", out.damage);
         out.ammoFlags = ReadUInt32(doc, "ammoFlags", out.ammoFlags);
+        out.weaponType = ReadUInt32(doc, "weaponType", out.weaponType);
+        out.weaponFlags = ReadUInt32(doc, "weaponFlags", out.weaponFlags);
+        out.weaponFlags2 = ReadUInt32(doc, "weaponFlags2", out.weaponFlags2);
+        out.weaponSkill = ReadUInt32(doc, "weaponSkill", out.weaponSkill);
+        out.weaponResist = ReadUInt32(doc, "weaponResist", out.weaponResist);
+        out.weaponCritFlags = ReadUInt32(doc, "weaponCritFlags", out.weaponCritFlags);
+        out.weaponCritDamage = ReadUInt32(doc, "weaponCritDamage", out.weaponCritDamage);
+        out.weaponSpeed = ReadFloat(doc, "weaponSpeed", out.weaponSpeed);
+        out.weaponReach = ReadFloat(doc, "weaponReach", out.weaponReach);
+        out.weaponMinRange = ReadFloat(doc, "weaponMinRange", out.weaponMinRange);
+        out.weaponMaxRange = ReadFloat(doc, "weaponMaxRange", out.weaponMaxRange);
+        out.weaponStagger = ReadFloat(doc, "weaponStagger", out.weaponStagger);
+        out.weaponCritMult = ReadFloat(doc, "weaponCritMult", out.weaponCritMult);
+        ReadFormRef(doc, "templateWeapon", out.templateWeapon);
+        ReadFormRef(doc, "critEffect", out.critEffect);
+        ReadFormRef(doc, "attackSound", out.attackSound);
+        ReadFormRef(doc, "attackSound2D", out.attackSound2D);
+        ReadFormRef(doc, "attackLoopSound", out.attackLoopSound);
+        ReadFormRef(doc, "attackFailSound", out.attackFailSound);
+        ReadFormRef(doc, "idleSound", out.idleSound);
+        ReadFormRef(doc, "equipSound", out.equipSound);
+        ReadFormRef(doc, "unequipSound", out.unequipSound);
+        ReadFormRef(doc, "firstPersonModelObject", out.firstPersonModelObject);
+        out.alchemyFlags = ReadUInt32(doc, "alchemyFlags", out.alchemyFlags);
+        if (doc.HasMember("alchemyCostOverride") && doc["alchemyCostOverride"].IsInt()) {
+            out.alchemyCostOverride = doc["alchemyCostOverride"].GetInt();
+        }
+        ReadFormRef(doc, "addictionItem", out.addictionItem);
+        out.addictionChance = ReadFloat(doc, "addictionChance", out.addictionChance);
+        ReadFormRef(doc, "consumptionSound", out.consumptionSound);
+        out.ingredientFlags = ReadUInt32(doc, "ingredientFlags", out.ingredientFlags);
+        if (doc.HasMember("ingredientCostOverride") && doc["ingredientCostOverride"].IsInt()) {
+            out.ingredientCostOverride = doc["ingredientCostOverride"].GetInt();
+        }
+        out.knownEffectFlags = ReadUInt16(doc, "knownEffectFlags", out.knownEffectFlags);
+        out.playerUses = ReadUInt16(doc, "playerUses", out.playerUses);
+        if (doc.HasMember("magicEffectsOverride") && doc["magicEffectsOverride"].IsBool()) {
+            out.magicEffectsOverride = doc["magicEffectsOverride"].GetBool();
+        }
+        if (doc.HasMember("magicEffects")) {
+            out.magicEffectsOverride = true;
+            ReadMagicEffectArray(doc, "magicEffects", out.magicEffects);
+        }
         out.bookFlags = ReadUInt32(doc, "bookFlags", out.bookFlags);
         out.bookType = ReadUInt32(doc, "bookType", out.bookType);
         ReadFormRef(doc, "teachesSpell", out.teachesSpell);
@@ -3265,6 +3587,10 @@ namespace {
         return PackageDirectory(packageName) / "package.db";
     }
 
+    std::filesystem::path PackageImportDirectory(const std::string_view packageName) {
+        return PackageDirectory(packageName) / "imports";
+    }
+
     std::string JsonString(const rapidjson::Document& doc) {
         rapidjson::StringBuffer buffer;
         rapidjson::PrettyWriter writer(buffer);
@@ -3384,6 +3710,111 @@ namespace {
                 "updated_at INTEGER NOT NULL DEFAULT (unixepoch())"
                 ");",
                 packageName);
+    }
+
+    void SetStringMember(
+        rapidjson::Document& doc,
+        rapidjson::Document::AllocatorType& allocator,
+        const char* key,
+        const std::string& value)
+    {
+        const auto member = doc.FindMember(key);
+        if (member != doc.MemberEnd()) {
+            member->value.SetString(value.c_str(), allocator);
+            return;
+        }
+
+        doc.AddMember(rapidjson::Value(key, allocator), rapidjson::Value(value.c_str(), allocator), allocator);
+    }
+
+    bool UpsertPackageFormPayload(
+        sqlite3* db,
+        const std::string_view packageName,
+        const DynamicForms::DynamicForm& form,
+        const std::string& payload)
+    {
+        SqliteStatement statement;
+        if (!PrepareSql(db,
+                "INSERT INTO forms(editor_id, form_kind, local_id, payload, updated_at) "
+                "VALUES(?1, ?2, ?3, ?4, unixepoch()) "
+                "ON CONFLICT(editor_id) DO UPDATE SET "
+                "form_kind=excluded.form_kind, local_id=excluded.local_id, payload=excluded.payload, updated_at=excluded.updated_at;",
+                statement,
+                packageName)) {
+            return false;
+        }
+
+        sqlite3_bind_text(statement.handle, 1, form.editorId.c_str(), -1, SQLITE_TRANSIENT);
+        const auto formKind = ToString(form.kind);
+        sqlite3_bind_text(statement.handle, 2, formKind.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(statement.handle, 3, form.localId);
+        sqlite3_bind_text(statement.handle, 4, payload.c_str(), -1, SQLITE_TRANSIENT);
+
+        const int rc = sqlite3_step(statement.handle);
+        if (rc == SQLITE_DONE) {
+            return true;
+        }
+
+        logger::warn("Could not import dynamic form '{}' in package '{}': {}", form.editorId, packageName, sqlite3_errmsg(db));
+        return false;
+    }
+
+    void ImportPackageJsonQueue(const std::string& packageName, sqlite3* db) {
+        const auto importDir = PackageImportDirectory(packageName);
+        if (!std::filesystem::exists(importDir)) {
+            return;
+        }
+
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(importDir, ec)) {
+            if (ec) {
+                logger::warn("Could not enumerate package import directory '{}': {}", importDir.string(), ec.message());
+                return;
+            }
+            if (!entry.is_regular_file() || entry.path().extension() != ".json") {
+                continue;
+            }
+
+            std::ifstream stream(entry.path());
+            if (!stream.is_open()) {
+                logger::warn("Could not open package import file '{}'.", entry.path().string());
+                continue;
+            }
+
+            std::string payload{
+                std::istreambuf_iterator<char>(stream),
+                std::istreambuf_iterator<char>() };
+
+            rapidjson::Document doc;
+            doc.Parse(payload.c_str());
+            if (doc.HasParseError() || !doc.IsObject()) {
+                logger::warn("Invalid package import JSON '{}'.", entry.path().string());
+                continue;
+            }
+
+            DynamicForms::DynamicForm form;
+            if (!ReadFormDocument(doc, entry.path().string(), entry.path().stem().string(), form)) {
+                continue;
+            }
+
+            form.packageName = packageName;
+            auto& allocator = doc.GetAllocator();
+            SetStringMember(doc, allocator, "editorId", form.editorId);
+            SetStringMember(doc, allocator, "packageName", packageName);
+            const auto normalizedPayload = JsonString(doc);
+
+            if (!UpsertPackageFormPayload(db, packageName, form, normalizedPayload)) {
+                continue;
+            }
+
+            std::error_code removeEc;
+            std::filesystem::remove(entry.path(), removeEc);
+            if (removeEc) {
+                logger::warn("Imported '{}' but could not remove import file: {}", entry.path().string(), removeEc.message());
+            } else {
+                logger::info("Imported dynamic form '{}' into package '{}'.", form.editorId, packageName);
+            }
+        }
     }
 
     bool PersistFormDocument(const DynamicForms::DynamicForm& form, const rapidjson::Document& doc) {
@@ -3543,6 +3974,8 @@ namespace {
             return;
         }
 
+        ImportPackageJsonQueue(packageName, db.handle);
+
         SqliteStatement formsStatement;
         if (PrepareSql(db.handle, "SELECT editor_id, payload FROM forms ORDER BY editor_id;", formsStatement, packageName)) {
             while (sqlite3_step(formsStatement.handle) == SQLITE_ROW) {
@@ -3661,7 +4094,10 @@ namespace Manager {
             form.kind == DynamicForms::FormKind::Misc ||
             form.kind == DynamicForms::FormKind::Key ||
             form.kind == DynamicForms::FormKind::SoulGem ||
-            form.kind == DynamicForms::FormKind::Ammo)
+            form.kind == DynamicForms::FormKind::Ammo ||
+            form.kind == DynamicForms::FormKind::Weapon ||
+            form.kind == DynamicForms::FormKind::AlchemyItem ||
+            form.kind == DynamicForms::FormKind::Ingredient)
         {
             AddString(doc, allocator, "fullName", form.fullName);
             AddString(doc, allocator, "modelPath", form.modelPath);
@@ -3700,6 +4136,57 @@ namespace Manager {
             AddFormRef(doc, allocator, "projectile", form.projectile);
             doc.AddMember("damage", form.damage, allocator);
             doc.AddMember("ammoFlags", form.ammoFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Weapon) {
+            doc.AddMember("damage", form.damage, allocator);
+            doc.AddMember("enchantmentAmount", form.enchantmentAmount, allocator);
+            AddFormRef(doc, allocator, "enchantment", form.enchantment);
+            AddFormRef(doc, allocator, "equipSlot", form.equipSlot);
+            AddFormRef(doc, allocator, "templateWeapon", form.templateWeapon);
+            AddFormRef(doc, allocator, "critEffect", form.critEffect);
+            AddFormRef(doc, allocator, "blockBashImpactDataSet", form.blockBashImpactDataSet);
+            AddFormRef(doc, allocator, "altBlockMaterialType", form.altBlockMaterialType);
+            AddFormRef(doc, allocator, "impactDataSet", form.impactDataSet);
+            AddFormRef(doc, allocator, "firstPersonModelObject", form.firstPersonModelObject);
+            AddFormRef(doc, allocator, "attackSound", form.attackSound);
+            AddFormRef(doc, allocator, "attackSound2D", form.attackSound2D);
+            AddFormRef(doc, allocator, "attackLoopSound", form.attackLoopSound);
+            AddFormRef(doc, allocator, "attackFailSound", form.attackFailSound);
+            AddFormRef(doc, allocator, "idleSound", form.idleSound);
+            AddFormRef(doc, allocator, "equipSound", form.equipSound);
+            AddFormRef(doc, allocator, "unequipSound", form.unequipSound);
+            doc.AddMember("weaponType", form.weaponType, allocator);
+            doc.AddMember("weaponFlags", form.weaponFlags, allocator);
+            doc.AddMember("weaponFlags2", form.weaponFlags2, allocator);
+            doc.AddMember("weaponSkill", form.weaponSkill, allocator);
+            doc.AddMember("weaponResist", form.weaponResist, allocator);
+            doc.AddMember("weaponCritFlags", form.weaponCritFlags, allocator);
+            doc.AddMember("weaponCritDamage", form.weaponCritDamage, allocator);
+            doc.AddMember("weaponSpeed", form.weaponSpeed, allocator);
+            doc.AddMember("weaponReach", form.weaponReach, allocator);
+            doc.AddMember("weaponMinRange", form.weaponMinRange, allocator);
+            doc.AddMember("weaponMaxRange", form.weaponMaxRange, allocator);
+            doc.AddMember("weaponStagger", form.weaponStagger, allocator);
+            doc.AddMember("weaponCritMult", form.weaponCritMult, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::AlchemyItem) {
+            AddFormRef(doc, allocator, "equipSlot", form.equipSlot);
+            AddFormRef(doc, allocator, "addictionItem", form.addictionItem);
+            AddFormRef(doc, allocator, "consumptionSound", form.consumptionSound);
+            doc.AddMember("alchemyFlags", form.alchemyFlags, allocator);
+            doc.AddMember("alchemyCostOverride", form.alchemyCostOverride, allocator);
+            doc.AddMember("addictionChance", form.addictionChance, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Ingredient) {
+            AddFormRef(doc, allocator, "equipSlot", form.equipSlot);
+            doc.AddMember("ingredientFlags", form.ingredientFlags, allocator);
+            doc.AddMember("ingredientCostOverride", form.ingredientCostOverride, allocator);
+            doc.AddMember("knownEffectFlags", static_cast<unsigned>(form.knownEffectFlags), allocator);
+            doc.AddMember("playerUses", static_cast<unsigned>(form.playerUses), allocator);
+        }
+        if ((form.kind == DynamicForms::FormKind::AlchemyItem || form.kind == DynamicForms::FormKind::Ingredient) && form.magicEffectsOverride) {
+            doc.AddMember("magicEffectsOverride", form.magicEffectsOverride, allocator);
+            AddMagicEffectArray(doc, allocator, "magicEffects", form.magicEffects);
         }
         if (form.kind == DynamicForms::FormKind::Global) {
             const auto globalType = ToString(form.globalType);
@@ -4032,7 +4519,7 @@ namespace Manager {
             forms[index].dirty = false;
             ListManager::GetSingleton()->PopulateAllLists(true);
             if (dispatchUpdate) {
-                DispatchEvent(UPDATED_EVENT, forms[index].editorId, static_cast<float>(forms[index].localId));
+                DispatchEvent(UPDATED_EVENT, ToSignature(forms[index].kind), static_cast<float>(forms[index].localId));
             }
         }
         return saved;
@@ -4040,18 +4527,22 @@ namespace Manager {
 
     bool SaveAllForms(const bool dispatchUpdate) {
         bool saved = true;
+        std::set<std::string> updatedSignatures;
+        std::size_t savedCount = 0;
         for (std::size_t i = 0; i < forms.size(); ++i) {
             const bool wasDirty = forms[i].dirty;
             if (ResolveDPFForm(forms[i]) && SaveForm(forms[i])) {
                 forms[i].dirty = dispatchUpdate ? false : wasDirty;
+                updatedSignatures.insert(ToSignature(forms[i].kind));
+                ++savedCount;
             } else {
                 saved = false;
             }
         }
         if (saved) {
             ListManager::GetSingleton()->PopulateAllLists(true);
-            if (dispatchUpdate) {
-                DispatchEvent(UPDATED_EVENT, "All", static_cast<float>(forms.size()));
+            if (dispatchUpdate && !updatedSignatures.empty()) {
+                DispatchEvent(UPDATED_EVENT, JoinSignatures(updatedSignatures), static_cast<float>(savedCount));
             }
         }
         return saved;
@@ -4072,7 +4563,6 @@ namespace Manager {
         if (saved) {
             forms.back().dirty = false;
             ListManager::GetSingleton()->PopulateAllLists(true);
-            DispatchEvent(UPDATED_EVENT, forms.back().editorId, static_cast<float>(forms.back().localId));
         }
         return saved;
     }
@@ -4116,9 +4606,10 @@ namespace Manager {
             return false;
         }
 
+        const auto signature = ToSignature(form.kind);
         forms.erase(forms.begin() + static_cast<std::ptrdiff_t>(index));
         ListManager::GetSingleton()->PopulateAllLists(true);
-        DispatchEvent(UPDATED_EVENT, form.editorId, static_cast<float>(form.localId));
+        DispatchEvent(UPDATED_EVENT, signature, static_cast<float>(form.localId));
         logger::info("Deleted dynamic form '{}' localId {:06X}.", form.editorId, form.localId);
         return true;
     }

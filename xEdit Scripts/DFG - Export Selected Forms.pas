@@ -2,6 +2,8 @@ unit userscript;
 
 var
   OutputDir: string;
+  PackageName: string;
+  PackageDir: string;
   ExportedCount: Integer;
   SkippedCount: Integer;
 
@@ -138,6 +140,17 @@ begin
     (c = '_');
 end;
 
+function IsSafePackageChar(const c: string): Boolean;
+begin
+  Result :=
+    ((c >= 'A') and (c <= 'Z')) or
+    ((c >= 'a') and (c <= 'z')) or
+    ((c >= '0') and (c <= '9')) or
+    (c = '_') or
+    (c = '-') or
+    (c = '.');
+end;
+
 function BoolJson(b: Boolean): string;
 begin
   if b then
@@ -175,6 +188,49 @@ begin
       Result := Result + c
     else
       Result := Result + '_';
+  end;
+end;
+
+function SafePackageFolder(const s: string): string;
+var
+  i: Integer;
+  c: string;
+begin
+  Result := '';
+  for i := 1 to Length(s) do begin
+    c := Copy(s, i, 1);
+    if IsSafePackageChar(c) then
+      Result := Result + c
+    else
+      Result := Result + '_';
+  end;
+
+  if Result = '' then
+    Result := 'Local_Forms';
+end;
+
+procedure WritePackageManifest;
+var
+  sl: TStringList;
+  fn: string;
+begin
+  fn := PackageDir + 'manifest.json';
+  if FileExists(fn) then
+    Exit;
+
+  sl := TStringList.Create;
+  try
+    sl.Add('{');
+    AddKV(sl, '  ', 'schemaVersion', '1');
+    AddStringKV(sl, '  ', 'displayName', PackageName);
+    AddKV(sl, '  ', 'enabled', 'true');
+    AddKV(sl, '  ', 'priority', '0');
+    AddStringKV(sl, '  ', 'database', 'package.db');
+    RemoveTrailingComma(sl);
+    sl.Add('}');
+    sl.SaveToFile(fn);
+  finally
+    sl.Free;
   end;
 end;
 
@@ -1772,6 +1828,7 @@ begin
     AddStringKV(sl, '  ', 'formKind', kind);
     AddStringKV(sl, '  ', 'sourceSignature', sig);
     AddStringKV(sl, '  ', 'editorId', edid);
+    AddStringKV(sl, '  ', 'packageName', PackageName);
 
     if sig = 'GLOB' then begin
       AddStringKV(sl, '  ', 'globalType', GlobalTypeFromRecord(e));
@@ -1803,6 +1860,8 @@ begin
 end;
 
 function Initialize: Integer;
+var
+  packageFolder: string;
 begin
   ExportedCount := 0;
   SkippedCount := 0;
@@ -1811,9 +1870,27 @@ begin
   DebugNpcEditorID := 'HousecarlWhiterun';
   // Use DebugNpcEditorID := ''; to log every selected NPC.
 
-  OutputDir := wbDataPath + 'Viny Mods\Dynamic Forms Generator\Forms\';
+  PackageName := 'Local Forms';
+  if not InputQuery('Dynamic Forms Generator', 'Package name:', PackageName) then begin
+    AddMessage('[DFG] Export cancelled: no package selected.');
+    Result := 1;
+    Exit;
+  end;
+
+  PackageName := Trim(PackageName);
+  if PackageName = '' then
+    PackageName := 'Local Forms';
+
+  packageFolder := SafePackageFolder(PackageName);
+  PackageDir := wbDataPath + 'Viny Mods\Dynamic Forms Generator\Packages\' + packageFolder + '\';
+  OutputDir := PackageDir + 'imports\';
+  ForceDirectories(PackageDir);
   ForceDirectories(OutputDir);
-  AddMessage('[DFG] Output folder: ' + OutputDir);
+  WritePackageManifest;
+
+  AddMessage('[DFG] Package: ' + PackageName);
+  AddMessage('[DFG] Package folder: ' + PackageDir);
+  AddMessage('[DFG] Import folder: ' + OutputDir);
   AddMessage('[DFG][FLAGS] Debug enabled=' + DebugBoolText(DebugNpcFlags) +
     ', NPC filter="' + DebugNpcEditorID + '"');
   Result := 0;
