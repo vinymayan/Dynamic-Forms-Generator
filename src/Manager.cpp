@@ -95,6 +95,77 @@ namespace {
             return "AlchemyItem";
         case DynamicForms::FormKind::Ingredient:
             return "Ingredient";
+        case DynamicForms::FormKind::Spell:
+            return "Spell";
+        case DynamicForms::FormKind::MagicEffect:
+            return "MagicEffect";
+        case DynamicForms::FormKind::Enchantment:
+            return "Enchantment";
+        case DynamicForms::FormKind::Scroll:
+            return "Scroll";
+        case DynamicForms::FormKind::Projectile:
+            return "Projectile";
+        case DynamicForms::FormKind::TextureSet:
+            return "TextureSet";
+        case DynamicForms::FormKind::Hazard:
+            return "Hazard";
+        case DynamicForms::FormKind::ImpactData:
+            return "ImpactData";
+        case DynamicForms::FormKind::ReferenceEffect:
+            return "ReferenceEffect";
+        case DynamicForms::FormKind::DualCastData:
+            return "DualCastData";
+        case DynamicForms::FormKind::Static:
+            return "Static";
+        case DynamicForms::FormKind::MovableStatic:
+            return "MovableStatic";
+        case DynamicForms::FormKind::Door:
+            return "Door";
+        case DynamicForms::FormKind::CombatStyle:
+            return "CombatStyle";
+        case DynamicForms::FormKind::SoundCategory:
+            return "SoundCategory";
+        case DynamicForms::FormKind::Class:
+            return "Class";
+        case DynamicForms::FormKind::Flora:
+            return "Flora";
+        case DynamicForms::FormKind::Tree:
+            return "Tree";
+        case DynamicForms::FormKind::ConstructibleObject:
+            return "ConstructibleObject";
+        case DynamicForms::FormKind::Container:
+            return "Container";
+        case DynamicForms::FormKind::ImpactDataSet: return "ImpactDataSet";
+        case DynamicForms::FormKind::CollisionLayer: return "CollisionLayer";
+        case DynamicForms::FormKind::Footstep: return "Footstep";
+        case DynamicForms::FormKind::FootstepSet: return "FootstepSet";
+        case DynamicForms::FormKind::ReverbParameters: return "ReverbParameters";
+        case DynamicForms::FormKind::AcousticSpace: return "AcousticSpace";
+        case DynamicForms::FormKind::Apparatus: return "Apparatus";
+        case DynamicForms::FormKind::StaticCollection: return "StaticCollection";
+        case DynamicForms::FormKind::Grass: return "Grass";
+        case DynamicForms::FormKind::IdleMarker: return "IdleMarker";
+        case DynamicForms::FormKind::EncounterZone: return "EncounterZone";
+        case DynamicForms::FormKind::Relationship: return "Relationship";
+        case DynamicForms::FormKind::AssociationType: return "AssociationType";
+        case DynamicForms::FormKind::MovementType: return "MovementType";
+        case DynamicForms::FormKind::WordOfPower: return "WordOfPower";
+        case DynamicForms::FormKind::Water: return "Water";
+        case DynamicForms::FormKind::ImageSpace: return "ImageSpace";
+        case DynamicForms::FormKind::LightingTemplate: return "LightingTemplate";
+        case DynamicForms::FormKind::Shout: return "Shout";
+        case DynamicForms::FormKind::LeveledItem: return "LeveledItem";
+        case DynamicForms::FormKind::LeveledNPC: return "LeveledNPC";
+        case DynamicForms::FormKind::LeveledSpell: return "LeveledSpell";
+        case DynamicForms::FormKind::LocationRefType: return "LocationRefType";
+        case DynamicForms::FormKind::Action: return "Action";
+        case DynamicForms::FormKind::MenuIcon: return "MenuIcon";
+        case DynamicForms::FormKind::Eyes: return "Eyes";
+        case DynamicForms::FormKind::Note: return "Note";
+        case DynamicForms::FormKind::AnimatedObject: return "AnimatedObject";
+        case DynamicForms::FormKind::LoadScreen: return "LoadScreen";
+        case DynamicForms::FormKind::ShaderParticleGeometry: return "ShaderParticleGeometry";
+        case DynamicForms::FormKind::AddonNode: return "AddonNode";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -185,6 +256,67 @@ namespace {
         if (normalized == "ingredient" || normalized == "ingr") {
             return DynamicForms::FormKind::Ingredient;
         }
+        if (normalized == "spell" || normalized == "spel") {
+            return DynamicForms::FormKind::Spell;
+        }
+        if (normalized == "magiceffect" || normalized == "effectsetting" || normalized == "mgef") {
+            return DynamicForms::FormKind::MagicEffect;
+        }
+        if (normalized == "enchantment" || normalized == "ench") {
+            return DynamicForms::FormKind::Enchantment;
+        }
+        if (normalized == "scroll" || normalized == "scrl") {
+            return DynamicForms::FormKind::Scroll;
+        }
+        if (normalized == "projectile" || normalized == "proj") {
+            return DynamicForms::FormKind::Projectile;
+        }
+        if (normalized == "textureset" || normalized == "txst") return DynamicForms::FormKind::TextureSet;
+        if (normalized == "hazard" || normalized == "hazd") return DynamicForms::FormKind::Hazard;
+        if (normalized == "impactdata" || normalized == "ipct") return DynamicForms::FormKind::ImpactData;
+        if (normalized == "referenceeffect" || normalized == "rfct") return DynamicForms::FormKind::ReferenceEffect;
+        if (normalized == "dualcastdata" || normalized == "dual") return DynamicForms::FormKind::DualCastData;
+        if (normalized == "static" || normalized == "stat") return DynamicForms::FormKind::Static;
+        if (normalized == "movablestatic" || normalized == "mstt") return DynamicForms::FormKind::MovableStatic;
+        if (normalized == "door") return DynamicForms::FormKind::Door;
+        if (normalized == "combatstyle" || normalized == "csty") return DynamicForms::FormKind::CombatStyle;
+        if (normalized == "soundcategory" || normalized == "snct") return DynamicForms::FormKind::SoundCategory;
+        if (normalized == "class" || normalized == "clas") return DynamicForms::FormKind::Class;
+        if (normalized == "flora" || normalized == "flor") return DynamicForms::FormKind::Flora;
+        if (normalized == "tree") return DynamicForms::FormKind::Tree;
+        if (normalized == "constructibleobject" || normalized == "constructible" || normalized == "cobj" || normalized == "recipe") return DynamicForms::FormKind::ConstructibleObject;
+        if (normalized == "container" || normalized == "cont") return DynamicForms::FormKind::Container;
+        if (normalized == "impactdataset" || normalized == "ipds") return DynamicForms::FormKind::ImpactDataSet;
+        if (normalized == "collisionlayer" || normalized == "coll") return DynamicForms::FormKind::CollisionLayer;
+        if (normalized == "footstep" || normalized == "fstp") return DynamicForms::FormKind::Footstep;
+        if (normalized == "footstepset" || normalized == "fsts") return DynamicForms::FormKind::FootstepSet;
+        if (normalized == "reverbparameters" || normalized == "reverbparam" || normalized == "revb") return DynamicForms::FormKind::ReverbParameters;
+        if (normalized == "acousticspace" || normalized == "aspc") return DynamicForms::FormKind::AcousticSpace;
+        if (normalized == "apparatus" || normalized == "appa") return DynamicForms::FormKind::Apparatus;
+        if (normalized == "staticcollection" || normalized == "scol") return DynamicForms::FormKind::StaticCollection;
+        if (normalized == "grass" || normalized == "gras") return DynamicForms::FormKind::Grass;
+        if (normalized == "idlemarker" || normalized == "idlm") return DynamicForms::FormKind::IdleMarker;
+        if (normalized == "encounterzone" || normalized == "eczn") return DynamicForms::FormKind::EncounterZone;
+        if (normalized == "relationship" || normalized == "rela") return DynamicForms::FormKind::Relationship;
+        if (normalized == "associationtype" || normalized == "astp") return DynamicForms::FormKind::AssociationType;
+        if (normalized == "movementtype" || normalized == "movt") return DynamicForms::FormKind::MovementType;
+        if (normalized == "wordofpower" || normalized == "woop") return DynamicForms::FormKind::WordOfPower;
+        if (normalized == "water" || normalized == "watr") return DynamicForms::FormKind::Water;
+        if (normalized == "imagespace" || normalized == "imgs") return DynamicForms::FormKind::ImageSpace;
+        if (normalized == "lightingtemplate" || normalized == "lgtm") return DynamicForms::FormKind::LightingTemplate;
+        if (normalized == "shout" || normalized == "shou") return DynamicForms::FormKind::Shout;
+        if (normalized == "leveleditem" || normalized == "lvli") return DynamicForms::FormKind::LeveledItem;
+        if (normalized == "levelednpc" || normalized == "leveledcharacter" || normalized == "lvln") return DynamicForms::FormKind::LeveledNPC;
+        if (normalized == "leveledspell" || normalized == "lvsp") return DynamicForms::FormKind::LeveledSpell;
+        if (normalized == "locationreftype" || normalized == "lcrt") return DynamicForms::FormKind::LocationRefType;
+        if (normalized == "action" || normalized == "aact") return DynamicForms::FormKind::Action;
+        if (normalized == "menuicon" || normalized == "micn") return DynamicForms::FormKind::MenuIcon;
+        if (normalized == "eyes") return DynamicForms::FormKind::Eyes;
+        if (normalized == "note") return DynamicForms::FormKind::Note;
+        if (normalized == "animatedobject" || normalized == "anio") return DynamicForms::FormKind::AnimatedObject;
+        if (normalized == "loadscreen" || normalized == "lscr") return DynamicForms::FormKind::LoadScreen;
+        if (normalized == "shaderparticlegeometry" || normalized == "spgd") return DynamicForms::FormKind::ShaderParticleGeometry;
+        if (normalized == "addonnode" || normalized == "addn") return DynamicForms::FormKind::AddonNode;
         if (normalized == "color" || normalized == "colorform" || normalized == "clfm") {
             return DynamicForms::FormKind::Color;
         }
@@ -464,7 +596,11 @@ namespace {
     }
 
     std::uint32_t ReadUInt32(const rapidjson::Value& doc, const char* key, std::uint32_t fallback);
+    std::int32_t ReadInt32(const rapidjson::Value& doc, const char* key, std::int32_t fallback);
     float ReadFloat(const rapidjson::Value& doc, const char* key, float fallback);
+    DynamicForms::PerkCondition ReadCondition(const rapidjson::Value& value);
+    void WriteCondition(rapidjson::Value& array, rapidjson::Document::AllocatorType& allocator, const DynamicForms::PerkCondition& condition);
+    void ApplyConditions(RE::TESCondition& target, const std::vector<DynamicForms::PerkCondition>& conditions);
 
     void ReadMagicEffectArray(const rapidjson::Value& doc, const char* key, std::vector<DynamicForms::MagicEffectEntry>& target) {
         if (!doc.HasMember(key) || !doc[key].IsArray()) {
@@ -487,6 +623,11 @@ namespace {
             entry.area = ReadUInt32(item, "area", entry.area);
             entry.duration = ReadUInt32(item, "duration", entry.duration);
             entry.cost = ReadFloat(item, "cost", entry.cost);
+            if (item.HasMember("conditions") && item["conditions"].IsArray()) {
+                for (const auto& condition : item["conditions"].GetArray()) {
+                    entry.conditions.push_back(ReadCondition(condition));
+                }
+            }
             if (!entry.effectSetting.empty()) {
                 target.push_back(std::move(entry));
             }
@@ -529,6 +670,62 @@ namespace {
             return "ALCH";
         case DynamicForms::FormKind::Ingredient:
             return "INGR";
+        case DynamicForms::FormKind::Spell:
+            return "SPEL";
+        case DynamicForms::FormKind::MagicEffect:
+            return "MGEF";
+        case DynamicForms::FormKind::Enchantment:
+            return "ENCH";
+        case DynamicForms::FormKind::Scroll:
+            return "SCRL";
+        case DynamicForms::FormKind::Projectile:
+            return "PROJ";
+        case DynamicForms::FormKind::TextureSet: return "TXST";
+        case DynamicForms::FormKind::Hazard: return "HAZD";
+        case DynamicForms::FormKind::ImpactData: return "IPCT";
+        case DynamicForms::FormKind::ReferenceEffect: return "RFCT";
+        case DynamicForms::FormKind::DualCastData: return "DUAL";
+        case DynamicForms::FormKind::Static: return "STAT";
+        case DynamicForms::FormKind::MovableStatic: return "MSTT";
+        case DynamicForms::FormKind::Door: return "DOOR";
+        case DynamicForms::FormKind::CombatStyle: return "CSTY";
+        case DynamicForms::FormKind::SoundCategory: return "SNCT";
+        case DynamicForms::FormKind::Class: return "CLAS";
+        case DynamicForms::FormKind::Flora: return "FLOR";
+        case DynamicForms::FormKind::Tree: return "TREE";
+        case DynamicForms::FormKind::ConstructibleObject: return "COBJ";
+        case DynamicForms::FormKind::Container: return "CONT";
+        case DynamicForms::FormKind::ImpactDataSet: return "IPDS";
+        case DynamicForms::FormKind::CollisionLayer: return "COLL";
+        case DynamicForms::FormKind::Footstep: return "FSTP";
+        case DynamicForms::FormKind::FootstepSet: return "FSTS";
+        case DynamicForms::FormKind::ReverbParameters: return "REVB";
+        case DynamicForms::FormKind::AcousticSpace: return "ASPC";
+        case DynamicForms::FormKind::Apparatus: return "APPA";
+        case DynamicForms::FormKind::StaticCollection: return "SCOL";
+        case DynamicForms::FormKind::Grass: return "GRAS";
+        case DynamicForms::FormKind::IdleMarker: return "IDLM";
+        case DynamicForms::FormKind::EncounterZone: return "ECZN";
+        case DynamicForms::FormKind::Relationship: return "RELA";
+        case DynamicForms::FormKind::AssociationType: return "ASTP";
+        case DynamicForms::FormKind::MovementType: return "MOVT";
+        case DynamicForms::FormKind::WordOfPower: return "WOOP";
+        case DynamicForms::FormKind::Water: return "WATR";
+        case DynamicForms::FormKind::ImageSpace: return "IMGS";
+        case DynamicForms::FormKind::LightingTemplate: return "LGTM";
+        case DynamicForms::FormKind::Shout: return "SHOU";
+        case DynamicForms::FormKind::LeveledItem: return "LVLI";
+        case DynamicForms::FormKind::LeveledNPC: return "LVLN";
+        case DynamicForms::FormKind::LeveledSpell: return "LVSP";
+        case DynamicForms::FormKind::LocationRefType: return "LCRT";
+        case DynamicForms::FormKind::Action: return "AACT";
+        case DynamicForms::FormKind::MenuIcon: return "MICN";
+        case DynamicForms::FormKind::Eyes: return "EYES";
+        case DynamicForms::FormKind::Note: return "NOTE";
+        case DynamicForms::FormKind::AnimatedObject: return "ANIO";
+        case DynamicForms::FormKind::LoadScreen: return "LSCR";
+        case DynamicForms::FormKind::ShaderParticleGeometry: return "SPGD";
+        case DynamicForms::FormKind::AddonNode: return "ADDN";
         case DynamicForms::FormKind::Color:
             return "CLFM";
         case DynamicForms::FormKind::ArtObject:
@@ -585,7 +782,159 @@ namespace {
             item.AddMember("area", value.area, allocator);
             item.AddMember("duration", value.duration, allocator);
             item.AddMember("cost", value.cost, allocator);
+            if (!value.conditions.empty()) {
+                rapidjson::Value conditions(rapidjson::kArrayType);
+                for (const auto& condition : value.conditions) {
+                    WriteCondition(conditions, allocator, condition);
+                }
+                item.AddMember("conditions", conditions, allocator);
+            }
             array.PushBack(item, allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    template <class T, std::size_t N>
+    void ReadNumberArray(const rapidjson::Value& object, const char* key, std::array<T, N>& values) {
+        if (!object.HasMember(key) || !object[key].IsArray()) return;
+        const auto array = object[key].GetArray();
+        const auto count = std::min<std::size_t>(N, array.Size());
+        for (std::size_t i = 0; i < count; ++i) {
+            if (array[static_cast<rapidjson::SizeType>(i)].IsNumber()) {
+                values[i] = static_cast<T>(array[static_cast<rapidjson::SizeType>(i)].GetDouble());
+            }
+        }
+    }
+
+    template <class T, std::size_t N>
+    void AddNumberArray(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::array<T, N>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto value : values) array.PushBack(value, allocator);
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    template <std::size_t N>
+    void ReadStringArray(const rapidjson::Value& object, const char* key, std::array<std::string, N>& values) {
+        if (!object.HasMember(key) || !object[key].IsArray()) return;
+        const auto array = object[key].GetArray();
+        const auto count = std::min<std::size_t>(N, array.Size());
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& value = array[static_cast<rapidjson::SizeType>(i)];
+            if (value.IsString()) values[i] = value.GetString();
+        }
+    }
+
+    template <std::size_t N>
+    void AddStringArray(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::array<std::string, N>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& value : values) array.PushBack(rapidjson::Value(value.c_str(), allocator), allocator);
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    void ReadContainerEntries(const rapidjson::Value& object, const char* key, std::vector<DynamicForms::ContainerEntry>& values) {
+        if (!object.HasMember(key) || !object[key].IsArray()) return;
+        values.clear();
+        for (const auto& entry : object[key].GetArray()) {
+            if (!entry.IsObject() || !entry.HasMember("item")) continue;
+            DynamicForms::ContainerEntry component;
+            component.item = ReadFormRefValue(entry["item"]);
+            component.count = std::max(1, ReadInt32(entry, "count", component.count));
+            if (entry.HasMember("owner")) component.owner = ReadFormRefValue(entry["owner"]);
+            if (entry.HasMember("conditionGlobal")) component.conditionGlobal = ReadFormRefValue(entry["conditionGlobal"]);
+            component.requiredRank = ReadInt32(entry, "requiredRank", component.requiredRank);
+            component.healthMult = ReadFloat(entry, "healthMult", component.healthMult);
+            if (!component.item.empty()) values.push_back(std::move(component));
+        }
+    }
+
+    void AddContainerEntries(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::vector<DynamicForms::ContainerEntry>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& component : values) {
+            if (component.item.empty()) continue;
+            rapidjson::Value entry(rapidjson::kObjectType);
+            rapidjson::Value item(rapidjson::kObjectType);
+            if (!component.item.editorID.empty()) item.AddMember("editorID", rapidjson::Value(component.item.editorID.c_str(), allocator), allocator);
+            if (!component.item.formID.empty()) item.AddMember("formID", rapidjson::Value(component.item.formID.c_str(), allocator), allocator);
+            entry.AddMember("item", item, allocator);
+            entry.AddMember("count", std::max(1, component.count), allocator);
+            const auto addEntryRef = [&](const char* name, const DynamicForms::FormRef& ref) {
+                if (ref.empty()) return;
+                rapidjson::Value value(rapidjson::kObjectType);
+                if (!ref.editorID.empty()) value.AddMember("editorID", rapidjson::Value(ref.editorID.c_str(), allocator), allocator);
+                if (!ref.formID.empty()) value.AddMember("formID", rapidjson::Value(ref.formID.c_str(), allocator), allocator);
+                entry.AddMember(rapidjson::Value(name, allocator), value, allocator);
+            };
+            addEntryRef("owner", component.owner);
+            addEntryRef("conditionGlobal", component.conditionGlobal);
+            entry.AddMember("requiredRank", component.requiredRank, allocator);
+            entry.AddMember("healthMult", component.healthMult, allocator);
+            array.PushBack(entry, allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    void ReadFormRefPairs(const rapidjson::Value& object, const char* key, std::vector<DynamicForms::FormRefPair>& values) {
+        if (!object.HasMember(key) || !object[key].IsArray()) return;
+        values.clear();
+        for (const auto& entry : object[key].GetArray()) {
+            if (!entry.IsObject() || !entry.HasMember("key") || !entry.HasMember("value")) continue;
+            DynamicForms::FormRefPair pair{ ReadFormRefValue(entry["key"]), ReadFormRefValue(entry["value"]) };
+            if (!pair.key.empty() && !pair.value.empty()) values.push_back(std::move(pair));
+        }
+    }
+
+    void AddFormRefPairs(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::vector<DynamicForms::FormRefPair>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& pair : values) {
+            if (pair.key.empty() || pair.value.empty()) continue;
+            rapidjson::Value entry(rapidjson::kObjectType);
+            const auto makeRef = [&](const DynamicForms::FormRef& ref) {
+                rapidjson::Value value(rapidjson::kObjectType);
+                if (!ref.editorID.empty()) value.AddMember("editorID", rapidjson::Value(ref.editorID.c_str(), allocator), allocator);
+                if (!ref.formID.empty()) value.AddMember("formID", rapidjson::Value(ref.formID.c_str(), allocator), allocator);
+                return value;
+            };
+            entry.AddMember("key", makeRef(pair.key), allocator);
+            entry.AddMember("value", makeRef(pair.value), allocator);
+            array.PushBack(entry, allocator);
+        }
+        object.AddMember(rapidjson::Value(key, allocator), array, allocator);
+    }
+
+    void ReadLeveledEntries(const rapidjson::Value& object, const char* key, std::vector<DynamicForms::LeveledEntry>& values) {
+        if (!object.HasMember(key) || !object[key].IsArray()) return;
+        values.clear();
+        for (const auto& entry : object[key].GetArray()) {
+            if (!entry.IsObject() || !entry.HasMember("form")) continue;
+            DynamicForms::LeveledEntry value;
+            value.form = ReadFormRefValue(entry["form"]);
+            value.level = static_cast<std::uint16_t>(std::clamp(ReadUInt32(entry, "level", value.level), 1u, 65535u));
+            value.count = static_cast<std::uint16_t>(std::clamp(ReadUInt32(entry, "count", value.count), 1u, 65535u));
+            if (entry.HasMember("owner")) value.owner = ReadFormRefValue(entry["owner"]);
+            if (entry.HasMember("conditionGlobal")) value.conditionGlobal = ReadFormRefValue(entry["conditionGlobal"]);
+            value.requiredRank = ReadInt32(entry, "requiredRank", value.requiredRank);
+            value.healthMult = ReadFloat(entry, "healthMult", value.healthMult);
+            if (!value.form.empty()) values.push_back(std::move(value));
+        }
+    }
+
+    void AddLeveledEntries(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const char* key, const std::vector<DynamicForms::LeveledEntry>& values) {
+        rapidjson::Value array(rapidjson::kArrayType);
+        for (const auto& value : values) {
+            if (value.form.empty()) continue;
+            rapidjson::Value entry(rapidjson::kObjectType);
+            const auto makeRef = [&](const DynamicForms::FormRef& ref) {
+                rapidjson::Value result(rapidjson::kObjectType);
+                if (!ref.editorID.empty()) result.AddMember("editorID", rapidjson::Value(ref.editorID.c_str(), allocator), allocator);
+                if (!ref.formID.empty()) result.AddMember("formID", rapidjson::Value(ref.formID.c_str(), allocator), allocator);
+                return result;
+            };
+            entry.AddMember("form", makeRef(value.form), allocator);
+            entry.AddMember("level", value.level, allocator); entry.AddMember("count", value.count, allocator);
+            if (!value.owner.empty()) entry.AddMember("owner", makeRef(value.owner), allocator);
+            if (!value.conditionGlobal.empty()) entry.AddMember("conditionGlobal", makeRef(value.conditionGlobal), allocator);
+            entry.AddMember("requiredRank", value.requiredRank, allocator); entry.AddMember("healthMult", value.healthMult, allocator);
+            array.PushBack(entry, allocator);
         }
         object.AddMember(rapidjson::Value(key, allocator), array, allocator);
     }
@@ -669,6 +1018,62 @@ namespace {
             return static_cast<std::uint32_t>(RE::FormType::AlchemyItem);
         case DynamicForms::FormKind::Ingredient:
             return static_cast<std::uint32_t>(RE::FormType::Ingredient);
+        case DynamicForms::FormKind::Spell:
+            return static_cast<std::uint32_t>(RE::FormType::Spell);
+        case DynamicForms::FormKind::MagicEffect:
+            return static_cast<std::uint32_t>(RE::FormType::MagicEffect);
+        case DynamicForms::FormKind::Enchantment:
+            return static_cast<std::uint32_t>(RE::FormType::Enchantment);
+        case DynamicForms::FormKind::Scroll:
+            return static_cast<std::uint32_t>(RE::FormType::Scroll);
+        case DynamicForms::FormKind::Projectile:
+            return static_cast<std::uint32_t>(RE::FormType::Projectile);
+        case DynamicForms::FormKind::TextureSet: return static_cast<std::uint32_t>(RE::FormType::TextureSet);
+        case DynamicForms::FormKind::Hazard: return static_cast<std::uint32_t>(RE::FormType::Hazard);
+        case DynamicForms::FormKind::ImpactData: return static_cast<std::uint32_t>(RE::FormType::Impact);
+        case DynamicForms::FormKind::ReferenceEffect: return static_cast<std::uint32_t>(RE::FormType::ReferenceEffect);
+        case DynamicForms::FormKind::DualCastData: return static_cast<std::uint32_t>(RE::FormType::DualCastData);
+        case DynamicForms::FormKind::Static: return static_cast<std::uint32_t>(RE::FormType::Static);
+        case DynamicForms::FormKind::MovableStatic: return static_cast<std::uint32_t>(RE::FormType::MovableStatic);
+        case DynamicForms::FormKind::Door: return static_cast<std::uint32_t>(RE::FormType::Door);
+        case DynamicForms::FormKind::CombatStyle: return static_cast<std::uint32_t>(RE::FormType::CombatStyle);
+        case DynamicForms::FormKind::SoundCategory: return static_cast<std::uint32_t>(RE::FormType::SoundCategory);
+        case DynamicForms::FormKind::Class: return static_cast<std::uint32_t>(RE::FormType::Class);
+        case DynamicForms::FormKind::Flora: return static_cast<std::uint32_t>(RE::FormType::Flora);
+        case DynamicForms::FormKind::Tree: return static_cast<std::uint32_t>(RE::FormType::Tree);
+        case DynamicForms::FormKind::ConstructibleObject: return static_cast<std::uint32_t>(RE::FormType::ConstructibleObject);
+        case DynamicForms::FormKind::Container: return static_cast<std::uint32_t>(RE::FormType::Container);
+        case DynamicForms::FormKind::ImpactDataSet: return static_cast<std::uint32_t>(RE::FormType::ImpactDataSet);
+        case DynamicForms::FormKind::CollisionLayer: return static_cast<std::uint32_t>(RE::FormType::CollisionLayer);
+        case DynamicForms::FormKind::Footstep: return static_cast<std::uint32_t>(RE::FormType::Footstep);
+        case DynamicForms::FormKind::FootstepSet: return static_cast<std::uint32_t>(RE::FormType::FootstepSet);
+        case DynamicForms::FormKind::ReverbParameters: return static_cast<std::uint32_t>(RE::FormType::ReverbParam);
+        case DynamicForms::FormKind::AcousticSpace: return static_cast<std::uint32_t>(RE::FormType::AcousticSpace);
+        case DynamicForms::FormKind::Apparatus: return static_cast<std::uint32_t>(RE::FormType::Apparatus);
+        case DynamicForms::FormKind::StaticCollection: return static_cast<std::uint32_t>(RE::FormType::StaticCollection);
+        case DynamicForms::FormKind::Grass: return static_cast<std::uint32_t>(RE::FormType::Grass);
+        case DynamicForms::FormKind::IdleMarker: return static_cast<std::uint32_t>(RE::FormType::IdleMarker);
+        case DynamicForms::FormKind::EncounterZone: return static_cast<std::uint32_t>(RE::FormType::EncounterZone);
+        case DynamicForms::FormKind::Relationship: return static_cast<std::uint32_t>(RE::FormType::Relationship);
+        case DynamicForms::FormKind::AssociationType: return static_cast<std::uint32_t>(RE::FormType::AssociationType);
+        case DynamicForms::FormKind::MovementType: return static_cast<std::uint32_t>(RE::FormType::MovementType);
+        case DynamicForms::FormKind::WordOfPower: return static_cast<std::uint32_t>(RE::FormType::WordOfPower);
+        case DynamicForms::FormKind::Water: return static_cast<std::uint32_t>(RE::FormType::Water);
+        case DynamicForms::FormKind::ImageSpace: return static_cast<std::uint32_t>(RE::FormType::ImageSpace);
+        case DynamicForms::FormKind::LightingTemplate: return static_cast<std::uint32_t>(RE::FormType::LightingMaster);
+        case DynamicForms::FormKind::Shout: return static_cast<std::uint32_t>(RE::FormType::Shout);
+        case DynamicForms::FormKind::LeveledItem: return static_cast<std::uint32_t>(RE::FormType::LeveledItem);
+        case DynamicForms::FormKind::LeveledNPC: return static_cast<std::uint32_t>(RE::FormType::LeveledNPC);
+        case DynamicForms::FormKind::LeveledSpell: return static_cast<std::uint32_t>(RE::FormType::LeveledSpell);
+        case DynamicForms::FormKind::LocationRefType: return static_cast<std::uint32_t>(RE::FormType::LocationRefType);
+        case DynamicForms::FormKind::Action: return static_cast<std::uint32_t>(RE::FormType::Action);
+        case DynamicForms::FormKind::MenuIcon: return static_cast<std::uint32_t>(RE::FormType::MenuIcon);
+        case DynamicForms::FormKind::Eyes: return static_cast<std::uint32_t>(RE::FormType::Eyes);
+        case DynamicForms::FormKind::Note: return static_cast<std::uint32_t>(RE::FormType::Note);
+        case DynamicForms::FormKind::AnimatedObject: return static_cast<std::uint32_t>(RE::FormType::AnimatedObject);
+        case DynamicForms::FormKind::LoadScreen: return static_cast<std::uint32_t>(RE::FormType::LoadScreen);
+        case DynamicForms::FormKind::ShaderParticleGeometry: return static_cast<std::uint32_t>(RE::FormType::ShaderParticleGeometryData);
+        case DynamicForms::FormKind::AddonNode: return static_cast<std::uint32_t>(RE::FormType::AddonNode);
         case DynamicForms::FormKind::Color:
             return static_cast<std::uint32_t>(RE::FormType::ColorForm);
         case DynamicForms::FormKind::ArtObject:
@@ -865,6 +1270,7 @@ namespace {
             effect->effectItem.area = entry.area;
             effect->effectItem.duration = entry.duration;
             effect->cost = entry.cost;
+            ApplyConditions(effect->conditions, entry.conditions);
             magicItem.effects.push_back(effect);
         }
         logger::info("Configured magic item '{}' with {} custom effects.", form.editorId, magicItem.effects.size());
@@ -1132,6 +1538,555 @@ namespace {
         ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*item), form);
         ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*item), form.keywords);
         ApplyMagicEffects(static_cast<RE::MagicItem&>(*item), form);
+        return true;
+    }
+
+    bool ConfigureSpell(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* spell = tesForm ? tesForm->As<RE::SpellItem>() : nullptr;
+        if (!spell) {
+            logger::warn("Dynamic form '{}' is not a SpellItem", form.editorId);
+            return false;
+        }
+
+        spell->SetFormEditorID(form.editorId.c_str());
+        spell->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        spell->data.costOverride = form.spellCostOverride;
+        spell->data.flags = static_cast<RE::SpellItem::SpellFlag>(form.spellFlags);
+        spell->data.spellType = static_cast<RE::MagicSystem::SpellType>(std::clamp(form.spellType, 0u, 13u));
+        spell->data.chargeTime = form.spellChargeTime;
+        spell->data.castingType = static_cast<RE::MagicSystem::CastingType>(std::clamp(form.spellCastingType, 0u, 3u));
+        spell->data.delivery = static_cast<RE::MagicSystem::Delivery>(std::clamp(form.spellDelivery, 0u, 5u));
+        spell->data.castDuration = form.spellCastDuration;
+        spell->data.range = form.spellRange;
+        spell->data.castingPerk = ResolveAs<RE::BGSPerk>(form.castingPerk);
+        spell->SetEquipSlot(ResolveAs<RE::BGSEquipSlot>(form.equipSlot));
+        spell->menuDispObject = ResolveAs<RE::TESBoundObject>(form.menuDisplayObject);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*spell), form.keywords);
+        ApplyMagicEffects(static_cast<RE::MagicItem&>(*spell), form);
+        if (!form.description.empty()) {
+            logger::debug("Spell '{}' description is saved in JSON but cannot be assigned directly with this CommonLib TESDescription layout.", form.editorId);
+        }
+        logger::info("Configured spell '{}' FormID={:08X} type={} casting={} delivery={} range={} cost={} effects={}.",
+            form.editorId,
+            spell->GetFormID(),
+            form.spellType,
+            form.spellCastingType,
+            form.spellDelivery,
+            form.spellRange,
+            form.spellCostOverride,
+            spell->effects.size());
+        return true;
+    }
+
+    bool ConfigureEnchantment(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* enchantment = tesForm ? tesForm->As<RE::EnchantmentItem>() : nullptr;
+        if (!enchantment) {
+            logger::warn("Dynamic form '{}' is not an EnchantmentItem", form.editorId);
+            return false;
+        }
+
+        enchantment->SetFormEditorID(form.editorId.c_str());
+        enchantment->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        enchantment->data.costOverride = form.enchantmentCostOverride;
+        enchantment->data.flags = static_cast<RE::EnchantmentItem::EnchantmentFlag>(form.enchantmentFlags);
+        enchantment->data.castingType = static_cast<RE::MagicSystem::CastingType>(std::clamp(form.enchantmentCastingType, 0u, 3u));
+        enchantment->data.chargeOverride = form.enchantmentChargeOverride;
+        enchantment->data.delivery = static_cast<RE::MagicSystem::Delivery>(std::clamp(form.enchantmentDelivery, 0u, 5u));
+        enchantment->data.spellType = static_cast<RE::MagicSystem::SpellType>(std::clamp(form.enchantmentSpellType, 0u, 13u));
+        enchantment->data.chargeTime = form.enchantmentChargeTime;
+        enchantment->data.baseEnchantment = ResolveAs<RE::EnchantmentItem>(form.baseEnchantment);
+        enchantment->data.wornRestrictions = ResolveAs<RE::BGSListForm>(form.wornRestrictions);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*enchantment), form.keywords);
+        ApplyMagicEffects(static_cast<RE::MagicItem&>(*enchantment), form);
+        logger::info("Configured enchantment '{}' FormID={:08X} type={} casting={} delivery={} cost={} charge={} effects={}.",
+            form.editorId,
+            enchantment->GetFormID(),
+            form.enchantmentSpellType,
+            form.enchantmentCastingType,
+            form.enchantmentDelivery,
+            form.enchantmentCostOverride,
+            form.enchantmentChargeOverride,
+            enchantment->effects.size());
+        return true;
+    }
+
+    bool ConfigureScroll(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* scroll = tesForm ? tesForm->As<RE::ScrollItem>() : nullptr;
+        if (!scroll) {
+            logger::warn("Dynamic form '{}' is not a ScrollItem", form.editorId);
+            return false;
+        }
+
+        scroll->SetFormEditorID(form.editorId.c_str());
+        scroll->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        scroll->SetModel(form.modelPath.c_str());
+        scroll->value = form.itemValue;
+        scroll->weight = form.itemWeight;
+        auto& spellData = static_cast<RE::SpellItem&>(*scroll).data;
+        spellData.costOverride = form.scrollCostOverride;
+        spellData.flags = static_cast<RE::SpellItem::SpellFlag>(form.scrollFlags);
+        spellData.spellType = RE::MagicSystem::SpellType::kScroll;
+        spellData.chargeTime = form.scrollChargeTime;
+        spellData.castingType = RE::MagicSystem::CastingType::kFireAndForget;
+        spellData.delivery = static_cast<RE::MagicSystem::Delivery>(std::clamp(form.scrollDelivery, 0u, 5u));
+        spellData.castDuration = form.scrollCastDuration;
+        spellData.range = form.scrollRange;
+        spellData.castingPerk = ResolveAs<RE::BGSPerk>(form.scrollCastingPerk);
+        scroll->SetEquipSlot(ResolveAs<RE::BGSEquipSlot>(form.equipSlot));
+        scroll->menuDispObject = ResolveAs<RE::TESBoundObject>(form.menuDisplayObject);
+        ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*scroll), form);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*scroll), form.keywords);
+        ApplyMagicEffects(static_cast<RE::MagicItem&>(*scroll), form);
+        logger::info("Configured scroll '{}' FormID={:08X} delivery={} range={} cost={} effects={}.",
+            form.editorId,
+            scroll->GetFormID(),
+            form.scrollDelivery,
+            form.scrollRange,
+            form.scrollCostOverride,
+            scroll->effects.size());
+        return true;
+    }
+
+    bool ConfigureProjectile(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* projectile = tesForm ? tesForm->As<RE::BGSProjectile>() : nullptr;
+        if (!projectile) {
+            logger::warn("Dynamic form '{}' is not a BGSProjectile", form.editorId);
+            return false;
+        }
+
+        projectile->SetFormEditorID(form.editorId.c_str());
+        projectile->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        projectile->SetModel(form.modelPath.c_str());
+        projectile->muzzleFlashModel.SetModel(form.projectileMuzzleFlashModel.c_str());
+
+        auto& data = projectile->data;
+        data.flags = static_cast<RE::BGSProjectileData::BGSProjectileFlags>(form.projectileFlags);
+        data.types = static_cast<RE::BGSProjectileData::Type>(form.projectileTypes);
+        data.gravity = form.projectileGravity;
+        data.speed = form.projectileSpeed;
+        data.range = form.projectileRange;
+        data.light = ResolveAs<RE::TESObjectLIGH>(form.projectileLight);
+        data.muzzleFlashLight = ResolveAs<RE::TESObjectLIGH>(form.projectileMuzzleFlashLight);
+        data.tracerChance = form.projectileTracerChance;
+        data.explosionProximity = form.projectileExplosionProximity;
+        data.explosionTimer = form.projectileExplosionTimer;
+        data.explosionType = ResolveAs<RE::BGSExplosion>(form.projectileExplosionType);
+        data.activeSoundLoop = ResolveAs<RE::BGSSoundDescriptorForm>(form.projectileActiveSoundLoop);
+        data.muzzleFlashDuration = form.projectileMuzzleFlashDuration;
+        data.fadeOutTime = form.projectileFadeOutTime;
+        data.force = form.projectileForce;
+        data.countdownSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.projectileCountdownSound);
+        data.deactivateSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.projectileDeactivateSound);
+        data.defaultWeaponSource = ResolveAs<RE::TESObjectWEAP>(form.projectileDefaultWeaponSource);
+        data.coneSpread = form.projectileConeSpread;
+        data.collisionRadius = form.projectileCollisionRadius;
+        data.lifetime = form.projectileLifetime;
+        data.relaunchInterval = form.projectileRelaunchInterval;
+        data.decalData = ResolveAs<RE::BGSTextureSet>(form.projectileDecalData);
+        data.collisionLayer = ResolveAs<RE::BGSCollisionLayer>(form.projectileCollisionLayer);
+        projectile->soundLevel = static_cast<RE::SOUND_LEVEL>(std::clamp(form.projectileSoundLevel, 0u, 4u));
+        logger::info("Configured projectile '{}' FormID={:08X} types={:04X} flags={:04X} speed={} range={}.",
+            form.editorId,
+            projectile->GetFormID(),
+            form.projectileTypes,
+            form.projectileFlags,
+            form.projectileSpeed,
+            form.projectileRange);
+        return true;
+    }
+
+    void ApplyDecalData(RE::DECAL_DATA_DATA& data, const DynamicForms::DynamicForm& form) {
+        data.decalMinWidth = form.decalMinWidth;
+        data.decalMaxWidth = form.decalMaxWidth;
+        data.decalMinHeight = form.decalMinHeight;
+        data.decalMaxHeight = form.decalMaxHeight;
+        data.depth = form.decalDepth;
+        data.shininess = form.decalShininess;
+        data.parallaxScale = form.decalParallaxScale;
+        data.parallaxPasses = static_cast<std::int8_t>(std::clamp(form.decalParallaxPasses, -128, 127));
+        data.flags = static_cast<RE::DECAL_DATA_DATA::Flag>(form.decalFlags);
+        data.color = RE::Color(form.decalRed, form.decalGreen, form.decalBlue, form.decalAlpha);
+    }
+
+    bool ConfigureTextureSet(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* textureSet = tesForm ? tesForm->As<RE::BGSTextureSet>() : nullptr;
+        if (!textureSet) return false;
+        textureSet->SetFormEditorID(form.editorId.c_str());
+        for (std::size_t i = 0; i < form.textureSetPaths.size(); ++i) {
+            textureSet->textures[i].textureName = form.textureSetPaths[i].c_str();
+            if (!form.textureSetPaths[i].empty()) {
+                textureSet->textureFileIDs[i].GenerateFromPath(form.textureSetPaths[i].c_str());
+            } else {
+                textureSet->textureFileIDs[i] = {};
+            }
+        }
+        textureSet->flags = static_cast<RE::BGSTextureSet::Flag>(form.textureSetFlags);
+        if (form.textureSetHasDecal) {
+            if (!textureSet->decalData) textureSet->decalData = new RE::DecalData();
+            ApplyDecalData(textureSet->decalData->data, form);
+        } else {
+            textureSet->decalData = nullptr;
+        }
+        return true;
+    }
+
+    bool ConfigureHazard(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* hazard = tesForm ? tesForm->As<RE::BGSHazard>() : nullptr;
+        if (!hazard) return false;
+        hazard->SetFormEditorID(form.editorId.c_str());
+        hazard->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        hazard->SetModel(form.modelPath.c_str());
+        hazard->imageSpaceModifying = ResolveAs<RE::TESImageSpaceModifier>(form.hazardImageSpaceModifier);
+        hazard->data.limit = form.hazardLimit;
+        hazard->data.radius = form.hazardRadius;
+        hazard->data.lifetime = form.hazardLifetime;
+        hazard->data.imageSpaceRadius = form.hazardImageSpaceRadius;
+        hazard->data.targetInterval = form.hazardTargetInterval;
+        hazard->data.flags = static_cast<RE::BGSHazardData::BGSHazardFlags>(form.hazardFlags);
+        hazard->data.spell = ResolveAs<RE::SpellItem>(form.hazardSpell);
+        hazard->data.light = ResolveAs<RE::TESObjectLIGH>(form.hazardLight);
+        hazard->data.impactDataSet = ResolveAs<RE::BGSImpactDataSet>(form.hazardImpactDataSet);
+        hazard->data.sound = ResolveAs<RE::BGSSoundDescriptorForm>(form.hazardSound);
+        return true;
+    }
+
+    bool ConfigureImpactData(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* impact = tesForm ? tesForm->As<RE::BGSImpactData>() : nullptr;
+        if (!impact) return false;
+        impact->SetFormEditorID(form.editorId.c_str());
+        impact->SetModel(form.modelPath.c_str());
+        impact->data.effectDuration = form.impactEffectDuration;
+        impact->data.orient = static_cast<RE::BGSImpactData::ORIENTATION>(std::clamp(form.impactOrientation, 0u, 2u));
+        impact->data.angleThreshold = form.impactAngleThreshold;
+        impact->data.placementRadius = form.impactPlacementRadius;
+        impact->data.soundLevel = static_cast<RE::SOUND_LEVEL>(std::clamp(form.impactSoundLevel, 0u, 4u));
+        impact->data.flags = static_cast<RE::BGSImpactData::IMPACT_DATA_DATA::Flag>(form.impactFlags);
+        impact->data.resultOverride = static_cast<RE::ImpactResult>(form.impactResultOverride);
+        impact->decalTextureSet = ResolveAs<RE::BGSTextureSet>(form.impactDecalTextureSet);
+        impact->decalTextureSet2 = ResolveAs<RE::BGSTextureSet>(form.impactDecalTextureSet2);
+        impact->sound1 = ResolveAs<RE::BGSSoundDescriptorForm>(form.impactSound1);
+        impact->sound2 = ResolveAs<RE::BGSSoundDescriptorForm>(form.impactSound2);
+        impact->hazard = ResolveAs<RE::BGSHazard>(form.impactHazard);
+        ApplyDecalData(impact->dData.data, form);
+        return true;
+    }
+
+    bool ConfigureReferenceEffect(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* effect = tesForm ? tesForm->As<RE::BGSReferenceEffect>() : nullptr;
+        if (!effect) return false;
+        effect->SetFormEditorID(form.editorId.c_str());
+        effect->data.artObject = ResolveAs<RE::BGSArtObject>(form.referenceEffectArtObject);
+        effect->data.effectShader = ResolveAs<RE::TESEffectShader>(form.referenceEffectShader);
+        effect->data.flags = static_cast<RE::BGSReferenceEffect::Flag>(form.referenceEffectFlags);
+        return true;
+    }
+
+    bool ConfigureDualCastData(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* dual = tesForm ? tesForm->As<RE::BGSDualCastData>() : nullptr;
+        if (!dual) return false;
+        dual->SetFormEditorID(form.editorId.c_str());
+        dual->data.pProjectile = ResolveAs<RE::BGSProjectile>(form.dualCastProjectile);
+        dual->data.pExplosion = ResolveAs<RE::BGSExplosion>(form.dualCastExplosion);
+        dual->data.pEffectShader = ResolveAs<RE::TESEffectShader>(form.dualCastEffectShader);
+        dual->data.pHitEffectArt = ResolveAs<RE::BGSArtObject>(form.dualCastHitEffectArt);
+        dual->data.pImpactDataSet = ResolveAs<RE::BGSImpactDataSet>(form.dualCastImpactDataSet);
+        dual->data.flags = static_cast<RE::BGSDualCastDataDEF::Flags>(form.dualCastFlags);
+        return true;
+    }
+
+    void ApplyRecordFlags(RE::TESForm& tesForm, const std::uint32_t requested, const std::uint32_t mask) {
+        tesForm.formFlags = (tesForm.formFlags & ~mask) | (requested & mask);
+    }
+
+    void ApplyStaticData(RE::TESObjectSTAT& stat, const DynamicForms::DynamicForm& form) {
+        stat.SetModel(form.modelPath.c_str());
+        stat.data.materialThresholdAngle = form.staticMaterialThresholdAngle;
+        stat.data.materialObj = ResolveAs<RE::BGSMaterialObject>(form.staticMaterialObject);
+        stat.data.flags = static_cast<RE::TESObjectSTATData::Flag>(form.staticFlags);
+    }
+
+    bool ConfigureStatic(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* stat = tesForm ? tesForm->As<RE::TESObjectSTAT>() : nullptr;
+        if (!stat) return false;
+        stat->SetFormEditorID(form.editorId.c_str());
+        ApplyStaticData(*stat, form);
+        ApplyRecordFlags(*stat, form.recordFlags, (1u << 2) | (1u << 5) | (1u << 6) | (1u << 7) | (1u << 9) | (1u << 15) | (1u << 17) | (1u << 19) | (1u << 23) | (1u << 25) | (1u << 26) | (1u << 27) | (1u << 28) | (1u << 30));
+        return true;
+    }
+
+    bool ConfigureMovableStatic(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* stat = tesForm ? tesForm->As<RE::BGSMovableStatic>() : nullptr;
+        if (!stat) return false;
+        stat->SetFormEditorID(form.editorId.c_str());
+        stat->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        ApplyStaticData(static_cast<RE::TESObjectSTAT&>(*stat), form);
+        stat->soundLoop = ResolveAs<RE::BGSSoundDescriptorForm>(form.movableStaticSoundLoop);
+        stat->data.flags = static_cast<RE::MOVABLE_STATIC_DATA::Flag>(form.movableStaticFlags);
+        ApplyRecordFlags(*stat, form.recordFlags, (1u << 8) | (1u << 9) | (1u << 15) | (1u << 16) | (1u << 19) | (1u << 25) | (1u << 26) | (1u << 27) | (1u << 30));
+        return true;
+    }
+
+    bool ConfigureDoor(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* door = tesForm ? tesForm->As<RE::TESObjectDOOR>() : nullptr;
+        if (!door) return false;
+        door->SetFormEditorID(form.editorId.c_str());
+        door->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        door->SetModel(form.modelPath.c_str());
+        door->openSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.doorOpenSound);
+        door->closeSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.doorCloseSound);
+        door->loopSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.doorLoopSound);
+        door->flags = static_cast<RE::TESObjectDOOR::Flag>(form.doorFlags);
+        ApplyRecordFlags(*door, form.recordFlags, (1u << 15) | (1u << 16) | (1u << 23));
+        return true;
+    }
+
+    template <std::size_t N, class T>
+    void CopyFloatArray(T& destination, const std::array<float, N>& source) {
+        static_assert(sizeof(T) >= sizeof(float) * N);
+        std::copy(source.begin(), source.end(), reinterpret_cast<float*>(std::addressof(destination)));
+    }
+
+    bool ConfigureCombatStyle(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* style = tesForm ? tesForm->As<RE::TESCombatStyle>() : nullptr;
+        if (!style) return false;
+        style->SetFormEditorID(form.editorId.c_str());
+        CopyFloatArray(style->generalData, form.combatGeneral);
+        CopyFloatArray(style->meleeData, form.combatMelee);
+        CopyFloatArray(style->closeRangeData, form.combatCloseRange);
+        style->longRangeData.strafeMult = form.combatLongRangeStrafe;
+        CopyFloatArray(style->flightData, form.combatFlight);
+        style->flags = static_cast<RE::TESCombatStyle::FLAG>(form.combatStyleFlags);
+        return true;
+    }
+
+    bool ConfigureSoundCategory(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* category = tesForm ? tesForm->As<RE::BGSSoundCategory>() : nullptr;
+        if (!category) return false;
+        category->SetFormEditorID(form.editorId.c_str());
+        category->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        category->flags = static_cast<RE::BGSSoundCategory::Flag>(form.soundCategoryFlags);
+        category->parentCategory = ResolveAs<RE::BGSSoundCategory>(form.soundCategoryParent);
+        category->attenuation = form.soundCategoryAttenuation;
+        category->SetStaticVolumeMultiplier(form.soundCategoryStaticMult);
+        category->SetDefaultMenuValue(form.soundCategoryDefaultMenuValue);
+        category->volumeMult = form.soundCategoryVolumeMult;
+        category->frequencyMult = form.soundCategoryFrequencyMult;
+        return true;
+    }
+
+    bool ConfigureClass(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* npcClass = tesForm ? tesForm->As<RE::TESClass>() : nullptr;
+        if (!npcClass) return false;
+        npcClass->SetFormEditorID(form.editorId.c_str());
+        npcClass->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        npcClass->data.teaches = static_cast<RE::CLASS_DATA::Skill>(std::clamp(form.classTeachesSkill, 0u, 17u));
+        npcClass->data.maximumTrainingLevel = form.classMaximumTrainingLevel;
+        std::copy(form.classSkillWeights.begin(), form.classSkillWeights.end(), std::addressof(npcClass->data.skillWeights.oneHanded));
+        npcClass->data.bleedoutDefault = form.classBleedoutDefault;
+        npcClass->data.voicePoints = form.classVoicePoints;
+        std::copy(form.classAttributeWeights.begin(), form.classAttributeWeights.end(), std::addressof(npcClass->data.attributeWeights.health));
+        static_cast<RE::TESTexture&>(*npcClass).textureName = form.classIconPath.c_str();
+        if (!form.description.empty()) logger::debug("Class '{}' description persisted but not assigned to TESDescription.", form.editorId);
+        return true;
+    }
+
+    void ApplyProduceData(RE::TESProduceForm& produce, const DynamicForms::DynamicForm& form) {
+        produce.harvestSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.harvestSound);
+        produce.produceItem = ResolveAs<RE::TESBoundObject>(form.produceItem);
+        std::copy(form.produceChance.begin(), form.produceChance.end(), produce.produceChance);
+    }
+
+    bool ConfigureFlora(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* flora = tesForm ? tesForm->As<RE::TESFlora>() : nullptr;
+        if (!flora) return false;
+        flora->SetFormEditorID(form.editorId.c_str());
+        flora->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        flora->SetModel(form.modelPath.c_str());
+        flora->soundLoop = ResolveAs<RE::BGSSoundDescriptorForm>(form.floraSoundLoop);
+        flora->soundActivate = ResolveAs<RE::BGSSoundDescriptorForm>(form.floraSoundActivate);
+        flora->waterForm = ResolveAs<RE::TESWaterForm>(form.floraWaterType);
+        flora->flags = static_cast<RE::TESObjectACTI::ActiFlags>(form.floraFlags);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*flora), form.keywords);
+        ApplyProduceData(static_cast<RE::TESProduceForm&>(*flora), form);
+        return true;
+    }
+
+    bool ConfigureTree(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* tree = tesForm ? tesForm->As<RE::TESObjectTREE>() : nullptr;
+        if (!tree) return false;
+        tree->SetFormEditorID(form.editorId.c_str());
+        tree->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        tree->SetModel(form.modelPath.c_str());
+        CopyFloatArray(tree->data, form.treeAnimation);
+        tree->type = static_cast<RE::TESObjectTREE::etTreeType>(std::clamp(form.treeType, 0u, 3u));
+        ApplyProduceData(static_cast<RE::TESProduceForm&>(*tree), form);
+        ApplyRecordFlags(*tree, form.recordFlags, 1u << 15);
+        return true;
+    }
+
+    void ApplyContainerEntries(RE::TESContainer& target, const std::vector<DynamicForms::ContainerEntry>& entries, const std::string_view editorId, const bool applyExtras) {
+        target.ClearDataComponent();
+        std::vector<RE::ContainerObject*> runtimeEntries;
+        for (const auto& component : entries) {
+            auto* item = ResolveAs<RE::TESBoundObject>(component.item);
+            if (!item) {
+                logger::warn("Container '{}' item '{}' is not a resolvable bound object.", editorId, component.item.Display());
+                continue;
+            }
+            auto* owner = applyExtras ? ResolveConfigForm(component.owner) : nullptr;
+            auto* runtimeEntry = new RE::ContainerObject(item, std::max(1, component.count));
+            const bool needsExtra = applyExtras && (owner || !component.conditionGlobal.empty() || component.requiredRank != 0 || component.healthMult != 100.0F);
+            if (needsExtra && !runtimeEntry->itemExtra) runtimeEntry->itemExtra = new RE::ContainerItemExtra(owner);
+            if (runtimeEntry->itemExtra) {
+                runtimeEntry->itemExtra->owner = owner;
+                if (auto* global = ResolveAs<RE::TESGlobal>(component.conditionGlobal)) {
+                    runtimeEntry->itemExtra->conditional.global = global;
+                } else {
+                    runtimeEntry->itemExtra->conditional.rank = component.requiredRank;
+                }
+                runtimeEntry->itemExtra->healthMult = component.healthMult;
+            }
+            runtimeEntries.push_back(runtimeEntry);
+        }
+        if (!runtimeEntries.empty()) {
+            target.containerObjects = RE::calloc<RE::ContainerObject*>(runtimeEntries.size());
+            std::ranges::copy(runtimeEntries, target.containerObjects);
+            target.numContainerObjects = static_cast<std::uint32_t>(runtimeEntries.size());
+        }
+    }
+
+    bool ConfigureConstructibleObject(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* recipe = tesForm ? tesForm->As<RE::BGSConstructibleObject>() : nullptr;
+        if (!recipe) {
+            logger::warn("Dynamic form '{}' is not a BGSConstructibleObject", form.editorId);
+            return false;
+        }
+
+        recipe->SetFormEditorID(form.editorId.c_str());
+        recipe->createdItem = ResolveAs<RE::TESBoundObject>(form.createdItem);
+        recipe->benchKeyword = ResolveAs<RE::BGSKeyword>(form.benchKeyword);
+        recipe->data.numConstructed = std::max<std::uint16_t>(1, form.numConstructed);
+        ApplyContainerEntries(recipe->requiredItems, form.requiredItems, form.editorId, false);
+        ApplyConditions(recipe->conditions, form.conditions);
+
+        if (!recipe->createdItem) {
+            logger::warn("Recipe '{}' has no valid created item and will not be craftable.", form.editorId);
+        }
+        if (!recipe->benchKeyword) {
+            logger::warn("Recipe '{}' has no valid bench keyword and will not appear at a workbench.", form.editorId);
+        }
+        logger::info("Configured recipe '{}' result={} count={} components={} conditions={}.",
+            form.editorId,
+            form.createdItem.Display(),
+            recipe->data.numConstructed,
+            recipe->requiredItems.numContainerObjects,
+            form.conditions.size());
+        return true;
+    }
+
+    bool ConfigureContainer(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* container = tesForm ? tesForm->As<RE::TESObjectCONT>() : nullptr;
+        if (!container) {
+            logger::warn("Dynamic form '{}' is not a TESObjectCONT", form.editorId);
+            return false;
+        }
+        container->SetFormEditorID(form.editorId.c_str());
+        container->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        container->SetModel(form.modelPath.c_str());
+        container->weight = form.itemWeight;
+        container->data.flags = static_cast<RE::CONT_DATA::Flag>(form.containerFlags);
+        container->openSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.containerOpenSound);
+        container->closeSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.containerCloseSound);
+        ApplyContainerEntries(static_cast<RE::TESContainer&>(*container), form.containerItems, form.editorId, true);
+        container->allowStolenItems = form.containerAllowStolenItems;
+        ApplyRecordFlags(*container, form.recordFlags, (1u << 15) | (1u << 16) | (1u << 25) | (1u << 26) | (1u << 27) | (1u << 30));
+        logger::info("Configured container '{}' items={} flags={:02X}.", form.editorId, container->numContainerObjects, form.containerFlags);
+        return true;
+    }
+
+    bool ConfigureMagicEffect(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        auto* effect = tesForm ? tesForm->As<RE::EffectSetting>() : nullptr;
+        if (!effect) {
+            logger::warn("Dynamic form '{}' is not an EffectSetting", form.editorId);
+            return false;
+        }
+
+        effect->SetFormEditorID(form.editorId.c_str());
+        effect->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        effect->menuDispObject = ResolveAs<RE::TESBoundObject>(form.menuDisplayObject);
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*effect), form.keywords);
+
+        auto& data = effect->data;
+        data.flags = static_cast<RE::EffectSetting::EffectSettingData::Flag>(form.magicEffectFlags);
+        data.baseCost = form.magicEffectBaseCost;
+        data.associatedForm = ResolveConfigForm(form.magicEffectAssociatedForm);
+        data.associatedSkill = static_cast<RE::ActorValue>(form.magicEffectAssociatedSkill);
+        data.resistVariable = static_cast<RE::ActorValue>(form.magicEffectResistVariable);
+        data.light = ResolveAs<RE::TESObjectLIGH>(form.magicEffectLight);
+        data.taperWeight = form.magicEffectTaperWeight;
+        data.effectShader = ResolveAs<RE::TESEffectShader>(form.magicEffectShader);
+        data.enchantShader = ResolveAs<RE::TESEffectShader>(form.magicEffectEnchantShader);
+        data.minimumSkill = form.magicEffectMinimumSkill;
+        data.spellmakingArea = form.magicEffectSpellmakingArea;
+        data.spellmakingChargeTime = form.magicEffectSpellmakingChargeTime;
+        data.taperCurve = form.magicEffectTaperCurve;
+        data.taperDuration = form.magicEffectTaperDuration;
+        data.secondAVWeight = form.magicEffectSecondAVWeight;
+        data.archetype = static_cast<RE::EffectSetting::Archetype>(std::clamp(form.magicEffectArchetype, -1, 46));
+        data.primaryAV = static_cast<RE::ActorValue>(form.magicEffectPrimaryAV);
+        data.projectileBase = ResolveAs<RE::BGSProjectile>(form.magicEffectProjectile);
+        data.explosion = ResolveAs<RE::BGSExplosion>(form.magicEffectExplosion);
+        data.castingType = static_cast<RE::MagicSystem::CastingType>(std::clamp(form.magicEffectCastingType, 0u, 3u));
+        data.delivery = static_cast<RE::MagicSystem::Delivery>(std::clamp(form.magicEffectDelivery, 0u, 5u));
+        data.secondaryAV = static_cast<RE::ActorValue>(form.magicEffectSecondaryAV);
+        data.castingArt = ResolveAs<RE::BGSArtObject>(form.magicEffectCastingArt);
+        data.hitEffectArt = ResolveAs<RE::BGSArtObject>(form.magicEffectHitEffectArt);
+        data.impactDataSet = ResolveAs<RE::BGSImpactDataSet>(form.magicEffectImpactDataSet);
+        data.skillUsageMult = form.magicEffectSkillUsageMult;
+        data.dualCastData = ResolveAs<RE::BGSDualCastData>(form.magicEffectDualCastData);
+        data.dualCastScale = form.magicEffectDualCastScale;
+        data.enchantEffectArt = ResolveAs<RE::BGSArtObject>(form.magicEffectEnchantEffectArt);
+        data.hitVisuals = ResolveAs<RE::BGSReferenceEffect>(form.magicEffectHitVisuals);
+        data.enchantVisuals = ResolveAs<RE::BGSReferenceEffect>(form.magicEffectEnchantVisuals);
+        data.equipAbility = ResolveAs<RE::SpellItem>(form.magicEffectEquipAbility);
+        data.imageSpaceMod = ResolveAs<RE::TESImageSpaceModifier>(form.magicEffectImageSpaceMod);
+        data.perk = ResolveAs<RE::BGSPerk>(form.magicEffectPerk);
+        data.castingSoundLevel = static_cast<RE::SOUND_LEVEL>(std::clamp(form.magicEffectCastingSoundLevel, 0u, 4u));
+        data.aiScore = form.magicEffectAIScore;
+        data.aiDelayTimer = form.magicEffectAIDelayTime;
+
+        effect->counterEffects.clear();
+        for (auto it = form.magicEffectCounterEffects.rbegin(); it != form.magicEffectCounterEffects.rend(); ++it) {
+            if (auto* counter = ResolveAs<RE::EffectSetting>(*it)) {
+                effect->counterEffects.push_front(counter);
+            }
+        }
+        data.numCounterEffects = static_cast<std::int16_t>(std::min<std::size_t>(effect->counterEffects.size(), std::numeric_limits<std::int16_t>::max()));
+
+        effect->effectSounds.clear();
+        for (std::size_t i = 0; i < form.magicEffectSounds.size(); ++i) {
+            auto* sound = ResolveAs<RE::BGSSoundDescriptorForm>(form.magicEffectSounds[i]);
+            if (!sound) {
+                continue;
+            }
+            RE::EffectSetting::SoundPair pair{};
+            pair.id = static_cast<RE::MagicSystem::SoundID>(i);
+            pair.sound = sound;
+            effect->effectSounds.push_back(pair);
+        }
+
+        effect->magicItemDescription = form.magicItemDescription.c_str();
+        ApplyConditions(effect->conditions, form.conditions);
+        logger::info("Configured magic effect '{}' FormID={:08X} archetype={} casting={} delivery={} flags={:08X} counters={} sounds={} conditions={}.",
+            form.editorId,
+            effect->GetFormID(),
+            form.magicEffectArchetype,
+            form.magicEffectCastingType,
+            form.magicEffectDelivery,
+            form.magicEffectFlags,
+            effect->counterEffects.size(),
+            effect->effectSounds.size(),
+            form.conditions.size());
         return true;
     }
 
@@ -2510,12 +3465,230 @@ namespace {
         return true;
     }
 
+    void ApplyLeveledList(RE::TESLeveledList& target, const DynamicForms::DynamicForm& form) {
+        target.ClearDataComponent();
+        std::vector<DynamicForms::LeveledEntry> valid;
+        valid.reserve(form.leveledEntries.size());
+        for (const auto& entry : form.leveledEntries) {
+            if (valid.size() >= 255) {
+                logger::warn("Leveled list '{}' has more than 255 entries; extra entries are ignored by the record format.", form.editorId);
+                break;
+            }
+            auto* resolved = ResolveConfigForm(entry.form);
+            if (!resolved || !target.GetCanContainFormsOfType(resolved->GetFormType())) {
+                logger::warn("Leveled list '{}' entry '{}' has an unsupported or unresolved form type.", form.editorId, entry.form.Display());
+                continue;
+            }
+            valid.push_back(entry);
+        }
+        target.entries.resize(valid.size());
+        for (std::size_t i = 0; i < valid.size(); ++i) {
+            const auto& source = valid[i]; auto& destination = target.entries[i];
+            destination.form = ResolveConfigForm(source.form); destination.level = source.level; destination.count = source.count; destination.itemExtra = nullptr;
+            auto* owner = ResolveConfigForm(source.owner); auto* global = ResolveAs<RE::TESGlobal>(source.conditionGlobal);
+            if (owner || global || source.requiredRank != 0 || source.healthMult != 100.0F) {
+                destination.itemExtra = new RE::ContainerItemExtra(owner);
+                if (global) destination.itemExtra->conditional.global = global; else destination.itemExtra->conditional.rank = source.requiredRank;
+                destination.itemExtra->healthMult = source.healthMult;
+            }
+        }
+        target.numEntries = static_cast<std::uint8_t>(valid.size());
+        target.chanceNone = static_cast<std::int8_t>(std::min(form.leveledChanceNone, static_cast<std::uint8_t>(100)));
+        target.llFlags = static_cast<RE::TESLeveledList::Flag>(form.leveledFlags);
+        target.chanceGlobal = ResolveAs<RE::TESGlobal>(form.leveledChanceGlobal);
+    }
+
+    bool ConfigureAdditionalReadyForm(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        using FK = DynamicForms::FormKind;
+        switch (form.kind) {
+        case FK::ImpactDataSet: {
+            auto* value = tesForm->As<RE::BGSImpactDataSet>(); if (!value) return false;
+            value->impactMap.clear();
+            for (const auto& entry : form.impactDataSetEntries) {
+                auto* material = ResolveAs<RE::BGSMaterialType>(entry.key);
+                auto* impact = ResolveAs<RE::BGSImpactData>(entry.value);
+                if (material && impact) value->impactMap.emplace(material, impact);
+            }
+            return true;
+        }
+        case FK::CollisionLayer: {
+            auto* value = tesForm->As<RE::BGSCollisionLayer>(); if (!value) return false;
+            value->collisionIdx = form.collisionLayerIndex;
+            value->debugColor = RE::Color(static_cast<std::uint8_t>((form.collisionLayerColor >> 24) & 0xFF), static_cast<std::uint8_t>((form.collisionLayerColor >> 16) & 0xFF), static_cast<std::uint8_t>((form.collisionLayerColor >> 8) & 0xFF), static_cast<std::uint8_t>(form.collisionLayerColor & 0xFF));
+            value->flags = static_cast<RE::BGSCollisionLayer::FLAG>(form.collisionLayerFlags);
+            value->name = form.collisionLayerName.c_str(); value->collidesWith.clear();
+            for (const auto& ref : form.collisionLayers) if (auto* layer = ResolveAs<RE::BGSCollisionLayer>(ref)) value->collidesWith.push_back(layer);
+            return true;
+        }
+        case FK::Footstep: {
+            auto* value = tesForm->As<RE::BGSFootstep>(); if (!value) return false;
+            value->tag = form.footstepTag.c_str(); value->impactSet = ResolveAs<RE::BGSImpactDataSet>(form.footstepImpactDataSet); return true;
+        }
+        case FK::FootstepSet: {
+            auto* value = tesForm->As<RE::BGSFootstepSet>(); if (!value) return false;
+            for (std::size_t i = 0; i < form.footstepSets.size(); ++i) {
+                value->entries[i].clear();
+                for (const auto& ref : form.footstepSets[i]) if (auto* step = ResolveAs<RE::BGSFootstep>(ref)) value->entries[i].push_back(step);
+            }
+            return true;
+        }
+        case FK::ReverbParameters: {
+            auto* value = tesForm->As<RE::BGSReverbParameters>(); if (!value) return false;
+            value->data.decayTime = form.reverbDecayTime; value->data.hfReference = form.reverbHFReference;
+            auto* bytes = std::addressof(value->data.roomFilter); std::copy(form.reverbValues.begin(), form.reverbValues.end(), bytes); return true;
+        }
+        case FK::AcousticSpace: {
+            auto* value = tesForm->As<RE::BGSAcousticSpace>(); if (!value) return false;
+            value->loopingSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.acousticLoopingSound);
+            value->soundRegion = ResolveAs<RE::TESRegion>(form.acousticSoundRegion);
+            value->reverbType = ResolveAs<RE::BGSReverbParameters>(form.acousticReverb); return true;
+        }
+        case FK::Apparatus: {
+            auto* value = tesForm->As<RE::BGSApparatus>(); if (!value) return false;
+            ApplyMiscLikeItem(static_cast<RE::TESObjectMISC&>(*value), form);
+            static_cast<RE::TESQualityForm&>(*value).quality = static_cast<RE::TESQualityForm::Quality>(std::min(form.apparatusQuality, 4u)); return true;
+        }
+        case FK::StaticCollection: {
+            auto* value = tesForm->As<RE::BGSStaticCollection>(); if (!value) return false;
+            value->SetModel(form.modelPath.c_str()); ApplyRecordFlags(*value, form.recordFlags, 1u << 19); return true;
+        }
+        case FK::Grass: {
+            auto* value = tesForm->As<RE::TESGrass>(); if (!value) return false;
+            value->SetModel(form.modelPath.c_str()); value->SetDensity(std::min(form.grassDensity, static_cast<std::uint8_t>(100)));
+            value->data.minSlopeDegrees = static_cast<std::int8_t>(std::min(form.grassMinSlope, static_cast<std::uint8_t>(90))); value->data.maxSlopeDegrees = static_cast<std::int8_t>(std::clamp<int>(form.grassMaxSlope, value->data.minSlopeDegrees, 90));
+            value->SetDistanceFromWaterLevel(form.grassDistanceFromWater); value->SetUnderwaterState(static_cast<RE::TESGrass::GRASS_WATER_STATE>(std::min(form.grassWaterState, 7u)));
+            value->data.positionRange = std::clamp(form.grassPositionRange, 0.0F, 512.0F); value->data.heightRange = std::clamp(form.grassHeightRange, 0.0F, 1.0F);
+            value->data.colorRange = std::clamp(form.grassColorRange, 0.0F, 1.0F); value->data.wavePeriod = std::max(form.grassWavePeriod, 0.001F);
+            value->data.flags = static_cast<RE::TESGrass::GRASS_DATA::Flag>(form.grassFlags); return true;
+        }
+        case FK::IdleMarker: {
+            auto* value = tesForm->As<RE::BGSIdleMarker>(); if (!value) return false;
+            value->SetModel(form.modelPath.c_str()); auto& collection = static_cast<RE::BGSIdleCollection&>(*value); collection.ClearDataComponent();
+            collection.idleFlags = static_cast<RE::BGSIdleCollection::IdleFlags>(form.idleFlags); collection.timerCheckForIdle = form.idleTimer;
+            for (const auto& ref : form.idleAnimations) if (auto* idle = ResolveAs<RE::TESIdleForm>(ref)) collection.AddIdle(idle);
+            ApplyRecordFlags(*value, form.recordFlags, 1u << 29); return true;
+        }
+        case FK::EncounterZone: {
+            auto* value = tesForm->As<RE::BGSEncounterZone>(); if (!value) return false;
+            value->data.zoneOwner = ResolveAs<RE::TESFaction>(form.encounterOwner); value->data.location = ResolveAs<RE::BGSLocation>(form.encounterLocation);
+            value->data.ownerRank = form.encounterOwnerRank; value->data.minLevel = form.encounterMinLevel; value->data.maxLevel = form.encounterMaxLevel;
+            value->data.flags = static_cast<RE::ENCOUNTER_ZONE_DATA::Flag>(form.encounterFlags); return true;
+        }
+        case FK::Relationship: {
+            auto* value = tesForm->As<RE::BGSRelationship>(); if (!value) return false;
+            value->npc1 = ResolveAs<RE::TESNPC>(form.relationshipNpc1); value->npc2 = ResolveAs<RE::TESNPC>(form.relationshipNpc2);
+            value->assocType = ResolveAs<RE::BGSAssociationType>(form.relationshipAssociation);
+            value->level = static_cast<RE::BGSRelationship::RELATIONSHIP_LEVEL>(std::min(form.relationshipLevel, 8u));
+            value->flags = static_cast<RE::BGSRelationship::Flag>(form.relationshipFlags); return true;
+        }
+        case FK::AssociationType: {
+            auto* value = tesForm->As<RE::BGSAssociationType>(); if (!value) return false;
+            value->associationLabels[0][0] = form.associationLabels[0].c_str(); value->associationLabels[0][1] = form.associationLabels[1].c_str();
+            value->associationLabels[1][0] = form.associationLabels[2].c_str(); value->associationLabels[1][1] = form.associationLabels[3].c_str();
+            value->flags = static_cast<RE::BGSAssociationType::FLAGS>(form.associationFlags); return true;
+        }
+        case FK::MovementType: {
+            auto* value = tesForm->As<RE::BGSMovementType>(); if (!value) return false;
+            value->movementTypeData.typeName = form.movementName.c_str();
+            std::copy(form.movementSpeeds.begin(), form.movementSpeeds.end(), std::addressof(value->movementTypeData.defaultData.speeds[0][0]));
+            value->movementTypeData.defaultData.rotateWhileMovingRun = form.movementRotateWhileMoving;
+            value->movementTypeData.directional = form.movementDirectional; value->movementTypeData.movementSpeed = form.movementSpeed; value->movementTypeData.rotationSpeed = form.movementRotationSpeed; return true;
+        }
+        case FK::WordOfPower: {
+            auto* value = tesForm->As<RE::TESWordOfPower>(); if (!value) return false;
+            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); value->translation = form.wordTranslation.c_str(); return true;
+        }
+        case FK::Water: {
+            auto* value = tesForm->As<RE::TESWaterForm>(); if (!value) return false;
+            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+            for (std::size_t i = 0; i < form.waterNoiseTextures.size(); ++i) value->noiseTextures[i].textureName = form.waterNoiseTextures[i].c_str();
+            value->alpha = static_cast<std::int8_t>(form.waterAlpha); value->flags = static_cast<RE::TESWaterForm::Flag>(form.waterFlags);
+            value->materialType = ResolveAs<RE::BGSMaterialType>(form.waterMaterial); value->waterSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.waterSound);
+            value->contactSpell = ResolveAs<RE::SpellItem>(form.waterContactSpell); value->imageSpace = ResolveAs<RE::TESImageSpace>(form.waterImageSpace);
+            std::copy(form.waterLinearVelocity.begin(), form.waterLinearVelocity.end(), std::addressof(value->linearVelocity.x));
+            std::copy(form.waterAngularVelocity.begin(), form.waterAngularVelocity.end(), std::addressof(value->angularVelocity.x)); return true;
+        }
+        case FK::ImageSpace: {
+            auto* value = tesForm->As<RE::TESImageSpace>(); if (!value) return false;
+            std::copy(form.imageSpaceHDR.begin(), form.imageSpaceHDR.end(), std::addressof(value->data.hdr.eyeAdaptSpeed));
+            std::copy(form.imageSpaceCinematic.begin(), form.imageSpaceCinematic.end(), std::addressof(value->data.cinematic.saturation));
+            value->data.tint.amount = form.imageSpaceTintAmount; std::copy(form.imageSpaceTintColor.begin(), form.imageSpaceTintColor.end(), std::addressof(value->data.tint.color.red));
+            std::copy(form.imageSpaceDOF.begin(), form.imageSpaceDOF.end(), std::addressof(value->data.depthOfField.strength));
+            value->data.depthOfField.flags = form.imageSpaceDOFFlags; value->data.depthOfField.skyBlurRadius = static_cast<RE::ImageSpaceBaseData::DepthOfField::SkyBlurRadius>(form.imageSpaceSkyBlur); return true;
+        }
+        case FK::LightingTemplate: {
+            auto* value = tesForm->As<RE::BGSLightingTemplate>(); if (!value) return false;
+            RE::Color* colors[]{ &value->data.ambient, &value->data.directional, &value->data.fogColorNear, &value->data.fogColorFar };
+            for (std::size_t i = 0; i < 4; ++i) *colors[i] = RE::Color(form.lightingColors[i]);
+            value->data.fogNear = form.lightingValues[0]; value->data.fogFar = form.lightingValues[1]; value->data.directionalFade = form.lightingValues[2]; value->data.clipDist = form.lightingValues[3];
+            value->data.fogPower = form.lightingValues[4]; value->data.fogClamp = form.lightingValues[5]; value->data.lightFadeStart = form.lightingValues[6]; value->data.lightFadeEnd = form.lightingValues[7];
+            value->data.directionalXY = form.lightingDirectionalXY; value->data.directionalZ = form.lightingDirectionalZ;
+            value->data.lightingTemplateInheritanceFlags = static_cast<RE::INTERIOR_DATA::Inherit>(form.lightingInheritanceFlags); return true;
+        }
+        case FK::Shout: {
+            auto* value = tesForm->As<RE::TESShout>(); if (!value) return false;
+            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+            static_cast<RE::BGSMenuDisplayObject&>(*value).menuDispObject = ResolveAs<RE::TESBoundObject>(form.menuDisplayObject);
+            static_cast<RE::BGSEquipType&>(*value).equipSlot = ResolveAs<RE::BGSEquipSlot>(form.equipSlot);
+            for (std::size_t i = 0; i < form.shoutWords.size(); ++i) {
+                value->variations[i].word = ResolveAs<RE::TESWordOfPower>(form.shoutWords[i]);
+                value->variations[i].spell = ResolveAs<RE::SpellItem>(form.shoutSpells[i]); value->variations[i].recoveryTime = form.shoutRecoveryTimes[i];
+            }
+            ApplyRecordFlags(*value, form.recordFlags, 1u << 7);
+            if (!form.description.empty()) logger::debug("Shout '{}' description persisted but not assigned to TESDescription.", form.editorId);
+            return true;
+        }
+        case FK::LeveledItem: { auto* value = tesForm->As<RE::TESLevItem>(); if (!value) return false; ApplyLeveledList(static_cast<RE::TESLeveledList&>(*value), form); return true; }
+        case FK::LeveledNPC: { auto* value = tesForm->As<RE::TESLevCharacter>(); if (!value) return false; value->SetModel(form.modelPath.c_str()); ApplyLeveledList(static_cast<RE::TESLeveledList&>(*value), form); return true; }
+        case FK::LeveledSpell: { auto* value = tesForm->As<RE::TESLevSpell>(); if (!value) return false; ApplyLeveledList(static_cast<RE::TESLeveledList&>(*value), form); return true; }
+        case FK::LocationRefType: return tesForm->As<RE::BGSLocationRefType>() != nullptr;
+        case FK::Action: { auto* value = tesForm->As<RE::BGSAction>(); if (!value) return false; value->index = form.actionIndex; return true; }
+        case FK::MenuIcon: { auto* value = tesForm->As<RE::BGSMenuIcon>(); if (!value) return false; static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); return true; }
+        case FK::Eyes: {
+            auto* value = tesForm->As<RE::TESEyes>(); if (!value) return false;
+            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); static_cast<RE::TESTexture&>(*value).textureName = form.eyesTexture.c_str(); value->flags = static_cast<RE::TESEyes::Flag>(form.eyesFlags); ApplyRecordFlags(*value, form.recordFlags, 1u << 2); return true;
+        }
+        case FK::Note: {
+            auto* value = tesForm->As<RE::BGSNote>(); if (!value) return false;
+            value->SetModel(form.modelPath.c_str()); value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*value), form); return true;
+        }
+        case FK::AnimatedObject: {
+            auto* value = tesForm->As<RE::TESObjectANIO>(); if (!value) return false; value->SetModel(form.modelPath.c_str()); value->unloadEventName = form.animatedUnloadEvent.c_str(); return true;
+        }
+        case FK::LoadScreen: {
+            auto* value = tesForm->As<RE::TESLoadScreen>(); if (!value) return false;
+            ApplyConditions(value->conditions, form.conditions); value->loadingText = form.loadScreenText.c_str();
+            if (!value->loadNIFData) {
+                value->loadNIFData = RE::calloc<RE::TESLoadScreen::LoadNIFData>(1);
+                SetRuntimeVTable(std::addressof(value->loadNIFData->cameraPath), RE::VTABLE_TESModel[0]);
+            }
+            auto& data = *value->loadNIFData; data.loadNIF = ResolveAs<RE::TESBoundObject>(form.loadScreenObject); data.initialScale = form.loadScreenInitialScale;
+            std::copy(form.loadScreenRotationConstraints.begin(), form.loadScreenRotationConstraints.end(), data.rotationConstraints); std::copy(form.loadScreenRotationOffsetConstraints.begin(), form.loadScreenRotationOffsetConstraints.end(), data.rotationOffsetConstraints); std::copy(form.loadScreenTranslationOffset.begin(), form.loadScreenTranslationOffset.end(), data.initialTranslationOffset); data.cameraPath.model = form.loadScreenCameraPath.c_str();
+            ApplyRecordFlags(*value, form.recordFlags, 1u << 10); return true;
+        }
+        case FK::ShaderParticleGeometry: {
+            auto* value = tesForm->As<RE::BGSShaderParticleGeometryData>(); if (!value) return false;
+            if (REL::Module::IsVR()) value->GetVRRuntimeData().data.resize(static_cast<std::size_t>(RE::BGSShaderParticleGeometryData::DataID::kTotal)); else value->GetRuntimeData().data.resize(static_cast<std::size_t>(RE::BGSShaderParticleGeometryData::DataID::kTotal));
+            for (std::size_t i = 0; i < form.shaderParticleSettings.size(); ++i) {
+                auto& setting = value->GetSettingRef(static_cast<RE::BGSShaderParticleGeometryData::DataID>(i));
+                if (i == 7 || i == 8 || i == 9) setting.i = static_cast<std::uint32_t>(std::max(0.0F, std::round(form.shaderParticleSettings[i]))); else setting.f = form.shaderParticleSettings[i];
+            }
+            if (REL::Module::IsVR()) value->GetVRRuntimeData().particleTexture.textureName = form.shaderParticleTexture.c_str(); else value->GetRuntimeData().particleTexture.textureName = form.shaderParticleTexture.c_str(); return true;
+        }
+        case FK::AddonNode: {
+            auto* value = tesForm->As<RE::BGSAddonNode>(); if (!value) return false; value->SetModel(form.modelPath.c_str()); value->index = form.addonIndex; value->sound = ResolveAs<RE::BGSSoundDescriptorForm>(form.addonSound); value->data.masterParticleCap = form.addonMasterParticleCap; value->data.flags = static_cast<RE::ADDON_DATA::Flag>(form.addonFlags); return true;
+        }
+        default: return false;
+        }
+    }
+
     bool ConfigureForm(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
         if (!tesForm) {
             return false;
         }
 
         tesForm->SetFormEditorID(form.editorId.c_str());
+        if (form.kind >= DynamicForms::FormKind::ImpactDataSet) return ConfigureAdditionalReadyForm(tesForm, form);
         if (form.kind == DynamicForms::FormKind::Global) {
             return ConfigureGlobal(tesForm, form);
         }
@@ -2563,6 +3736,36 @@ namespace {
         }
         if (form.kind == DynamicForms::FormKind::Ingredient) {
             return ConfigureIngredient(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Spell) {
+            return ConfigureSpell(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Enchantment) {
+            return ConfigureEnchantment(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Scroll) {
+            return ConfigureScroll(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::Projectile) {
+            return ConfigureProjectile(tesForm, form);
+        }
+        if (form.kind == DynamicForms::FormKind::TextureSet) return ConfigureTextureSet(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::Hazard) return ConfigureHazard(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::ImpactData) return ConfigureImpactData(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::ReferenceEffect) return ConfigureReferenceEffect(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::DualCastData) return ConfigureDualCastData(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::Static) return ConfigureStatic(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::MovableStatic) return ConfigureMovableStatic(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::Door) return ConfigureDoor(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::CombatStyle) return ConfigureCombatStyle(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::SoundCategory) return ConfigureSoundCategory(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::Class) return ConfigureClass(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::Flora) return ConfigureFlora(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::Tree) return ConfigureTree(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::ConstructibleObject) return ConfigureConstructibleObject(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::Container) return ConfigureContainer(tesForm, form);
+        if (form.kind == DynamicForms::FormKind::MagicEffect) {
+            return ConfigureMagicEffect(tesForm, form);
         }
         if (form.kind == DynamicForms::FormKind::Color) {
             return ConfigureColor(tesForm, form);
@@ -3158,6 +4361,202 @@ namespace {
         }
         out.knownEffectFlags = ReadUInt16(doc, "knownEffectFlags", out.knownEffectFlags);
         out.playerUses = ReadUInt16(doc, "playerUses", out.playerUses);
+        out.spellFlags = ReadUInt32(doc, "spellFlags", out.spellFlags);
+        out.spellType = ReadUInt32(doc, "spellType", out.spellType);
+        if (doc.HasMember("spellCostOverride") && doc["spellCostOverride"].IsInt()) {
+            out.spellCostOverride = doc["spellCostOverride"].GetInt();
+        }
+        out.spellChargeTime = ReadFloat(doc, "spellChargeTime", out.spellChargeTime);
+        out.spellCastingType = ReadUInt32(doc, "spellCastingType", out.spellCastingType);
+        out.spellDelivery = ReadUInt32(doc, "spellDelivery", out.spellDelivery);
+        out.spellCastDuration = ReadFloat(doc, "spellCastDuration", out.spellCastDuration);
+        out.spellRange = ReadFloat(doc, "spellRange", out.spellRange);
+        ReadFormRef(doc, "castingPerk", out.castingPerk);
+        ReadFormRef(doc, "menuDisplayObject", out.menuDisplayObject);
+        out.enchantmentFlags = ReadUInt32(doc, "enchantmentFlags", out.enchantmentFlags);
+        out.enchantmentCostOverride = ReadInt32(doc, "enchantmentCostOverride", out.enchantmentCostOverride);
+        out.enchantmentCastingType = ReadUInt32(doc, "enchantmentCastingType", out.enchantmentCastingType);
+        out.enchantmentChargeOverride = ReadInt32(doc, "enchantmentChargeOverride", out.enchantmentChargeOverride);
+        out.enchantmentDelivery = ReadUInt32(doc, "enchantmentDelivery", out.enchantmentDelivery);
+        out.enchantmentSpellType = ReadUInt32(doc, "enchantmentSpellType", out.enchantmentSpellType);
+        out.enchantmentChargeTime = ReadFloat(doc, "enchantmentChargeTime", out.enchantmentChargeTime);
+        ReadFormRef(doc, "baseEnchantment", out.baseEnchantment);
+        ReadFormRef(doc, "wornRestrictions", out.wornRestrictions);
+        out.scrollFlags = ReadUInt32(doc, "scrollFlags", out.scrollFlags);
+        out.scrollCostOverride = ReadInt32(doc, "scrollCostOverride", out.scrollCostOverride);
+        out.scrollChargeTime = ReadFloat(doc, "scrollChargeTime", out.scrollChargeTime);
+        out.scrollDelivery = ReadUInt32(doc, "scrollDelivery", out.scrollDelivery);
+        out.scrollCastDuration = ReadFloat(doc, "scrollCastDuration", out.scrollCastDuration);
+        out.scrollRange = ReadFloat(doc, "scrollRange", out.scrollRange);
+        ReadFormRef(doc, "scrollCastingPerk", out.scrollCastingPerk);
+        out.projectileFlags = ReadUInt32(doc, "projectileFlags", out.projectileFlags);
+        out.projectileTypes = ReadUInt32(doc, "projectileTypes", out.projectileTypes);
+        out.projectileGravity = ReadFloat(doc, "projectileGravity", out.projectileGravity);
+        out.projectileSpeed = ReadFloat(doc, "projectileSpeed", out.projectileSpeed);
+        out.projectileRange = ReadFloat(doc, "projectileRange", out.projectileRange);
+        ReadFormRef(doc, "projectileLight", out.projectileLight);
+        ReadFormRef(doc, "projectileMuzzleFlashLight", out.projectileMuzzleFlashLight);
+        out.projectileTracerChance = ReadFloat(doc, "projectileTracerChance", out.projectileTracerChance);
+        out.projectileExplosionProximity = ReadFloat(doc, "projectileExplosionProximity", out.projectileExplosionProximity);
+        out.projectileExplosionTimer = ReadFloat(doc, "projectileExplosionTimer", out.projectileExplosionTimer);
+        ReadFormRef(doc, "projectileExplosionType", out.projectileExplosionType);
+        ReadFormRef(doc, "projectileActiveSoundLoop", out.projectileActiveSoundLoop);
+        out.projectileMuzzleFlashDuration = ReadFloat(doc, "projectileMuzzleFlashDuration", out.projectileMuzzleFlashDuration);
+        out.projectileFadeOutTime = ReadFloat(doc, "projectileFadeOutTime", out.projectileFadeOutTime);
+        out.projectileForce = ReadFloat(doc, "projectileForce", out.projectileForce);
+        ReadFormRef(doc, "projectileCountdownSound", out.projectileCountdownSound);
+        ReadFormRef(doc, "projectileDeactivateSound", out.projectileDeactivateSound);
+        ReadFormRef(doc, "projectileDefaultWeaponSource", out.projectileDefaultWeaponSource);
+        out.projectileConeSpread = ReadFloat(doc, "projectileConeSpread", out.projectileConeSpread);
+        out.projectileCollisionRadius = ReadFloat(doc, "projectileCollisionRadius", out.projectileCollisionRadius);
+        out.projectileLifetime = ReadFloat(doc, "projectileLifetime", out.projectileLifetime);
+        out.projectileRelaunchInterval = ReadFloat(doc, "projectileRelaunchInterval", out.projectileRelaunchInterval);
+        ReadFormRef(doc, "projectileDecalData", out.projectileDecalData);
+        ReadFormRef(doc, "projectileCollisionLayer", out.projectileCollisionLayer);
+        ReadString(doc, "projectileMuzzleFlashModel", out.projectileMuzzleFlashModel);
+        out.projectileSoundLevel = ReadUInt32(doc, "projectileSoundLevel", out.projectileSoundLevel);
+        ReadStringArray(doc, "textureSetPaths", out.textureSetPaths);
+        out.textureSetFlags = ReadUInt32(doc, "textureSetFlags", out.textureSetFlags);
+        if (doc.HasMember("textureSetHasDecal") && doc["textureSetHasDecal"].IsBool()) out.textureSetHasDecal = doc["textureSetHasDecal"].GetBool();
+        out.decalMinWidth = ReadFloat(doc, "decalMinWidth", out.decalMinWidth);
+        out.decalMaxWidth = ReadFloat(doc, "decalMaxWidth", out.decalMaxWidth);
+        out.decalMinHeight = ReadFloat(doc, "decalMinHeight", out.decalMinHeight);
+        out.decalMaxHeight = ReadFloat(doc, "decalMaxHeight", out.decalMaxHeight);
+        out.decalDepth = ReadFloat(doc, "decalDepth", out.decalDepth);
+        out.decalShininess = ReadFloat(doc, "decalShininess", out.decalShininess);
+        out.decalParallaxScale = ReadFloat(doc, "decalParallaxScale", out.decalParallaxScale);
+        out.decalParallaxPasses = ReadInt32(doc, "decalParallaxPasses", out.decalParallaxPasses);
+        out.decalFlags = ReadUInt32(doc, "decalFlags", out.decalFlags);
+        out.decalRed = static_cast<std::uint8_t>(ReadUInt32(doc, "decalRed", out.decalRed));
+        out.decalGreen = static_cast<std::uint8_t>(ReadUInt32(doc, "decalGreen", out.decalGreen));
+        out.decalBlue = static_cast<std::uint8_t>(ReadUInt32(doc, "decalBlue", out.decalBlue));
+        out.decalAlpha = static_cast<std::uint8_t>(ReadUInt32(doc, "decalAlpha", out.decalAlpha));
+        out.hazardLimit = ReadUInt32(doc, "hazardLimit", out.hazardLimit);
+        out.hazardRadius = ReadFloat(doc, "hazardRadius", out.hazardRadius);
+        out.hazardLifetime = ReadFloat(doc, "hazardLifetime", out.hazardLifetime);
+        out.hazardImageSpaceRadius = ReadFloat(doc, "hazardImageSpaceRadius", out.hazardImageSpaceRadius);
+        out.hazardTargetInterval = ReadFloat(doc, "hazardTargetInterval", out.hazardTargetInterval);
+        out.hazardFlags = ReadUInt32(doc, "hazardFlags", out.hazardFlags);
+        ReadFormRef(doc, "hazardSpell", out.hazardSpell); ReadFormRef(doc, "hazardLight", out.hazardLight);
+        ReadFormRef(doc, "hazardImpactDataSet", out.hazardImpactDataSet); ReadFormRef(doc, "hazardSound", out.hazardSound);
+        ReadFormRef(doc, "hazardImageSpaceModifier", out.hazardImageSpaceModifier);
+        out.impactEffectDuration = ReadFloat(doc, "impactEffectDuration", out.impactEffectDuration);
+        out.impactOrientation = ReadUInt32(doc, "impactOrientation", out.impactOrientation);
+        out.impactAngleThreshold = ReadFloat(doc, "impactAngleThreshold", out.impactAngleThreshold);
+        out.impactPlacementRadius = ReadFloat(doc, "impactPlacementRadius", out.impactPlacementRadius);
+        out.impactSoundLevel = ReadUInt32(doc, "impactSoundLevel", out.impactSoundLevel);
+        out.impactFlags = ReadUInt32(doc, "impactFlags", out.impactFlags);
+        out.impactResultOverride = ReadUInt32(doc, "impactResultOverride", out.impactResultOverride);
+        ReadFormRef(doc, "impactDecalTextureSet", out.impactDecalTextureSet); ReadFormRef(doc, "impactDecalTextureSet2", out.impactDecalTextureSet2);
+        ReadFormRef(doc, "impactSound1", out.impactSound1); ReadFormRef(doc, "impactSound2", out.impactSound2); ReadFormRef(doc, "impactHazard", out.impactHazard);
+        ReadFormRef(doc, "referenceEffectArtObject", out.referenceEffectArtObject); ReadFormRef(doc, "referenceEffectShader", out.referenceEffectShader);
+        out.referenceEffectFlags = ReadUInt32(doc, "referenceEffectFlags", out.referenceEffectFlags);
+        ReadFormRef(doc, "dualCastProjectile", out.dualCastProjectile); ReadFormRef(doc, "dualCastExplosion", out.dualCastExplosion);
+        ReadFormRef(doc, "dualCastEffectShader", out.dualCastEffectShader); ReadFormRef(doc, "dualCastHitEffectArt", out.dualCastHitEffectArt);
+        ReadFormRef(doc, "dualCastImpactDataSet", out.dualCastImpactDataSet); out.dualCastFlags = ReadUInt32(doc, "dualCastFlags", out.dualCastFlags);
+        out.staticMaterialThresholdAngle = ReadFloat(doc, "staticMaterialThresholdAngle", out.staticMaterialThresholdAngle);
+        ReadFormRef(doc, "staticMaterialObject", out.staticMaterialObject); out.staticFlags = ReadUInt32(doc, "staticFlags", out.staticFlags);
+        out.recordFlags = ReadUInt32(doc, "recordFlags", out.recordFlags);
+        ReadFormRef(doc, "movableStaticSoundLoop", out.movableStaticSoundLoop); out.movableStaticFlags = ReadUInt32(doc, "movableStaticFlags", out.movableStaticFlags);
+        ReadFormRef(doc, "doorOpenSound", out.doorOpenSound); ReadFormRef(doc, "doorCloseSound", out.doorCloseSound); ReadFormRef(doc, "doorLoopSound", out.doorLoopSound);
+        out.doorFlags = ReadUInt32(doc, "doorFlags", out.doorFlags);
+        ReadNumberArray(doc, "combatGeneral", out.combatGeneral); ReadNumberArray(doc, "combatMelee", out.combatMelee);
+        ReadNumberArray(doc, "combatCloseRange", out.combatCloseRange); out.combatLongRangeStrafe = ReadFloat(doc, "combatLongRangeStrafe", out.combatLongRangeStrafe);
+        ReadNumberArray(doc, "combatFlight", out.combatFlight); out.combatStyleFlags = ReadUInt32(doc, "combatStyleFlags", out.combatStyleFlags);
+        out.soundCategoryFlags = ReadUInt32(doc, "soundCategoryFlags", out.soundCategoryFlags); ReadFormRef(doc, "soundCategoryParent", out.soundCategoryParent);
+        out.soundCategoryAttenuation = static_cast<std::uint16_t>(ReadUInt32(doc, "soundCategoryAttenuation", out.soundCategoryAttenuation));
+        out.soundCategoryStaticMult = ReadFloat(doc, "soundCategoryStaticMult", out.soundCategoryStaticMult);
+        out.soundCategoryDefaultMenuValue = ReadFloat(doc, "soundCategoryDefaultMenuValue", out.soundCategoryDefaultMenuValue);
+        out.soundCategoryVolumeMult = ReadFloat(doc, "soundCategoryVolumeMult", out.soundCategoryVolumeMult);
+        out.soundCategoryFrequencyMult = ReadFloat(doc, "soundCategoryFrequencyMult", out.soundCategoryFrequencyMult);
+        out.classTeachesSkill = ReadUInt32(doc, "classTeachesSkill", out.classTeachesSkill);
+        out.classMaximumTrainingLevel = static_cast<std::uint8_t>(ReadUInt32(doc, "classMaximumTrainingLevel", out.classMaximumTrainingLevel));
+        ReadNumberArray(doc, "classSkillWeights", out.classSkillWeights); out.classBleedoutDefault = ReadFloat(doc, "classBleedoutDefault", out.classBleedoutDefault);
+        out.classVoicePoints = ReadUInt32(doc, "classVoicePoints", out.classVoicePoints); ReadNumberArray(doc, "classAttributeWeights", out.classAttributeWeights);
+        ReadString(doc, "classIconPath", out.classIconPath); ReadFormRef(doc, "produceItem", out.produceItem); ReadFormRef(doc, "harvestSound", out.harvestSound);
+        ReadNumberArray(doc, "produceChance", out.produceChance); out.floraFlags = ReadUInt32(doc, "floraFlags", out.floraFlags);
+        ReadFormRef(doc, "floraSoundLoop", out.floraSoundLoop); ReadFormRef(doc, "floraSoundActivate", out.floraSoundActivate); ReadFormRef(doc, "floraWaterType", out.floraWaterType);
+        ReadNumberArray(doc, "treeAnimation", out.treeAnimation); out.treeType = ReadUInt32(doc, "treeType", out.treeType);
+        ReadFormRef(doc, "createdItem", out.createdItem);
+        ReadFormRef(doc, "benchKeyword", out.benchKeyword);
+        out.numConstructed = static_cast<std::uint16_t>(std::clamp(ReadUInt32(doc, "numConstructed", out.numConstructed), 1u, 65535u));
+        ReadContainerEntries(doc, "requiredItems", out.requiredItems);
+        ReadContainerEntries(doc, "containerItems", out.containerItems);
+        out.containerFlags = ReadUInt32(doc, "containerFlags", out.containerFlags);
+        if (doc.HasMember("containerAllowStolenItems") && doc["containerAllowStolenItems"].IsBool()) out.containerAllowStolenItems = doc["containerAllowStolenItems"].GetBool();
+        ReadFormRef(doc, "containerOpenSound", out.containerOpenSound);
+        ReadFormRef(doc, "containerCloseSound", out.containerCloseSound);
+        ReadFormRefPairs(doc, "impactDataSetEntries", out.impactDataSetEntries);
+        out.collisionLayerIndex = ReadUInt32(doc, "collisionLayerIndex", out.collisionLayerIndex); out.collisionLayerColor = ReadUInt32(doc, "collisionLayerColor", out.collisionLayerColor);
+        out.collisionLayerFlags = ReadUInt32(doc, "collisionLayerFlags", out.collisionLayerFlags); ReadString(doc, "collisionLayerName", out.collisionLayerName); ReadFormRefArray(doc, "collisionLayers", out.collisionLayers);
+        ReadString(doc, "footstepTag", out.footstepTag); ReadFormRef(doc, "footstepImpactDataSet", out.footstepImpactDataSet);
+        constexpr std::array footstepKeys{ "footstepWalk", "footstepRun", "footstepSneak", "footstepBleedout", "footstepSwim" };
+        for (std::size_t i = 0; i < footstepKeys.size(); ++i) ReadFormRefArray(doc, footstepKeys[i], out.footstepSets[i]);
+        out.reverbDecayTime = static_cast<std::uint16_t>(ReadUInt32(doc, "reverbDecayTime", out.reverbDecayTime)); out.reverbHFReference = static_cast<std::uint16_t>(ReadUInt32(doc, "reverbHFReference", out.reverbHFReference)); ReadNumberArray(doc, "reverbValues", out.reverbValues);
+        ReadFormRef(doc, "acousticLoopingSound", out.acousticLoopingSound); ReadFormRef(doc, "acousticSoundRegion", out.acousticSoundRegion); ReadFormRef(doc, "acousticReverb", out.acousticReverb);
+        out.apparatusQuality = ReadUInt32(doc, "apparatusQuality", out.apparatusQuality);
+        out.grassDensity = static_cast<std::uint8_t>(ReadUInt32(doc, "grassDensity", out.grassDensity)); out.grassMinSlope = static_cast<std::uint8_t>(ReadUInt32(doc, "grassMinSlope", out.grassMinSlope)); out.grassMaxSlope = static_cast<std::uint8_t>(ReadUInt32(doc, "grassMaxSlope", out.grassMaxSlope));
+        out.grassDistanceFromWater = static_cast<std::uint16_t>(ReadUInt32(doc, "grassDistanceFromWater", out.grassDistanceFromWater)); out.grassWaterState = ReadUInt32(doc, "grassWaterState", out.grassWaterState);
+        out.grassPositionRange = ReadFloat(doc, "grassPositionRange", out.grassPositionRange); out.grassHeightRange = ReadFloat(doc, "grassHeightRange", out.grassHeightRange); out.grassColorRange = ReadFloat(doc, "grassColorRange", out.grassColorRange); out.grassWavePeriod = ReadFloat(doc, "grassWavePeriod", out.grassWavePeriod); out.grassFlags = ReadUInt32(doc, "grassFlags", out.grassFlags);
+        out.idleFlags = ReadUInt32(doc, "idleFlags", out.idleFlags); out.idleTimer = ReadFloat(doc, "idleTimer", out.idleTimer); ReadFormRefArray(doc, "idleAnimations", out.idleAnimations);
+        ReadFormRef(doc, "encounterOwner", out.encounterOwner); ReadFormRef(doc, "encounterLocation", out.encounterLocation); out.encounterOwnerRank = static_cast<std::int8_t>(ReadInt32(doc, "encounterOwnerRank", out.encounterOwnerRank)); out.encounterMinLevel = static_cast<std::int8_t>(ReadInt32(doc, "encounterMinLevel", out.encounterMinLevel)); out.encounterMaxLevel = static_cast<std::int8_t>(ReadInt32(doc, "encounterMaxLevel", out.encounterMaxLevel)); out.encounterFlags = ReadUInt32(doc, "encounterFlags", out.encounterFlags);
+        ReadFormRef(doc, "relationshipNpc1", out.relationshipNpc1); ReadFormRef(doc, "relationshipNpc2", out.relationshipNpc2); ReadFormRef(doc, "relationshipAssociation", out.relationshipAssociation); out.relationshipLevel = ReadUInt32(doc, "relationshipLevel", out.relationshipLevel); out.relationshipFlags = ReadUInt32(doc, "relationshipFlags", out.relationshipFlags);
+        ReadStringArray(doc, "associationLabels", out.associationLabels); out.associationFlags = ReadUInt32(doc, "associationFlags", out.associationFlags);
+        ReadString(doc, "movementName", out.movementName); ReadNumberArray(doc, "movementSpeeds", out.movementSpeeds); out.movementRotateWhileMoving = ReadFloat(doc, "movementRotateWhileMoving", out.movementRotateWhileMoving); out.movementDirectional = ReadFloat(doc, "movementDirectional", out.movementDirectional); out.movementSpeed = ReadFloat(doc, "movementSpeed", out.movementSpeed); out.movementRotationSpeed = ReadFloat(doc, "movementRotationSpeed", out.movementRotationSpeed);
+        ReadString(doc, "wordTranslation", out.wordTranslation); ReadStringArray(doc, "waterNoiseTextures", out.waterNoiseTextures); out.waterAlpha = static_cast<std::uint8_t>(ReadUInt32(doc, "waterAlpha", out.waterAlpha)); out.waterFlags = ReadUInt32(doc, "waterFlags", out.waterFlags);
+        ReadFormRef(doc, "waterMaterial", out.waterMaterial); ReadFormRef(doc, "waterSound", out.waterSound); ReadFormRef(doc, "waterContactSpell", out.waterContactSpell); ReadFormRef(doc, "waterImageSpace", out.waterImageSpace); ReadNumberArray(doc, "waterLinearVelocity", out.waterLinearVelocity); ReadNumberArray(doc, "waterAngularVelocity", out.waterAngularVelocity);
+        ReadNumberArray(doc, "imageSpaceHDR", out.imageSpaceHDR); ReadNumberArray(doc, "imageSpaceCinematic", out.imageSpaceCinematic); out.imageSpaceTintAmount = ReadFloat(doc, "imageSpaceTintAmount", out.imageSpaceTintAmount); ReadNumberArray(doc, "imageSpaceTintColor", out.imageSpaceTintColor); ReadNumberArray(doc, "imageSpaceDOF", out.imageSpaceDOF); out.imageSpaceDOFFlags = static_cast<std::uint16_t>(ReadUInt32(doc, "imageSpaceDOFFlags", out.imageSpaceDOFFlags)); out.imageSpaceSkyBlur = static_cast<std::uint16_t>(ReadUInt32(doc, "imageSpaceSkyBlur", out.imageSpaceSkyBlur));
+        ReadNumberArray(doc, "lightingColors", out.lightingColors); ReadNumberArray(doc, "lightingValues", out.lightingValues); out.lightingDirectionalXY = ReadUInt32(doc, "lightingDirectionalXY", out.lightingDirectionalXY); out.lightingDirectionalZ = ReadUInt32(doc, "lightingDirectionalZ", out.lightingDirectionalZ); out.lightingInheritanceFlags = ReadUInt32(doc, "lightingInheritanceFlags", out.lightingInheritanceFlags);
+        constexpr std::array shoutWordKeys{ "shoutWord1", "shoutWord2", "shoutWord3" }; constexpr std::array shoutSpellKeys{ "shoutSpell1", "shoutSpell2", "shoutSpell3" };
+        for (std::size_t i = 0; i < 3; ++i) { ReadFormRef(doc, shoutWordKeys[i], out.shoutWords[i]); ReadFormRef(doc, shoutSpellKeys[i], out.shoutSpells[i]); }
+        ReadNumberArray(doc, "shoutRecoveryTimes", out.shoutRecoveryTimes);
+        ReadLeveledEntries(doc, "leveledEntries", out.leveledEntries); out.leveledChanceNone = static_cast<std::uint8_t>(std::clamp(ReadUInt32(doc, "leveledChanceNone", out.leveledChanceNone), 0u, 100u)); out.leveledFlags = ReadUInt32(doc, "leveledFlags", out.leveledFlags); ReadFormRef(doc, "leveledChanceGlobal", out.leveledChanceGlobal);
+        out.actionIndex = ReadUInt32(doc, "actionIndex", out.actionIndex); ReadString(doc, "eyesTexture", out.eyesTexture); out.eyesFlags = ReadUInt32(doc, "eyesFlags", out.eyesFlags); ReadString(doc, "animatedUnloadEvent", out.animatedUnloadEvent);
+        ReadString(doc, "loadScreenText", out.loadScreenText); ReadFormRef(doc, "loadScreenObject", out.loadScreenObject); out.loadScreenInitialScale = ReadFloat(doc, "loadScreenInitialScale", out.loadScreenInitialScale); ReadNumberArray(doc, "loadScreenRotationConstraints", out.loadScreenRotationConstraints); ReadNumberArray(doc, "loadScreenRotationOffsetConstraints", out.loadScreenRotationOffsetConstraints); ReadNumberArray(doc, "loadScreenTranslationOffset", out.loadScreenTranslationOffset); ReadString(doc, "loadScreenCameraPath", out.loadScreenCameraPath);
+        ReadNumberArray(doc, "shaderParticleSettings", out.shaderParticleSettings); ReadString(doc, "shaderParticleTexture", out.shaderParticleTexture); out.addonIndex = ReadUInt32(doc, "addonIndex", out.addonIndex); ReadFormRef(doc, "addonSound", out.addonSound); out.addonMasterParticleCap = static_cast<std::uint16_t>(ReadUInt32(doc, "addonMasterParticleCap", out.addonMasterParticleCap)); out.addonFlags = ReadUInt32(doc, "addonFlags", out.addonFlags);
+        out.magicEffectFlags = ReadUInt32(doc, "magicEffectFlags", out.magicEffectFlags);
+        out.magicEffectBaseCost = ReadFloat(doc, "magicEffectBaseCost", out.magicEffectBaseCost);
+        ReadFormRef(doc, "magicEffectAssociatedForm", out.magicEffectAssociatedForm);
+        out.magicEffectAssociatedSkill = ReadInt32(doc, "magicEffectAssociatedSkill", out.magicEffectAssociatedSkill);
+        out.magicEffectResistVariable = ReadInt32(doc, "magicEffectResistVariable", out.magicEffectResistVariable);
+        ReadFormRefArray(doc, "magicEffectCounterEffects", out.magicEffectCounterEffects);
+        ReadFormRef(doc, "magicEffectLight", out.magicEffectLight);
+        out.magicEffectTaperWeight = ReadFloat(doc, "magicEffectTaperWeight", out.magicEffectTaperWeight);
+        ReadFormRef(doc, "magicEffectShader", out.magicEffectShader);
+        ReadFormRef(doc, "magicEffectEnchantShader", out.magicEffectEnchantShader);
+        out.magicEffectMinimumSkill = ReadInt32(doc, "magicEffectMinimumSkill", out.magicEffectMinimumSkill);
+        out.magicEffectSpellmakingArea = ReadInt32(doc, "magicEffectSpellmakingArea", out.magicEffectSpellmakingArea);
+        out.magicEffectSpellmakingChargeTime = ReadFloat(doc, "magicEffectSpellmakingChargeTime", out.magicEffectSpellmakingChargeTime);
+        out.magicEffectTaperCurve = ReadFloat(doc, "magicEffectTaperCurve", out.magicEffectTaperCurve);
+        out.magicEffectTaperDuration = ReadFloat(doc, "magicEffectTaperDuration", out.magicEffectTaperDuration);
+        out.magicEffectSecondAVWeight = ReadFloat(doc, "magicEffectSecondAVWeight", out.magicEffectSecondAVWeight);
+        out.magicEffectArchetype = ReadInt32(doc, "magicEffectArchetype", out.magicEffectArchetype);
+        out.magicEffectPrimaryAV = ReadInt32(doc, "magicEffectPrimaryAV", out.magicEffectPrimaryAV);
+        ReadFormRef(doc, "magicEffectProjectile", out.magicEffectProjectile);
+        ReadFormRef(doc, "magicEffectExplosion", out.magicEffectExplosion);
+        out.magicEffectCastingType = ReadUInt32(doc, "magicEffectCastingType", out.magicEffectCastingType);
+        out.magicEffectDelivery = ReadUInt32(doc, "magicEffectDelivery", out.magicEffectDelivery);
+        out.magicEffectSecondaryAV = ReadInt32(doc, "magicEffectSecondaryAV", out.magicEffectSecondaryAV);
+        ReadFormRef(doc, "magicEffectCastingArt", out.magicEffectCastingArt);
+        ReadFormRef(doc, "magicEffectHitEffectArt", out.magicEffectHitEffectArt);
+        ReadFormRef(doc, "magicEffectImpactDataSet", out.magicEffectImpactDataSet);
+        out.magicEffectSkillUsageMult = ReadFloat(doc, "magicEffectSkillUsageMult", out.magicEffectSkillUsageMult);
+        ReadFormRef(doc, "magicEffectDualCastData", out.magicEffectDualCastData);
+        out.magicEffectDualCastScale = ReadFloat(doc, "magicEffectDualCastScale", out.magicEffectDualCastScale);
+        ReadFormRef(doc, "magicEffectEnchantEffectArt", out.magicEffectEnchantEffectArt);
+        ReadFormRef(doc, "magicEffectHitVisuals", out.magicEffectHitVisuals);
+        ReadFormRef(doc, "magicEffectEnchantVisuals", out.magicEffectEnchantVisuals);
+        ReadFormRef(doc, "magicEffectEquipAbility", out.magicEffectEquipAbility);
+        ReadFormRef(doc, "magicEffectImageSpaceMod", out.magicEffectImageSpaceMod);
+        ReadFormRef(doc, "magicEffectPerk", out.magicEffectPerk);
+        out.magicEffectCastingSoundLevel = ReadUInt32(doc, "magicEffectCastingSoundLevel", out.magicEffectCastingSoundLevel);
+        out.magicEffectAIScore = ReadFloat(doc, "magicEffectAIScore", out.magicEffectAIScore);
+        out.magicEffectAIDelayTime = ReadFloat(doc, "magicEffectAIDelayTime", out.magicEffectAIDelayTime);
+        for (std::size_t i = 0; i < out.magicEffectSounds.size(); ++i) {
+            const auto key = std::format("magicEffectSound{}", i);
+            ReadFormRef(doc, key.c_str(), out.magicEffectSounds[i]);
+        }
+        ReadString(doc, "magicItemDescription", out.magicItemDescription);
         if (doc.HasMember("magicEffectsOverride") && doc["magicEffectsOverride"].IsBool()) {
             out.magicEffectsOverride = doc["magicEffectsOverride"].GetBool();
         }
@@ -3559,6 +4958,13 @@ namespace {
             return false;
         }
         return ReadFormDocument(doc, path.string(), path.stem().string(), out);
+    }
+
+    std::int32_t ReadInt32(const rapidjson::Value& doc, const char* key, const std::int32_t fallback) {
+        if (!doc.HasMember(key) || !doc[key].IsInt()) {
+            return fallback;
+        }
+        return doc[key].GetInt();
     }
 
     std::string EffectivePackageName(const DynamicForms::DynamicForm& form) {
@@ -4184,7 +5590,300 @@ namespace Manager {
             doc.AddMember("knownEffectFlags", static_cast<unsigned>(form.knownEffectFlags), allocator);
             doc.AddMember("playerUses", static_cast<unsigned>(form.playerUses), allocator);
         }
-        if ((form.kind == DynamicForms::FormKind::AlchemyItem || form.kind == DynamicForms::FormKind::Ingredient) && form.magicEffectsOverride) {
+        if (form.kind == DynamicForms::FormKind::Spell) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddString(doc, allocator, "description", form.description);
+            AddFormRefArray(doc, allocator, "keywords", form.keywords);
+            AddFormRef(doc, allocator, "equipSlot", form.equipSlot);
+            AddFormRef(doc, allocator, "castingPerk", form.castingPerk);
+            AddFormRef(doc, allocator, "menuDisplayObject", form.menuDisplayObject);
+            doc.AddMember("spellFlags", form.spellFlags, allocator);
+            doc.AddMember("spellType", form.spellType, allocator);
+            doc.AddMember("spellCostOverride", form.spellCostOverride, allocator);
+            doc.AddMember("spellChargeTime", form.spellChargeTime, allocator);
+            doc.AddMember("spellCastingType", form.spellCastingType, allocator);
+            doc.AddMember("spellDelivery", form.spellDelivery, allocator);
+            doc.AddMember("spellCastDuration", form.spellCastDuration, allocator);
+            doc.AddMember("spellRange", form.spellRange, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Enchantment) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddFormRefArray(doc, allocator, "keywords", form.keywords);
+            doc.AddMember("enchantmentFlags", form.enchantmentFlags, allocator);
+            doc.AddMember("enchantmentCostOverride", form.enchantmentCostOverride, allocator);
+            doc.AddMember("enchantmentCastingType", form.enchantmentCastingType, allocator);
+            doc.AddMember("enchantmentChargeOverride", form.enchantmentChargeOverride, allocator);
+            doc.AddMember("enchantmentDelivery", form.enchantmentDelivery, allocator);
+            doc.AddMember("enchantmentSpellType", form.enchantmentSpellType, allocator);
+            doc.AddMember("enchantmentChargeTime", form.enchantmentChargeTime, allocator);
+            AddFormRef(doc, allocator, "baseEnchantment", form.baseEnchantment);
+            AddFormRef(doc, allocator, "wornRestrictions", form.wornRestrictions);
+        }
+        if (form.kind == DynamicForms::FormKind::Scroll) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddString(doc, allocator, "description", form.description);
+            AddString(doc, allocator, "modelPath", form.modelPath);
+            AddFormRefArray(doc, allocator, "keywords", form.keywords);
+            AddFormRef(doc, allocator, "equipSlot", form.equipSlot);
+            AddFormRef(doc, allocator, "menuDisplayObject", form.menuDisplayObject);
+            AddFormRef(doc, allocator, "pickupSound", form.pickupSound);
+            AddFormRef(doc, allocator, "putdownSound", form.putdownSound);
+            doc.AddMember("itemValue", form.itemValue, allocator);
+            doc.AddMember("itemWeight", form.itemWeight, allocator);
+            doc.AddMember("scrollFlags", form.scrollFlags, allocator);
+            doc.AddMember("scrollCostOverride", form.scrollCostOverride, allocator);
+            doc.AddMember("scrollChargeTime", form.scrollChargeTime, allocator);
+            doc.AddMember("scrollDelivery", form.scrollDelivery, allocator);
+            doc.AddMember("scrollCastDuration", form.scrollCastDuration, allocator);
+            doc.AddMember("scrollRange", form.scrollRange, allocator);
+            AddFormRef(doc, allocator, "scrollCastingPerk", form.scrollCastingPerk);
+        }
+        if (form.kind == DynamicForms::FormKind::Projectile) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddString(doc, allocator, "modelPath", form.modelPath);
+            AddString(doc, allocator, "projectileMuzzleFlashModel", form.projectileMuzzleFlashModel);
+            doc.AddMember("projectileFlags", form.projectileFlags, allocator);
+            doc.AddMember("projectileTypes", form.projectileTypes, allocator);
+            doc.AddMember("projectileGravity", form.projectileGravity, allocator);
+            doc.AddMember("projectileSpeed", form.projectileSpeed, allocator);
+            doc.AddMember("projectileRange", form.projectileRange, allocator);
+            AddFormRef(doc, allocator, "projectileLight", form.projectileLight);
+            AddFormRef(doc, allocator, "projectileMuzzleFlashLight", form.projectileMuzzleFlashLight);
+            doc.AddMember("projectileTracerChance", form.projectileTracerChance, allocator);
+            doc.AddMember("projectileExplosionProximity", form.projectileExplosionProximity, allocator);
+            doc.AddMember("projectileExplosionTimer", form.projectileExplosionTimer, allocator);
+            AddFormRef(doc, allocator, "projectileExplosionType", form.projectileExplosionType);
+            AddFormRef(doc, allocator, "projectileActiveSoundLoop", form.projectileActiveSoundLoop);
+            doc.AddMember("projectileMuzzleFlashDuration", form.projectileMuzzleFlashDuration, allocator);
+            doc.AddMember("projectileFadeOutTime", form.projectileFadeOutTime, allocator);
+            doc.AddMember("projectileForce", form.projectileForce, allocator);
+            AddFormRef(doc, allocator, "projectileCountdownSound", form.projectileCountdownSound);
+            AddFormRef(doc, allocator, "projectileDeactivateSound", form.projectileDeactivateSound);
+            AddFormRef(doc, allocator, "projectileDefaultWeaponSource", form.projectileDefaultWeaponSource);
+            doc.AddMember("projectileConeSpread", form.projectileConeSpread, allocator);
+            doc.AddMember("projectileCollisionRadius", form.projectileCollisionRadius, allocator);
+            doc.AddMember("projectileLifetime", form.projectileLifetime, allocator);
+            doc.AddMember("projectileRelaunchInterval", form.projectileRelaunchInterval, allocator);
+            AddFormRef(doc, allocator, "projectileDecalData", form.projectileDecalData);
+            AddFormRef(doc, allocator, "projectileCollisionLayer", form.projectileCollisionLayer);
+            doc.AddMember("projectileSoundLevel", form.projectileSoundLevel, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::TextureSet) {
+            AddStringArray(doc, allocator, "textureSetPaths", form.textureSetPaths);
+            doc.AddMember("textureSetFlags", form.textureSetFlags, allocator);
+            doc.AddMember("textureSetHasDecal", form.textureSetHasDecal, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::TextureSet || form.kind == DynamicForms::FormKind::ImpactData) {
+            doc.AddMember("decalMinWidth", form.decalMinWidth, allocator); doc.AddMember("decalMaxWidth", form.decalMaxWidth, allocator);
+            doc.AddMember("decalMinHeight", form.decalMinHeight, allocator); doc.AddMember("decalMaxHeight", form.decalMaxHeight, allocator);
+            doc.AddMember("decalDepth", form.decalDepth, allocator); doc.AddMember("decalShininess", form.decalShininess, allocator);
+            doc.AddMember("decalParallaxScale", form.decalParallaxScale, allocator); doc.AddMember("decalParallaxPasses", form.decalParallaxPasses, allocator);
+            doc.AddMember("decalFlags", form.decalFlags, allocator); doc.AddMember("decalRed", form.decalRed, allocator);
+            doc.AddMember("decalGreen", form.decalGreen, allocator); doc.AddMember("decalBlue", form.decalBlue, allocator); doc.AddMember("decalAlpha", form.decalAlpha, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Hazard) {
+            AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "modelPath", form.modelPath);
+            doc.AddMember("hazardLimit", form.hazardLimit, allocator); doc.AddMember("hazardRadius", form.hazardRadius, allocator);
+            doc.AddMember("hazardLifetime", form.hazardLifetime, allocator); doc.AddMember("hazardImageSpaceRadius", form.hazardImageSpaceRadius, allocator);
+            doc.AddMember("hazardTargetInterval", form.hazardTargetInterval, allocator); doc.AddMember("hazardFlags", form.hazardFlags, allocator);
+            AddFormRef(doc, allocator, "hazardSpell", form.hazardSpell); AddFormRef(doc, allocator, "hazardLight", form.hazardLight);
+            AddFormRef(doc, allocator, "hazardImpactDataSet", form.hazardImpactDataSet); AddFormRef(doc, allocator, "hazardSound", form.hazardSound);
+            AddFormRef(doc, allocator, "hazardImageSpaceModifier", form.hazardImageSpaceModifier);
+        }
+        if (form.kind == DynamicForms::FormKind::ImpactData) {
+            AddString(doc, allocator, "modelPath", form.modelPath); doc.AddMember("impactEffectDuration", form.impactEffectDuration, allocator);
+            doc.AddMember("impactOrientation", form.impactOrientation, allocator); doc.AddMember("impactAngleThreshold", form.impactAngleThreshold, allocator);
+            doc.AddMember("impactPlacementRadius", form.impactPlacementRadius, allocator); doc.AddMember("impactSoundLevel", form.impactSoundLevel, allocator);
+            doc.AddMember("impactFlags", form.impactFlags, allocator); doc.AddMember("impactResultOverride", form.impactResultOverride, allocator);
+            AddFormRef(doc, allocator, "impactDecalTextureSet", form.impactDecalTextureSet); AddFormRef(doc, allocator, "impactDecalTextureSet2", form.impactDecalTextureSet2);
+            AddFormRef(doc, allocator, "impactSound1", form.impactSound1); AddFormRef(doc, allocator, "impactSound2", form.impactSound2);
+            AddFormRef(doc, allocator, "impactHazard", form.impactHazard);
+        }
+        if (form.kind == DynamicForms::FormKind::ReferenceEffect) {
+            AddFormRef(doc, allocator, "referenceEffectArtObject", form.referenceEffectArtObject); AddFormRef(doc, allocator, "referenceEffectShader", form.referenceEffectShader);
+            doc.AddMember("referenceEffectFlags", form.referenceEffectFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::DualCastData) {
+            AddFormRef(doc, allocator, "dualCastProjectile", form.dualCastProjectile); AddFormRef(doc, allocator, "dualCastExplosion", form.dualCastExplosion);
+            AddFormRef(doc, allocator, "dualCastEffectShader", form.dualCastEffectShader); AddFormRef(doc, allocator, "dualCastHitEffectArt", form.dualCastHitEffectArt);
+            AddFormRef(doc, allocator, "dualCastImpactDataSet", form.dualCastImpactDataSet); doc.AddMember("dualCastFlags", form.dualCastFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Static || form.kind == DynamicForms::FormKind::MovableStatic) {
+            AddString(doc, allocator, "modelPath", form.modelPath); doc.AddMember("staticMaterialThresholdAngle", form.staticMaterialThresholdAngle, allocator);
+            AddFormRef(doc, allocator, "staticMaterialObject", form.staticMaterialObject); doc.AddMember("staticFlags", form.staticFlags, allocator);
+            doc.AddMember("recordFlags", form.recordFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::MovableStatic) {
+            AddString(doc, allocator, "fullName", form.fullName); AddFormRef(doc, allocator, "movableStaticSoundLoop", form.movableStaticSoundLoop);
+            doc.AddMember("movableStaticFlags", form.movableStaticFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Door) {
+            AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "modelPath", form.modelPath);
+            AddFormRef(doc, allocator, "doorOpenSound", form.doorOpenSound); AddFormRef(doc, allocator, "doorCloseSound", form.doorCloseSound);
+            AddFormRef(doc, allocator, "doorLoopSound", form.doorLoopSound); doc.AddMember("doorFlags", form.doorFlags, allocator);
+            doc.AddMember("recordFlags", form.recordFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::CombatStyle) {
+            AddNumberArray(doc, allocator, "combatGeneral", form.combatGeneral); AddNumberArray(doc, allocator, "combatMelee", form.combatMelee);
+            AddNumberArray(doc, allocator, "combatCloseRange", form.combatCloseRange); doc.AddMember("combatLongRangeStrafe", form.combatLongRangeStrafe, allocator);
+            AddNumberArray(doc, allocator, "combatFlight", form.combatFlight); doc.AddMember("combatStyleFlags", form.combatStyleFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::SoundCategory) {
+            AddString(doc, allocator, "fullName", form.fullName); doc.AddMember("soundCategoryFlags", form.soundCategoryFlags, allocator);
+            AddFormRef(doc, allocator, "soundCategoryParent", form.soundCategoryParent); doc.AddMember("soundCategoryAttenuation", form.soundCategoryAttenuation, allocator);
+            doc.AddMember("soundCategoryStaticMult", form.soundCategoryStaticMult, allocator); doc.AddMember("soundCategoryDefaultMenuValue", form.soundCategoryDefaultMenuValue, allocator);
+            doc.AddMember("soundCategoryVolumeMult", form.soundCategoryVolumeMult, allocator); doc.AddMember("soundCategoryFrequencyMult", form.soundCategoryFrequencyMult, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Class) {
+            AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "description", form.description); AddString(doc, allocator, "classIconPath", form.classIconPath);
+            doc.AddMember("classTeachesSkill", form.classTeachesSkill, allocator); doc.AddMember("classMaximumTrainingLevel", form.classMaximumTrainingLevel, allocator);
+            AddNumberArray(doc, allocator, "classSkillWeights", form.classSkillWeights); doc.AddMember("classBleedoutDefault", form.classBleedoutDefault, allocator);
+            doc.AddMember("classVoicePoints", form.classVoicePoints, allocator); AddNumberArray(doc, allocator, "classAttributeWeights", form.classAttributeWeights);
+        }
+        if (form.kind == DynamicForms::FormKind::Flora || form.kind == DynamicForms::FormKind::Tree) {
+            AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "modelPath", form.modelPath);
+            AddFormRef(doc, allocator, "produceItem", form.produceItem); AddFormRef(doc, allocator, "harvestSound", form.harvestSound);
+            AddNumberArray(doc, allocator, "produceChance", form.produceChance);
+        }
+        if (form.kind == DynamicForms::FormKind::Flora) {
+            AddFormRefArray(doc, allocator, "keywords", form.keywords); doc.AddMember("floraFlags", form.floraFlags, allocator);
+            AddFormRef(doc, allocator, "floraSoundLoop", form.floraSoundLoop); AddFormRef(doc, allocator, "floraSoundActivate", form.floraSoundActivate);
+            AddFormRef(doc, allocator, "floraWaterType", form.floraWaterType);
+        }
+        if (form.kind == DynamicForms::FormKind::Tree) {
+            AddNumberArray(doc, allocator, "treeAnimation", form.treeAnimation); doc.AddMember("treeType", form.treeType, allocator);
+            doc.AddMember("recordFlags", form.recordFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::ConstructibleObject) {
+            AddFormRef(doc, allocator, "createdItem", form.createdItem);
+            AddFormRef(doc, allocator, "benchKeyword", form.benchKeyword);
+            doc.AddMember("numConstructed", std::max<std::uint16_t>(1, form.numConstructed), allocator);
+            AddContainerEntries(doc, allocator, "requiredItems", form.requiredItems);
+            rapidjson::Value conditions(rapidjson::kArrayType);
+            for (const auto& condition : form.conditions) WriteCondition(conditions, allocator, condition);
+            doc.AddMember("conditions", conditions, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::Container) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddString(doc, allocator, "modelPath", form.modelPath);
+            doc.AddMember("itemWeight", form.itemWeight, allocator);
+            AddContainerEntries(doc, allocator, "containerItems", form.containerItems);
+            doc.AddMember("containerFlags", form.containerFlags, allocator);
+            doc.AddMember("containerAllowStolenItems", form.containerAllowStolenItems, allocator);
+            AddFormRef(doc, allocator, "containerOpenSound", form.containerOpenSound);
+            AddFormRef(doc, allocator, "containerCloseSound", form.containerCloseSound);
+            doc.AddMember("recordFlags", form.recordFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::ImpactDataSet) AddFormRefPairs(doc, allocator, "impactDataSetEntries", form.impactDataSetEntries);
+        if (form.kind == DynamicForms::FormKind::CollisionLayer) {
+            doc.AddMember("collisionLayerIndex", form.collisionLayerIndex, allocator); doc.AddMember("collisionLayerColor", form.collisionLayerColor, allocator); doc.AddMember("collisionLayerFlags", form.collisionLayerFlags, allocator);
+            AddString(doc, allocator, "collisionLayerName", form.collisionLayerName); AddFormRefArray(doc, allocator, "collisionLayers", form.collisionLayers);
+        }
+        if (form.kind == DynamicForms::FormKind::Footstep) { AddString(doc, allocator, "footstepTag", form.footstepTag); AddFormRef(doc, allocator, "footstepImpactDataSet", form.footstepImpactDataSet); }
+        if (form.kind == DynamicForms::FormKind::FootstepSet) {
+            constexpr std::array footstepKeys{ "footstepWalk", "footstepRun", "footstepSneak", "footstepBleedout", "footstepSwim" };
+            for (std::size_t i = 0; i < footstepKeys.size(); ++i) AddFormRefArray(doc, allocator, footstepKeys[i], form.footstepSets[i]);
+        }
+        if (form.kind == DynamicForms::FormKind::ReverbParameters) { doc.AddMember("reverbDecayTime", form.reverbDecayTime, allocator); doc.AddMember("reverbHFReference", form.reverbHFReference, allocator); AddNumberArray(doc, allocator, "reverbValues", form.reverbValues); }
+        if (form.kind == DynamicForms::FormKind::AcousticSpace) { AddFormRef(doc, allocator, "acousticLoopingSound", form.acousticLoopingSound); AddFormRef(doc, allocator, "acousticSoundRegion", form.acousticSoundRegion); AddFormRef(doc, allocator, "acousticReverb", form.acousticReverb); }
+        if (form.kind == DynamicForms::FormKind::Apparatus) {
+            AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "modelPath", form.modelPath); AddString(doc, allocator, "inventoryIcon", form.inventoryIcon); AddString(doc, allocator, "messageIcon", form.messageIcon);
+            doc.AddMember("itemValue", form.itemValue, allocator); doc.AddMember("itemWeight", form.itemWeight, allocator); AddFormRefArray(doc, allocator, "keywords", form.keywords); AddFormRef(doc, allocator, "pickupSound", form.pickupSound); AddFormRef(doc, allocator, "putdownSound", form.putdownSound); doc.AddMember("apparatusQuality", form.apparatusQuality, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::StaticCollection) { AddString(doc, allocator, "modelPath", form.modelPath); doc.AddMember("recordFlags", form.recordFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::Grass) {
+            AddString(doc, allocator, "modelPath", form.modelPath); doc.AddMember("grassDensity", form.grassDensity, allocator); doc.AddMember("grassMinSlope", form.grassMinSlope, allocator); doc.AddMember("grassMaxSlope", form.grassMaxSlope, allocator); doc.AddMember("grassDistanceFromWater", form.grassDistanceFromWater, allocator); doc.AddMember("grassWaterState", form.grassWaterState, allocator);
+            doc.AddMember("grassPositionRange", form.grassPositionRange, allocator); doc.AddMember("grassHeightRange", form.grassHeightRange, allocator); doc.AddMember("grassColorRange", form.grassColorRange, allocator); doc.AddMember("grassWavePeriod", form.grassWavePeriod, allocator); doc.AddMember("grassFlags", form.grassFlags, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::IdleMarker) { AddString(doc, allocator, "modelPath", form.modelPath); doc.AddMember("idleFlags", form.idleFlags, allocator); doc.AddMember("idleTimer", form.idleTimer, allocator); AddFormRefArray(doc, allocator, "idleAnimations", form.idleAnimations); doc.AddMember("recordFlags", form.recordFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::EncounterZone) { AddFormRef(doc, allocator, "encounterOwner", form.encounterOwner); AddFormRef(doc, allocator, "encounterLocation", form.encounterLocation); doc.AddMember("encounterOwnerRank", form.encounterOwnerRank, allocator); doc.AddMember("encounterMinLevel", form.encounterMinLevel, allocator); doc.AddMember("encounterMaxLevel", form.encounterMaxLevel, allocator); doc.AddMember("encounterFlags", form.encounterFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::Relationship) { AddFormRef(doc, allocator, "relationshipNpc1", form.relationshipNpc1); AddFormRef(doc, allocator, "relationshipNpc2", form.relationshipNpc2); AddFormRef(doc, allocator, "relationshipAssociation", form.relationshipAssociation); doc.AddMember("relationshipLevel", form.relationshipLevel, allocator); doc.AddMember("relationshipFlags", form.relationshipFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::AssociationType) { AddStringArray(doc, allocator, "associationLabels", form.associationLabels); doc.AddMember("associationFlags", form.associationFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::MovementType) { AddString(doc, allocator, "movementName", form.movementName); AddNumberArray(doc, allocator, "movementSpeeds", form.movementSpeeds); doc.AddMember("movementRotateWhileMoving", form.movementRotateWhileMoving, allocator); doc.AddMember("movementDirectional", form.movementDirectional, allocator); doc.AddMember("movementSpeed", form.movementSpeed, allocator); doc.AddMember("movementRotationSpeed", form.movementRotationSpeed, allocator); }
+        if (form.kind == DynamicForms::FormKind::WordOfPower) { AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "wordTranslation", form.wordTranslation); }
+        if (form.kind == DynamicForms::FormKind::Water) { AddString(doc, allocator, "fullName", form.fullName); AddStringArray(doc, allocator, "waterNoiseTextures", form.waterNoiseTextures); doc.AddMember("waterAlpha", form.waterAlpha, allocator); doc.AddMember("waterFlags", form.waterFlags, allocator); AddFormRef(doc, allocator, "waterMaterial", form.waterMaterial); AddFormRef(doc, allocator, "waterSound", form.waterSound); AddFormRef(doc, allocator, "waterContactSpell", form.waterContactSpell); AddFormRef(doc, allocator, "waterImageSpace", form.waterImageSpace); AddNumberArray(doc, allocator, "waterLinearVelocity", form.waterLinearVelocity); AddNumberArray(doc, allocator, "waterAngularVelocity", form.waterAngularVelocity); }
+        if (form.kind == DynamicForms::FormKind::ImageSpace) { AddNumberArray(doc, allocator, "imageSpaceHDR", form.imageSpaceHDR); AddNumberArray(doc, allocator, "imageSpaceCinematic", form.imageSpaceCinematic); doc.AddMember("imageSpaceTintAmount", form.imageSpaceTintAmount, allocator); AddNumberArray(doc, allocator, "imageSpaceTintColor", form.imageSpaceTintColor); AddNumberArray(doc, allocator, "imageSpaceDOF", form.imageSpaceDOF); doc.AddMember("imageSpaceDOFFlags", form.imageSpaceDOFFlags, allocator); doc.AddMember("imageSpaceSkyBlur", form.imageSpaceSkyBlur, allocator); }
+        if (form.kind == DynamicForms::FormKind::LightingTemplate) { AddNumberArray(doc, allocator, "lightingColors", form.lightingColors); AddNumberArray(doc, allocator, "lightingValues", form.lightingValues); doc.AddMember("lightingDirectionalXY", form.lightingDirectionalXY, allocator); doc.AddMember("lightingDirectionalZ", form.lightingDirectionalZ, allocator); doc.AddMember("lightingInheritanceFlags", form.lightingInheritanceFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::Shout) {
+            AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "description", form.description); AddFormRef(doc, allocator, "equipSlot", form.equipSlot); AddFormRef(doc, allocator, "menuDisplayObject", form.menuDisplayObject); doc.AddMember("recordFlags", form.recordFlags, allocator);
+            constexpr std::array shoutWordKeys{ "shoutWord1", "shoutWord2", "shoutWord3" }; constexpr std::array shoutSpellKeys{ "shoutSpell1", "shoutSpell2", "shoutSpell3" };
+            for (std::size_t i = 0; i < 3; ++i) { AddFormRef(doc, allocator, shoutWordKeys[i], form.shoutWords[i]); AddFormRef(doc, allocator, shoutSpellKeys[i], form.shoutSpells[i]); }
+            AddNumberArray(doc, allocator, "shoutRecoveryTimes", form.shoutRecoveryTimes);
+        }
+        if (form.kind == DynamicForms::FormKind::LeveledItem || form.kind == DynamicForms::FormKind::LeveledNPC || form.kind == DynamicForms::FormKind::LeveledSpell) {
+            AddLeveledEntries(doc, allocator, "leveledEntries", form.leveledEntries); doc.AddMember("leveledChanceNone", form.leveledChanceNone, allocator); doc.AddMember("leveledFlags", form.leveledFlags, allocator); AddFormRef(doc, allocator, "leveledChanceGlobal", form.leveledChanceGlobal);
+            if (form.kind == DynamicForms::FormKind::LeveledNPC) AddString(doc, allocator, "modelPath", form.modelPath);
+        }
+        if (form.kind == DynamicForms::FormKind::Action) doc.AddMember("actionIndex", form.actionIndex, allocator);
+        if (form.kind == DynamicForms::FormKind::MenuIcon) AddString(doc, allocator, "inventoryIcon", form.inventoryIcon);
+        if (form.kind == DynamicForms::FormKind::Eyes) { AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "eyesTexture", form.eyesTexture); doc.AddMember("eyesFlags", form.eyesFlags, allocator); doc.AddMember("recordFlags", form.recordFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::Note) { AddString(doc, allocator, "fullName", form.fullName); AddString(doc, allocator, "modelPath", form.modelPath); AddString(doc, allocator, "inventoryIcon", form.inventoryIcon); AddFormRef(doc, allocator, "pickupSound", form.pickupSound); AddFormRef(doc, allocator, "putdownSound", form.putdownSound); }
+        if (form.kind == DynamicForms::FormKind::AnimatedObject) { AddString(doc, allocator, "modelPath", form.modelPath); AddString(doc, allocator, "animatedUnloadEvent", form.animatedUnloadEvent); }
+        if (form.kind == DynamicForms::FormKind::LoadScreen) {
+            AddString(doc, allocator, "loadScreenText", form.loadScreenText); AddFormRef(doc, allocator, "loadScreenObject", form.loadScreenObject); doc.AddMember("loadScreenInitialScale", form.loadScreenInitialScale, allocator); AddNumberArray(doc, allocator, "loadScreenRotationConstraints", form.loadScreenRotationConstraints); AddNumberArray(doc, allocator, "loadScreenRotationOffsetConstraints", form.loadScreenRotationOffsetConstraints); AddNumberArray(doc, allocator, "loadScreenTranslationOffset", form.loadScreenTranslationOffset); AddString(doc, allocator, "loadScreenCameraPath", form.loadScreenCameraPath); doc.AddMember("recordFlags", form.recordFlags, allocator);
+            rapidjson::Value conditions(rapidjson::kArrayType); for (const auto& condition : form.conditions) WriteCondition(conditions, allocator, condition); doc.AddMember("conditions", conditions, allocator);
+        }
+        if (form.kind == DynamicForms::FormKind::ShaderParticleGeometry) { AddNumberArray(doc, allocator, "shaderParticleSettings", form.shaderParticleSettings); AddString(doc, allocator, "shaderParticleTexture", form.shaderParticleTexture); }
+        if (form.kind == DynamicForms::FormKind::AddonNode) { AddString(doc, allocator, "modelPath", form.modelPath); doc.AddMember("addonIndex", form.addonIndex, allocator); AddFormRef(doc, allocator, "addonSound", form.addonSound); doc.AddMember("addonMasterParticleCap", form.addonMasterParticleCap, allocator); doc.AddMember("addonFlags", form.addonFlags, allocator); }
+        if (form.kind == DynamicForms::FormKind::MagicEffect) {
+            AddString(doc, allocator, "fullName", form.fullName);
+            AddString(doc, allocator, "magicItemDescription", form.magicItemDescription);
+            AddFormRefArray(doc, allocator, "keywords", form.keywords);
+            AddFormRef(doc, allocator, "menuDisplayObject", form.menuDisplayObject);
+            doc.AddMember("magicEffectFlags", form.magicEffectFlags, allocator);
+            doc.AddMember("magicEffectBaseCost", form.magicEffectBaseCost, allocator);
+            AddFormRef(doc, allocator, "magicEffectAssociatedForm", form.magicEffectAssociatedForm);
+            doc.AddMember("magicEffectAssociatedSkill", form.magicEffectAssociatedSkill, allocator);
+            doc.AddMember("magicEffectResistVariable", form.magicEffectResistVariable, allocator);
+            AddFormRefArray(doc, allocator, "magicEffectCounterEffects", form.magicEffectCounterEffects);
+            AddFormRef(doc, allocator, "magicEffectLight", form.magicEffectLight);
+            doc.AddMember("magicEffectTaperWeight", form.magicEffectTaperWeight, allocator);
+            AddFormRef(doc, allocator, "magicEffectShader", form.magicEffectShader);
+            AddFormRef(doc, allocator, "magicEffectEnchantShader", form.magicEffectEnchantShader);
+            doc.AddMember("magicEffectMinimumSkill", form.magicEffectMinimumSkill, allocator);
+            doc.AddMember("magicEffectSpellmakingArea", form.magicEffectSpellmakingArea, allocator);
+            doc.AddMember("magicEffectSpellmakingChargeTime", form.magicEffectSpellmakingChargeTime, allocator);
+            doc.AddMember("magicEffectTaperCurve", form.magicEffectTaperCurve, allocator);
+            doc.AddMember("magicEffectTaperDuration", form.magicEffectTaperDuration, allocator);
+            doc.AddMember("magicEffectSecondAVWeight", form.magicEffectSecondAVWeight, allocator);
+            doc.AddMember("magicEffectArchetype", form.magicEffectArchetype, allocator);
+            doc.AddMember("magicEffectPrimaryAV", form.magicEffectPrimaryAV, allocator);
+            AddFormRef(doc, allocator, "magicEffectProjectile", form.magicEffectProjectile);
+            AddFormRef(doc, allocator, "magicEffectExplosion", form.magicEffectExplosion);
+            doc.AddMember("magicEffectCastingType", form.magicEffectCastingType, allocator);
+            doc.AddMember("magicEffectDelivery", form.magicEffectDelivery, allocator);
+            doc.AddMember("magicEffectSecondaryAV", form.magicEffectSecondaryAV, allocator);
+            AddFormRef(doc, allocator, "magicEffectCastingArt", form.magicEffectCastingArt);
+            AddFormRef(doc, allocator, "magicEffectHitEffectArt", form.magicEffectHitEffectArt);
+            AddFormRef(doc, allocator, "magicEffectImpactDataSet", form.magicEffectImpactDataSet);
+            doc.AddMember("magicEffectSkillUsageMult", form.magicEffectSkillUsageMult, allocator);
+            AddFormRef(doc, allocator, "magicEffectDualCastData", form.magicEffectDualCastData);
+            doc.AddMember("magicEffectDualCastScale", form.magicEffectDualCastScale, allocator);
+            AddFormRef(doc, allocator, "magicEffectEnchantEffectArt", form.magicEffectEnchantEffectArt);
+            AddFormRef(doc, allocator, "magicEffectHitVisuals", form.magicEffectHitVisuals);
+            AddFormRef(doc, allocator, "magicEffectEnchantVisuals", form.magicEffectEnchantVisuals);
+            AddFormRef(doc, allocator, "magicEffectEquipAbility", form.magicEffectEquipAbility);
+            AddFormRef(doc, allocator, "magicEffectImageSpaceMod", form.magicEffectImageSpaceMod);
+            AddFormRef(doc, allocator, "magicEffectPerk", form.magicEffectPerk);
+            doc.AddMember("magicEffectCastingSoundLevel", form.magicEffectCastingSoundLevel, allocator);
+            doc.AddMember("magicEffectAIScore", form.magicEffectAIScore, allocator);
+            doc.AddMember("magicEffectAIDelayTime", form.magicEffectAIDelayTime, allocator);
+            for (std::size_t i = 0; i < form.magicEffectSounds.size(); ++i) {
+                const auto key = std::format("magicEffectSound{}", i);
+                AddFormRef(doc, allocator, key.c_str(), form.magicEffectSounds[i]);
+            }
+            rapidjson::Value conditions(rapidjson::kArrayType);
+            for (const auto& condition : form.conditions) {
+                WriteCondition(conditions, allocator, condition);
+            }
+            doc.AddMember("conditions", conditions, allocator);
+        }
+        if ((form.kind == DynamicForms::FormKind::AlchemyItem ||
+                form.kind == DynamicForms::FormKind::Ingredient ||
+                form.kind == DynamicForms::FormKind::Spell ||
+                form.kind == DynamicForms::FormKind::Enchantment ||
+                form.kind == DynamicForms::FormKind::Scroll) &&
+            form.magicEffectsOverride) {
             doc.AddMember("magicEffectsOverride", form.magicEffectsOverride, allocator);
             AddMagicEffectArray(doc, allocator, "magicEffects", form.magicEffects);
         }
@@ -4810,14 +6509,26 @@ namespace Manager {
     void ApplyAllForms() {
         bool changed = false;
         bool allApplied = true;
+
+        // Create/register every dynamic form first so references between forms in the
+        // same package do not depend on database or import ordering.
         for (auto& form : forms) {
             const auto oldLocalId = form.localId;
-            if (ResolveDPFForm(form)) {
+            if (ResolveDPFFormObject(form, false)) {
                 if (form.localId != oldLocalId) {
                     changed = true;
                 }
             } else {
                 allApplied = false;
+            }
+        }
+
+        if (allApplied) {
+            for (auto& form : forms) {
+                auto* runtimeForm = ResolveDPFFormObject(form, false);
+                if (!runtimeForm || !ConfigureForm(runtimeForm, form)) {
+                    allApplied = false;
+                }
             }
         }
 

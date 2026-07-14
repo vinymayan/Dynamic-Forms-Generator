@@ -21,6 +21,7 @@
 #include <rapidjson/istreamwrapper.h>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -116,8 +117,8 @@ namespace {
     const ImGui::ImVec4 INHERITED_COLOR{ 0.6F, 0.78F, 1.0F, 1.0F };
     const ImGui::ImVec4 OVERRIDE_COLOR{ 1.0F, 0.62F, 0.22F, 1.0F };
     const ImGui::ImVec4 LOCAL_COLOR{ 0.55F, 0.9F, 0.65F, 1.0F };
-    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
-    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC" };
+    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node" };
+    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node" };
     constexpr std::array FORM_KIND_TREE_ORDER{
         DynamicForms::FormKind::Global,
         DynamicForms::FormKind::Keyword,
@@ -133,9 +134,14 @@ namespace {
         DynamicForms::FormKind::SoulGem,
         DynamicForms::FormKind::MaterialType,
         DynamicForms::FormKind::Ammo,
+        DynamicForms::FormKind::Projectile,
         DynamicForms::FormKind::Weapon,
         DynamicForms::FormKind::AlchemyItem,
         DynamicForms::FormKind::Ingredient,
+        DynamicForms::FormKind::Spell,
+        DynamicForms::FormKind::Enchantment,
+        DynamicForms::FormKind::Scroll,
+        DynamicForms::FormKind::MagicEffect,
         DynamicForms::FormKind::Color,
         DynamicForms::FormKind::ArtObject,
         DynamicForms::FormKind::Perk,
@@ -145,7 +151,52 @@ namespace {
         DynamicForms::FormKind::Explosion,
         DynamicForms::FormKind::Activator,
         DynamicForms::FormKind::EffectShader,
-        DynamicForms::FormKind::NPC
+        DynamicForms::FormKind::NPC,
+        DynamicForms::FormKind::TextureSet, DynamicForms::FormKind::Hazard, DynamicForms::FormKind::ImpactData,
+        DynamicForms::FormKind::ReferenceEffect, DynamicForms::FormKind::DualCastData, DynamicForms::FormKind::Static,
+        DynamicForms::FormKind::MovableStatic, DynamicForms::FormKind::Door, DynamicForms::FormKind::CombatStyle,
+        DynamicForms::FormKind::SoundCategory, DynamicForms::FormKind::Class, DynamicForms::FormKind::Flora,
+        DynamicForms::FormKind::Tree,
+        DynamicForms::FormKind::ConstructibleObject,
+        DynamicForms::FormKind::Container,
+        DynamicForms::FormKind::ImpactDataSet, DynamicForms::FormKind::CollisionLayer, DynamicForms::FormKind::Footstep,
+        DynamicForms::FormKind::FootstepSet, DynamicForms::FormKind::ReverbParameters, DynamicForms::FormKind::AcousticSpace,
+        DynamicForms::FormKind::Apparatus, DynamicForms::FormKind::StaticCollection, DynamicForms::FormKind::Grass,
+        DynamicForms::FormKind::IdleMarker, DynamicForms::FormKind::EncounterZone, DynamicForms::FormKind::Relationship,
+        DynamicForms::FormKind::AssociationType, DynamicForms::FormKind::MovementType, DynamicForms::FormKind::WordOfPower,
+        DynamicForms::FormKind::Water, DynamicForms::FormKind::ImageSpace, DynamicForms::FormKind::LightingTemplate,
+        DynamicForms::FormKind::Shout, DynamicForms::FormKind::LeveledItem, DynamicForms::FormKind::LeveledNPC, DynamicForms::FormKind::LeveledSpell,
+        DynamicForms::FormKind::LocationRefType, DynamicForms::FormKind::Action, DynamicForms::FormKind::MenuIcon,
+        DynamicForms::FormKind::Eyes, DynamicForms::FormKind::Note, DynamicForms::FormKind::AnimatedObject,
+        DynamicForms::FormKind::LoadScreen, DynamicForms::FormKind::ShaderParticleGeometry, DynamicForms::FormKind::AddonNode
+    };
+    constexpr std::array FILTER_KIND_ORDER{
+        DynamicForms::FormKind::Global, DynamicForms::FormKind::Keyword, DynamicForms::FormKind::FormList,
+        DynamicForms::FormKind::EquipSlot, DynamicForms::FormKind::VoiceType, DynamicForms::FormKind::Outfit,
+        DynamicForms::FormKind::ArmorType, DynamicForms::FormKind::Armor, DynamicForms::FormKind::Book,
+        DynamicForms::FormKind::Misc, DynamicForms::FormKind::Key, DynamicForms::FormKind::SoulGem,
+        DynamicForms::FormKind::MaterialType, DynamicForms::FormKind::Ammo, DynamicForms::FormKind::Weapon,
+        DynamicForms::FormKind::AlchemyItem, DynamicForms::FormKind::Ingredient, DynamicForms::FormKind::Spell,
+        DynamicForms::FormKind::Color, DynamicForms::FormKind::ArtObject, DynamicForms::FormKind::Perk,
+        DynamicForms::FormKind::HeadPart, DynamicForms::FormKind::SoundDescriptor, DynamicForms::FormKind::Light,
+        DynamicForms::FormKind::Explosion, DynamicForms::FormKind::Activator, DynamicForms::FormKind::EffectShader,
+        DynamicForms::FormKind::NPC, DynamicForms::FormKind::MagicEffect, DynamicForms::FormKind::Enchantment,
+        DynamicForms::FormKind::Scroll, DynamicForms::FormKind::Projectile, DynamicForms::FormKind::TextureSet,
+        DynamicForms::FormKind::Hazard, DynamicForms::FormKind::ImpactData, DynamicForms::FormKind::ReferenceEffect,
+        DynamicForms::FormKind::DualCastData, DynamicForms::FormKind::Static, DynamicForms::FormKind::MovableStatic,
+        DynamicForms::FormKind::Door, DynamicForms::FormKind::CombatStyle, DynamicForms::FormKind::SoundCategory,
+        DynamicForms::FormKind::Class, DynamicForms::FormKind::Flora, DynamicForms::FormKind::Tree,
+        DynamicForms::FormKind::ConstructibleObject, DynamicForms::FormKind::Container,
+        DynamicForms::FormKind::ImpactDataSet, DynamicForms::FormKind::CollisionLayer, DynamicForms::FormKind::Footstep,
+        DynamicForms::FormKind::FootstepSet, DynamicForms::FormKind::ReverbParameters, DynamicForms::FormKind::AcousticSpace,
+        DynamicForms::FormKind::Apparatus, DynamicForms::FormKind::StaticCollection, DynamicForms::FormKind::Grass,
+        DynamicForms::FormKind::IdleMarker, DynamicForms::FormKind::EncounterZone, DynamicForms::FormKind::Relationship,
+        DynamicForms::FormKind::AssociationType, DynamicForms::FormKind::MovementType, DynamicForms::FormKind::WordOfPower,
+        DynamicForms::FormKind::Water, DynamicForms::FormKind::ImageSpace, DynamicForms::FormKind::LightingTemplate,
+        DynamicForms::FormKind::Shout, DynamicForms::FormKind::LeveledItem, DynamicForms::FormKind::LeveledNPC, DynamicForms::FormKind::LeveledSpell,
+        DynamicForms::FormKind::LocationRefType, DynamicForms::FormKind::Action, DynamicForms::FormKind::MenuIcon,
+        DynamicForms::FormKind::Eyes, DynamicForms::FormKind::Note, DynamicForms::FormKind::AnimatedObject,
+        DynamicForms::FormKind::LoadScreen, DynamicForms::FormKind::ShaderParticleGeometry, DynamicForms::FormKind::AddonNode
     };
     constexpr std::array GLOBAL_TYPE_ITEMS{ "short", "long", "float" };
     constexpr std::array ART_TYPE_ITEMS{ "MagicCasting", "MagicHitEffect", "MagicEnchantEffect" };
@@ -170,6 +221,31 @@ namespace {
     constexpr std::array SOUL_LEVEL_ITEMS{ "None", "Petty", "Lesser", "Common", "Greater", "Grand" };
     constexpr std::array BOOK_TYPE_ITEMS{ "Book/Tome", "Note/Scroll" };
     constexpr std::array WEAPON_TYPE_ITEMS{ "Hand to Hand", "One-Hand Sword", "One-Hand Dagger", "One-Hand Axe", "One-Hand Mace", "Two-Hand Sword", "Two-Hand Axe", "Bow", "Staff", "Crossbow" };
+    constexpr std::array SPELL_TYPE_ITEMS{ "Spell", "Disease", "Power", "Lesser Power", "Ability", "Poison", "Enchantment", "Potion", "Ingredient", "Leveled Spell", "Addiction", "Voice Power", "Staff Enchantment", "Scroll" };
+    constexpr std::array SPELL_CASTING_TYPE_ITEMS{ "Constant Effect", "Fire and Forget", "Concentration", "Scroll" };
+    constexpr std::array SPELL_DELIVERY_ITEMS{ "Self", "Touch", "Aimed", "Target Actor", "Target Location", "None" };
+    constexpr std::array ENCHANTMENT_TYPE_ITEMS{ "Enchantment", "Staff Enchantment" };
+    constexpr std::array<std::uint32_t, ENCHANTMENT_TYPE_ITEMS.size()> ENCHANTMENT_TYPE_IDS{ 6u, 12u };
+    constexpr std::array MAGIC_EFFECT_ARCHETYPE_ITEMS{
+        "None", "Value Modifier", "Script", "Dispel", "Cure Disease", "Absorb", "Dual Value Modifier", "Calm",
+        "Demoralize", "Frenzy", "Disarm", "Command Summoned", "Invisibility", "Light", "Darkness", "Night Eye",
+        "Lock", "Open", "Bound Weapon", "Summon Creature", "Detect Life", "Telekinesis", "Paralysis", "Reanimate",
+        "Soul Trap", "Turn Undead", "Guide", "Werewolf Feed", "Cure Paralysis", "Cure Addiction", "Cure Poison",
+        "Concussion", "Value and Parts", "Accumulate Magnitude", "Stagger", "Peak Value Modifier", "Cloak", "Werewolf",
+        "Slow Time", "Rally", "Enhance Weapon", "Spawn Hazard", "Etherealize", "Banish", "Spawn Scripted Ref",
+        "Disguise", "Grab Actor", "Vampire Lord"
+    };
+    constexpr std::array SOUND_LEVEL_ITEMS{ "Loud", "Normal", "Silent", "Very Loud", "Quiet" };
+    constexpr std::array MAGIC_EFFECT_SOUND_ITEMS{ "Draw/Sheathe", "Charge", "Ready Loop", "Release", "Cast Loop", "Hit" };
+    constexpr std::array PROJECTILE_TYPE_ITEMS{ "Missile", "Grenade", "Beam", "Flamethrower", "Cone", "Barrier", "Arrow" };
+    constexpr std::array TEXTURE_SLOT_ITEMS{ "Diffuse", "Normal/Gloss", "Environment Mask/Subsurface", "Glow/Detail", "Height", "Environment", "Multilayer", "Backlight Specular" };
+    constexpr std::array IMPACT_ORIENTATION_ITEMS{ "Surface Normal", "Projectile Vector", "Projectile Reflection" };
+    constexpr std::array IMPACT_RESULT_ITEMS{ "Default", "Destroy", "Bounce", "Impale", "Stick" };
+    constexpr std::array TREE_TYPE_ITEMS{ "Short and Thin", "Short and Thick", "Tall and Thin", "Tall and Thick" };
+    constexpr std::array COMBAT_GENERAL_ITEMS{ "Offensive", "Defensive", "Group Offensive", "Melee Score", "Magic Score", "Ranged Score", "Shout Score", "Unarmed Score", "Staff Score", "Avoid Threat Chance" };
+    constexpr std::array COMBAT_MELEE_ITEMS{ "Attack Incapacitated", "Power Attack Incapacitated", "Power Attack Blocking", "Bash", "Bash Recoil", "Bash Attack", "Bash Power Attack", "Special Attack" };
+    constexpr std::array COMBAT_CLOSE_ITEMS{ "Circle", "Fallback", "Flank Distance", "Stalk Time" };
+    constexpr std::array COMBAT_FLIGHT_ITEMS{ "Hover Chance", "Dive Bomb Chance", "Ground Attack Chance", "Hover Time", "Ground Attack Time", "Perch Attack Chance", "Perch Attack Time", "Flying Attack Chance" };
     constexpr std::array ACTOR_VALUE_ITEMS{ "One-Handed", "Two-Handed", "Archery", "Block", "Smithing", "Heavy Armor", "Light Armor", "Pickpocket", "Lockpicking", "Sneak", "Alchemy", "Speech", "Alteration", "Conjuration", "Destruction", "Illusion", "Restoration", "Enchanting", "Health", "Magicka", "Stamina", "Heal Rate", "Magicka Rate", "Stamina Rate", "None" };
     constexpr std::array<std::uint32_t, ACTOR_VALUE_ITEMS.size()> ACTOR_VALUE_IDS{
         6u, 7u, 8u, 9u, 10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u,
@@ -194,6 +270,52 @@ namespace {
         PickerType{ "Weapon", "Weapon" },
         PickerType{ "AlchemyItem", "Alchemy Item" },
         PickerType{ "Ingredient", "Ingredient" },
+        PickerType{ "Spell", "Spell" },
+        PickerType{ "Enchantment", "Enchantment" },
+        PickerType{ "Scroll", "Scroll" },
+        PickerType{ "Projectile", "Projectile" },
+        PickerType{ "TextureSet", "Texture Set" },
+        PickerType{ "Hazard", "Hazard" },
+        PickerType{ "ImpactData", "Impact Data" },
+        PickerType{ "ImpactDataSet", "Impact Data Set" },
+        PickerType{ "ReferenceEffect", "Reference Effect" },
+        PickerType{ "DualCastData", "Dual Cast Data" },
+        PickerType{ "Static", "Static" },
+        PickerType{ "MovableStatic", "Movable Static" },
+        PickerType{ "Door", "Door" },
+        PickerType{ "CombatStyle", "Combat Style" },
+        PickerType{ "SoundCategory", "Sound Category" },
+        PickerType{ "Class", "Class" },
+        PickerType{ "Flora", "Flora" },
+        PickerType{ "Tree", "Tree" },
+        PickerType{ "ConstructibleObject", "Constructible Object" },
+        PickerType{ "Container", "Container" },
+        PickerType{ "Footstep", "Footstep" },
+        PickerType{ "FootstepSet", "Footstep Set" },
+        PickerType{ "ReverbParameters", "Reverb Parameters" },
+        PickerType{ "AcousticSpace", "Acoustic Space" },
+        PickerType{ "AssociationType", "Association Type" },
+        PickerType{ "ImageSpace", "Image Space" },
+        PickerType{ "Region", "Region" },
+        PickerType{ "Location", "Location" },
+        PickerType{ "Idle", "Idle" },
+        PickerType{ "Shout", "Shout" },
+        PickerType{ "WordOfPower", "Word of Power" },
+        PickerType{ "LeveledItem", "Leveled Item" },
+        PickerType{ "LeveledNPC", "Leveled NPC" },
+        PickerType{ "LeveledSpell", "Leveled Spell" },
+        PickerType{ "LocationRefType", "Location Ref Type" },
+        PickerType{ "Action", "Action" },
+        PickerType{ "MenuIcon", "Menu Icon" },
+        PickerType{ "Eyes", "Eyes" },
+        PickerType{ "Note", "Note" },
+        PickerType{ "AnimatedObject", "Animated Object" },
+        PickerType{ "LoadScreen", "Load Screen" },
+        PickerType{ "ShaderParticleGeometry", "Shader Particle Geometry" },
+        PickerType{ "AddonNode", "Addon Node" },
+        PickerType{ "MaterialObject", "Material Object" },
+        PickerType{ "CollisionLayer", "Collision Layer" },
+        PickerType{ "MagicEffect", "Magic Effect" },
         PickerType{ "Color", "Color" },
         PickerType{ "ArtObject", "Art Object" },
         PickerType{ "Perk", "Perk" },
@@ -255,6 +377,9 @@ namespace {
     }
 
     DynamicForms::FormKind SelectedFormKind() {
+        if (selectedFormKind >= 0 && selectedFormKind < static_cast<int>(FORM_KIND_ITEMS.size())) {
+            return static_cast<DynamicForms::FormKind>(selectedFormKind);
+        }
         switch (selectedFormKind) {
         case 1:
             return DynamicForms::FormKind::Keyword;
@@ -289,25 +414,50 @@ namespace {
         case 16:
             return DynamicForms::FormKind::Ingredient;
         case 17:
-            return DynamicForms::FormKind::Color;
+            return DynamicForms::FormKind::Spell;
         case 18:
-            return DynamicForms::FormKind::ArtObject;
+            return DynamicForms::FormKind::Color;
         case 19:
-            return DynamicForms::FormKind::Perk;
+            return DynamicForms::FormKind::ArtObject;
         case 20:
-            return DynamicForms::FormKind::HeadPart;
+            return DynamicForms::FormKind::Perk;
         case 21:
-            return DynamicForms::FormKind::SoundDescriptor;
+            return DynamicForms::FormKind::HeadPart;
         case 22:
-            return DynamicForms::FormKind::Light;
+            return DynamicForms::FormKind::SoundDescriptor;
         case 23:
-            return DynamicForms::FormKind::Explosion;
+            return DynamicForms::FormKind::Light;
         case 24:
-            return DynamicForms::FormKind::Activator;
+            return DynamicForms::FormKind::Explosion;
         case 25:
-            return DynamicForms::FormKind::EffectShader;
+            return DynamicForms::FormKind::Activator;
         case 26:
+            return DynamicForms::FormKind::EffectShader;
+        case 27:
             return DynamicForms::FormKind::NPC;
+        case 28:
+            return DynamicForms::FormKind::MagicEffect;
+        case 29:
+            return DynamicForms::FormKind::Enchantment;
+        case 30:
+            return DynamicForms::FormKind::Scroll;
+        case 31:
+            return DynamicForms::FormKind::Projectile;
+        case 32: return DynamicForms::FormKind::TextureSet;
+        case 33: return DynamicForms::FormKind::Hazard;
+        case 34: return DynamicForms::FormKind::ImpactData;
+        case 35: return DynamicForms::FormKind::ReferenceEffect;
+        case 36: return DynamicForms::FormKind::DualCastData;
+        case 37: return DynamicForms::FormKind::Static;
+        case 38: return DynamicForms::FormKind::MovableStatic;
+        case 39: return DynamicForms::FormKind::Door;
+        case 40: return DynamicForms::FormKind::CombatStyle;
+        case 41: return DynamicForms::FormKind::SoundCategory;
+        case 42: return DynamicForms::FormKind::Class;
+        case 43: return DynamicForms::FormKind::Flora;
+        case 44: return DynamicForms::FormKind::Tree;
+        case 45: return DynamicForms::FormKind::ConstructibleObject;
+        case 46: return DynamicForms::FormKind::Container;
         case 0:
         default:
             return DynamicForms::FormKind::Global;
@@ -411,6 +561,62 @@ namespace {
             return "Alchemy Item";
         case DynamicForms::FormKind::Ingredient:
             return "Ingredient";
+        case DynamicForms::FormKind::Spell:
+            return "Spell";
+        case DynamicForms::FormKind::MagicEffect:
+            return "Magic Effect";
+        case DynamicForms::FormKind::Enchantment:
+            return "Enchantment";
+        case DynamicForms::FormKind::Scroll:
+            return "Scroll";
+        case DynamicForms::FormKind::Projectile:
+            return "Projectile";
+        case DynamicForms::FormKind::TextureSet: return "Texture Set";
+        case DynamicForms::FormKind::Hazard: return "Hazard";
+        case DynamicForms::FormKind::ImpactData: return "Impact Data";
+        case DynamicForms::FormKind::ReferenceEffect: return "Reference Effect";
+        case DynamicForms::FormKind::DualCastData: return "Dual Cast Data";
+        case DynamicForms::FormKind::Static: return "Static";
+        case DynamicForms::FormKind::MovableStatic: return "Movable Static";
+        case DynamicForms::FormKind::Door: return "Door";
+        case DynamicForms::FormKind::CombatStyle: return "Combat Style";
+        case DynamicForms::FormKind::SoundCategory: return "Sound Category";
+        case DynamicForms::FormKind::Class: return "Class";
+        case DynamicForms::FormKind::Flora: return "Flora";
+        case DynamicForms::FormKind::Tree: return "Tree";
+        case DynamicForms::FormKind::ConstructibleObject: return "Constructible Object";
+        case DynamicForms::FormKind::Container: return "Container";
+        case DynamicForms::FormKind::ImpactDataSet: return "Impact Data Set";
+        case DynamicForms::FormKind::CollisionLayer: return "Collision Layer";
+        case DynamicForms::FormKind::Footstep: return "Footstep";
+        case DynamicForms::FormKind::FootstepSet: return "Footstep Set";
+        case DynamicForms::FormKind::ReverbParameters: return "Reverb Parameters";
+        case DynamicForms::FormKind::AcousticSpace: return "Acoustic Space";
+        case DynamicForms::FormKind::Apparatus: return "Apparatus";
+        case DynamicForms::FormKind::StaticCollection: return "Static Collection";
+        case DynamicForms::FormKind::Grass: return "Grass";
+        case DynamicForms::FormKind::IdleMarker: return "Idle Marker";
+        case DynamicForms::FormKind::EncounterZone: return "Encounter Zone";
+        case DynamicForms::FormKind::Relationship: return "Relationship";
+        case DynamicForms::FormKind::AssociationType: return "Association Type";
+        case DynamicForms::FormKind::MovementType: return "Movement Type";
+        case DynamicForms::FormKind::WordOfPower: return "Word of Power";
+        case DynamicForms::FormKind::Water: return "Water";
+        case DynamicForms::FormKind::ImageSpace: return "Image Space";
+        case DynamicForms::FormKind::LightingTemplate: return "Lighting Template";
+        case DynamicForms::FormKind::Shout: return "Shout";
+        case DynamicForms::FormKind::LeveledItem: return "Leveled Item";
+        case DynamicForms::FormKind::LeveledNPC: return "Leveled NPC";
+        case DynamicForms::FormKind::LeveledSpell: return "Leveled Spell";
+        case DynamicForms::FormKind::LocationRefType: return "Location Ref Type";
+        case DynamicForms::FormKind::Action: return "Action";
+        case DynamicForms::FormKind::MenuIcon: return "Menu Icon";
+        case DynamicForms::FormKind::Eyes: return "Eyes";
+        case DynamicForms::FormKind::Note: return "Note";
+        case DynamicForms::FormKind::AnimatedObject: return "Animated Object";
+        case DynamicForms::FormKind::LoadScreen: return "Load Screen";
+        case DynamicForms::FormKind::ShaderParticleGeometry: return "Shader Particle Geometry";
+        case DynamicForms::FormKind::AddonNode: return "Addon Node";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -680,10 +886,10 @@ namespace {
     }
 
     std::optional<DynamicForms::FormKind> FormKindFromFilterIndex(const int kindFilter) {
-        if (kindFilter <= 0 || kindFilter > static_cast<int>(FORM_KIND_TREE_ORDER.size())) {
+        if (kindFilter <= 0 || kindFilter > static_cast<int>(FILTER_KIND_ORDER.size())) {
             return std::nullopt;
         }
-        return FORM_KIND_TREE_ORDER[static_cast<std::size_t>(kindFilter - 1)];
+        return FILTER_KIND_ORDER[static_cast<std::size_t>(kindFilter - 1)];
     }
 
     bool MatchesFilterValues(const DynamicForms::DynamicForm& form, const int kindFilter, const std::string_view editorIdFilter) {
@@ -718,7 +924,10 @@ namespace {
             kind == DynamicForms::FormKind::Weapon ||
             kind == DynamicForms::FormKind::AlchemyItem ||
             kind == DynamicForms::FormKind::Ingredient ||
-            kind == DynamicForms::FormKind::Light;
+            kind == DynamicForms::FormKind::Scroll ||
+            kind == DynamicForms::FormKind::Light ||
+            kind == DynamicForms::FormKind::Apparatus ||
+            kind == DynamicForms::FormKind::Note;
     }
 
     bool CanSpawnInWorld(const DynamicForms::FormKind kind) {
@@ -731,9 +940,22 @@ namespace {
             kind == DynamicForms::FormKind::Weapon ||
             kind == DynamicForms::FormKind::AlchemyItem ||
             kind == DynamicForms::FormKind::Ingredient ||
+            kind == DynamicForms::FormKind::Scroll ||
             kind == DynamicForms::FormKind::Light ||
             kind == DynamicForms::FormKind::Explosion ||
             kind == DynamicForms::FormKind::Activator ||
+            kind == DynamicForms::FormKind::Hazard ||
+            kind == DynamicForms::FormKind::Static ||
+            kind == DynamicForms::FormKind::MovableStatic ||
+            kind == DynamicForms::FormKind::Door ||
+            kind == DynamicForms::FormKind::Flora ||
+            kind == DynamicForms::FormKind::Tree ||
+            kind == DynamicForms::FormKind::Container ||
+            kind == DynamicForms::FormKind::Apparatus ||
+            kind == DynamicForms::FormKind::StaticCollection ||
+            kind == DynamicForms::FormKind::Grass ||
+            kind == DynamicForms::FormKind::IdleMarker ||
+            kind == DynamicForms::FormKind::Note ||
             kind == DynamicForms::FormKind::NPC;
     }
 
@@ -1132,6 +1354,15 @@ namespace {
     bool RenderWeaponEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderAlchemyItemEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderIngredientEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderSpellEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderEnchantmentEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderScrollEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderProjectileEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderReadyFormEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderConstructibleObjectEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderContainerEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderAdditionalReadyEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool RenderMagicEffectEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderColorEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderArtObjectEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderPerkEditor(std::size_t index, DynamicForms::DynamicForm& form);
@@ -1252,6 +1483,30 @@ namespace {
                 RenderAlchemyItemEditor(index, form);
             } else if (form.kind == DynamicForms::FormKind::Ingredient) {
                 RenderIngredientEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Spell) {
+                RenderSpellEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Enchantment) {
+                RenderEnchantmentEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Scroll) {
+                RenderScrollEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Projectile) {
+                RenderProjectileEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::TextureSet ||
+                form.kind == DynamicForms::FormKind::Hazard || form.kind == DynamicForms::FormKind::ImpactData ||
+                form.kind == DynamicForms::FormKind::ReferenceEffect || form.kind == DynamicForms::FormKind::DualCastData ||
+                form.kind == DynamicForms::FormKind::Static || form.kind == DynamicForms::FormKind::MovableStatic ||
+                form.kind == DynamicForms::FormKind::Door || form.kind == DynamicForms::FormKind::CombatStyle ||
+                form.kind == DynamicForms::FormKind::SoundCategory || form.kind == DynamicForms::FormKind::Class ||
+                form.kind == DynamicForms::FormKind::Flora || form.kind == DynamicForms::FormKind::Tree) {
+                RenderReadyFormEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::ConstructibleObject) {
+                RenderConstructibleObjectEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::Container) {
+                RenderContainerEditor(index, form);
+            } else if (form.kind >= DynamicForms::FormKind::ImpactDataSet) {
+                RenderAdditionalReadyEditor(index, form);
+            } else if (form.kind == DynamicForms::FormKind::MagicEffect) {
+                RenderMagicEffectEditor(index, form);
             } else if (form.kind == DynamicForms::FormKind::Color) {
                 RenderColorEditor(index, form);
             } else if (form.kind == DynamicForms::FormKind::ArtObject) {
@@ -1428,7 +1683,8 @@ namespace {
                 form.kind == DynamicForms::FormKind::SoulGem ||
                 form.kind == DynamicForms::FormKind::Weapon ||
                 form.kind == DynamicForms::FormKind::AlchemyItem ||
-                form.kind == DynamicForms::FormKind::Ingredient)
+                form.kind == DynamicForms::FormKind::Ingredient ||
+                form.kind == DynamicForms::FormKind::Container)
             {
                 form.itemWeight = 1.0F;
             }
@@ -1449,6 +1705,56 @@ namespace {
                 form.weaponType = 1;
                 form.weaponSkill = 6;
                 form.weaponResist = 24;
+            }
+            if (form.kind == DynamicForms::FormKind::Spell) {
+                form.spellType = 0;
+                form.spellCastingType = 1;
+                form.spellDelivery = 0;
+                form.magicEffectsOverride = true;
+            }
+            if (form.kind == DynamicForms::FormKind::MagicEffect) {
+                form.magicEffectArchetype = 0;
+                form.magicEffectCastingType = 1;
+                form.magicEffectDelivery = 0;
+                form.magicEffectCastingSoundLevel = 1;
+                form.magicEffectDualCastScale = 1.0F;
+            }
+            if (form.kind == DynamicForms::FormKind::Enchantment) {
+                form.enchantmentSpellType = 6;
+                form.enchantmentCastingType = 1;
+                form.enchantmentDelivery = 0;
+                form.magicEffectsOverride = true;
+            }
+            if (form.kind == DynamicForms::FormKind::Scroll) {
+                form.itemWeight = 0.5F;
+                form.scrollDelivery = 0;
+                form.magicEffectsOverride = true;
+            }
+            if (form.kind == DynamicForms::FormKind::Projectile) {
+                form.projectileTypes = 1;
+                form.projectileSpeed = 1000.0F;
+                form.projectileRange = 10000.0F;
+                form.projectileSoundLevel = 1;
+            }
+            if (form.kind == DynamicForms::FormKind::ShaderParticleGeometry) {
+                form.shaderParticleSettings[7] = 1.0F;
+                form.shaderParticleSettings[8] = 1.0F;
+            }
+            if (form.kind == DynamicForms::FormKind::TextureSet) {
+                form.textureSetPaths[0] = "textures\\";
+            }
+            if (form.kind == DynamicForms::FormKind::ImpactData) {
+                form.impactSoundLevel = 1;
+            }
+            if (form.kind == DynamicForms::FormKind::CombatStyle) {
+                form.combatGeneral.fill(1.0F);
+                form.combatMelee.fill(1.0F);
+                form.combatCloseRange.fill(1.0F);
+                form.combatLongRangeStrafe = 1.0F;
+                form.combatFlight.fill(1.0F);
+            }
+            if (form.kind == DynamicForms::FormKind::Flora || form.kind == DynamicForms::FormKind::Tree) {
+                form.produceChance.fill(100);
             }
             if (form.kind == DynamicForms::FormKind::SoulGem) {
                 form.soulCapacity = 5;
@@ -2173,6 +2479,35 @@ namespace {
         return false;
     }
 
+    bool DrawFullActorValueCombo(const char* label, std::int32_t& actorValue) {
+        const auto preview = actorValue < 0 ? std::string("None") : std::string(RE::ActorValueToString(static_cast<RE::ActorValue>(actorValue)));
+        bool changed = false;
+        SetAvailableComboWidth(300.0F);
+        SetFixedComboPopupWidth(300.0F);
+        if (ImGui::BeginCombo(label, preview.c_str())) {
+            if (ImGui::Selectable("None", actorValue < 0)) {
+                actorValue = -1;
+                changed = true;
+            }
+            const auto total = static_cast<int>(RE::ActorValue::kTotal);
+            auto* clipper = ImGui::ImGuiListClipperManager::Create();
+            ImGui::ImGuiListClipperManager::Begin(clipper, total, 0.0F);
+            while (ImGui::ImGuiListClipperManager::Step(clipper)) {
+                for (int i = clipper->DisplayStart; i < clipper->DisplayEnd; ++i) {
+                    const auto name = RE::ActorValueToString(static_cast<RE::ActorValue>(i));
+                    const auto item = std::format("{} ({})", name, i);
+                    if (ImGui::Selectable(item.c_str(), actorValue == i)) {
+                        actorValue = i;
+                        changed = true;
+                    }
+                }
+            }
+            ImGui::ImGuiListClipperManager::Destroy(clipper);
+            ImGui::EndCombo();
+        }
+        return changed;
+    }
+
     bool RenderWeaponEditor(std::size_t index, DynamicForms::DynamicForm& form) {
         bool changed = false;
         auto edited = form;
@@ -2284,6 +2619,8 @@ namespace {
         return CommitEditedForm(index, form, edited, changed);
     }
 
+    bool DrawPerkConditions(std::vector<DynamicForms::PerkCondition>& conditions);
+
     bool DrawMagicEffectsEditor(DynamicForms::DynamicForm& edited) {
         bool changed = false;
         if (ImGui::Checkbox(Configuration::GetLoc("menu.use_custom_magic_effects", "Use custom magic effects"), &edited.magicEffectsOverride)) {
@@ -2321,6 +2658,9 @@ namespace {
                 if (ImGui::InputFloat(Configuration::GetLoc("menu.cost", "Cost"), &entry.cost)) {
                     changed = true;
                 }
+                ImGui::Separator();
+                ImGui::Text("%s", Configuration::GetLoc("menu.effect_conditions", "Effect conditions"));
+                changed |= DrawPerkConditions(entry.conditions);
                 if (ImGui::SmallButton(Configuration::GetLoc("menu.remove", "Remove"))) {
                     edited.magicEffects.erase(edited.magicEffects.begin() + static_cast<std::ptrdiff_t>(i));
                     changed = true;
@@ -2393,6 +2733,829 @@ namespace {
             changed = true;
         }
         changed |= DrawMagicEffectsEditor(edited);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderSpellEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
+        changed |= InputString(Configuration::GetLoc("menu.description", "Description"), edited.description, 520.0F);
+        changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.keywords", "Keywords"), "Keyword", edited.keywords);
+
+        int spellType = static_cast<int>(std::min<std::uint32_t>(edited.spellType, static_cast<std::uint32_t>(SPELL_TYPE_ITEMS.size() - 1)));
+        SetStableComboWidth(SPELL_TYPE_ITEMS, 220.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.spell_type", "Spell type"), &spellType, SPELL_TYPE_ITEMS.data(), static_cast<int>(SPELL_TYPE_ITEMS.size()))) {
+            edited.spellType = static_cast<std::uint32_t>(spellType);
+            changed = true;
+        }
+
+        int castingType = static_cast<int>(std::min<std::uint32_t>(edited.spellCastingType, static_cast<std::uint32_t>(SPELL_CASTING_TYPE_ITEMS.size() - 1)));
+        SetStableComboWidth(SPELL_CASTING_TYPE_ITEMS, 220.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.casting_type", "Casting type"), &castingType, SPELL_CASTING_TYPE_ITEMS.data(), static_cast<int>(SPELL_CASTING_TYPE_ITEMS.size()))) {
+            edited.spellCastingType = static_cast<std::uint32_t>(castingType);
+            changed = true;
+        }
+
+        int delivery = static_cast<int>(std::min<std::uint32_t>(edited.spellDelivery, static_cast<std::uint32_t>(SPELL_DELIVERY_ITEMS.size() - 1)));
+        SetStableComboWidth(SPELL_DELIVERY_ITEMS, 220.0F);
+        if (ImGui::Combo(Configuration::GetLoc("menu.delivery", "Delivery"), &delivery, SPELL_DELIVERY_ITEMS.data(), static_cast<int>(SPELL_DELIVERY_ITEMS.size()))) {
+            edited.spellDelivery = static_cast<std::uint32_t>(delivery);
+            changed = true;
+        }
+
+        ImGui::TextUnformatted(Configuration::GetLoc("menu.spell_flags", "Spell flags"));
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_cost_override", "Cost Override"), edited.spellFlags, 1u << 0);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_food_item", "Food Item"), edited.spellFlags, 1u << 1);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_extend_duration", "Extend Duration"), edited.spellFlags, 1u << 3);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_pc_start_spell", "PC Start Spell"), edited.spellFlags, 1u << 17);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_instant_cast", "Instant Cast"), edited.spellFlags, 1u << 18);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_los", "Ignore LOS"), edited.spellFlags, 1u << 19);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_resistance", "Ignore Resistance"), edited.spellFlags, 1u << 20);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_absorb", "No Absorb"), edited.spellFlags, 1u << 21);
+        changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_dual_cast_mods", "No Dual Cast Mods"), edited.spellFlags, 1u << 23);
+
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputInt(Configuration::GetLoc("menu.cost_override", "Cost override"), &edited.spellCostOverride)) {
+            changed = true;
+        }
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.charge_time", "Charge time"), &edited.spellChargeTime)) {
+            changed = true;
+        }
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.cast_duration", "Cast duration"), &edited.spellCastDuration)) {
+            changed = true;
+        }
+        ImGui::SetNextItemWidth(160.0F);
+        if (ImGui::InputFloat(Configuration::GetLoc("menu.range", "Range"), &edited.spellRange)) {
+            changed = true;
+        }
+
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.equip_slot", "Equip slot"), "EquipSlot", edited.equipSlot);
+        changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.casting_perk", "Casting perk"), "Perk", edited.castingPerk);
+        changed |= DrawAnyFormReferencePicker(Configuration::GetLoc("menu.menu_display_object", "Menu display object"), edited.menuDisplayObject);
+        changed |= DrawMagicEffectsEditor(edited);
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderEnchantmentEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##enchantmentTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
+                changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.keywords", "Keywords"), "Keyword", edited.keywords);
+
+                int typeIndex = edited.enchantmentSpellType == ENCHANTMENT_TYPE_IDS[1] ? 1 : 0;
+                SetStableComboWidth(ENCHANTMENT_TYPE_ITEMS, 220.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.enchantment_type", "Enchantment type"), &typeIndex, ENCHANTMENT_TYPE_ITEMS.data(), static_cast<int>(ENCHANTMENT_TYPE_ITEMS.size()))) {
+                    edited.enchantmentSpellType = ENCHANTMENT_TYPE_IDS[static_cast<std::size_t>(typeIndex)];
+                    changed = true;
+                }
+
+                int castingType = static_cast<int>(std::min<std::uint32_t>(edited.enchantmentCastingType, static_cast<std::uint32_t>(SPELL_CASTING_TYPE_ITEMS.size() - 1)));
+                SetStableComboWidth(SPELL_CASTING_TYPE_ITEMS, 220.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.casting_type", "Casting type"), &castingType, SPELL_CASTING_TYPE_ITEMS.data(), static_cast<int>(SPELL_CASTING_TYPE_ITEMS.size()))) {
+                    edited.enchantmentCastingType = static_cast<std::uint32_t>(castingType);
+                    changed = true;
+                }
+
+                int delivery = static_cast<int>(std::min<std::uint32_t>(edited.enchantmentDelivery, static_cast<std::uint32_t>(SPELL_DELIVERY_ITEMS.size() - 1)));
+                SetStableComboWidth(SPELL_DELIVERY_ITEMS, 220.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.delivery", "Delivery"), &delivery, SPELL_DELIVERY_ITEMS.data(), static_cast<int>(SPELL_DELIVERY_ITEMS.size()))) {
+                    edited.enchantmentDelivery = static_cast<std::uint32_t>(delivery);
+                    changed = true;
+                }
+
+                ImGui::TextUnformatted(Configuration::GetLoc("menu.enchantment_flags", "Enchantment flags"));
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_cost_override", "Cost Override"), edited.enchantmentFlags, 1u << 0);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_food_item", "Food Item"), edited.enchantmentFlags, 1u << 1);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_extend_duration", "Extend Duration"), edited.enchantmentFlags, 1u << 3);
+
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputInt(Configuration::GetLoc("menu.cost_override", "Cost override"), &edited.enchantmentCostOverride);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputInt(Configuration::GetLoc("menu.charge_override", "Charge override"), &edited.enchantmentChargeOverride);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.charge_time", "Charge time"), &edited.enchantmentChargeTime);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.base_enchantment", "Base enchantment"), "Enchantment", edited.baseEnchantment);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.worn_restrictions", "Worn restrictions"), "FormList", edited.wornRestrictions);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.effects", "Effects"))) {
+                changed |= DrawMagicEffectsEditor(edited);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderScrollEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##scrollTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
+                changed |= InputString(Configuration::GetLoc("menu.description", "Description"), edited.description, 520.0F);
+                changed |= InputString(Configuration::GetLoc("menu.model_path", "Model path"), edited.modelPath, 420.0F);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputInt(Configuration::GetLoc("menu.value", "Value"), &edited.itemValue);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.weight", "Weight"), &edited.itemWeight);
+                changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.keywords", "Keywords"), "Keyword", edited.keywords);
+
+                int delivery = static_cast<int>(std::min<std::uint32_t>(edited.scrollDelivery, static_cast<std::uint32_t>(SPELL_DELIVERY_ITEMS.size() - 1)));
+                SetStableComboWidth(SPELL_DELIVERY_ITEMS, 220.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.delivery", "Delivery"), &delivery, SPELL_DELIVERY_ITEMS.data(), static_cast<int>(SPELL_DELIVERY_ITEMS.size()))) {
+                    edited.scrollDelivery = static_cast<std::uint32_t>(delivery);
+                    changed = true;
+                }
+
+                ImGui::TextUnformatted(Configuration::GetLoc("menu.scroll_flags", "Scroll flags"));
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_cost_override", "Cost Override"), edited.scrollFlags, 1u << 0);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_extend_duration", "Extend Duration"), edited.scrollFlags, 1u << 3);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_instant_cast", "Instant Cast"), edited.scrollFlags, 1u << 18);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_los", "Ignore LOS"), edited.scrollFlags, 1u << 19);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_ignore_resistance", "Ignore Resistance"), edited.scrollFlags, 1u << 20);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_absorb", "No Absorb"), edited.scrollFlags, 1u << 21);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_dual_cast_mods", "No Dual Cast Mods"), edited.scrollFlags, 1u << 23);
+
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputInt(Configuration::GetLoc("menu.cost_override", "Cost override"), &edited.scrollCostOverride);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.charge_time", "Charge time"), &edited.scrollChargeTime);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.cast_duration", "Cast duration"), &edited.scrollCastDuration);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.range", "Range"), &edited.scrollRange);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.equip_slot", "Equip slot"), "EquipSlot", edited.equipSlot);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.casting_perk", "Casting perk"), "Perk", edited.scrollCastingPerk);
+                changed |= DrawAnyFormReferencePicker(Configuration::GetLoc("menu.menu_display_object", "Menu display object"), edited.menuDisplayObject);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.pickup_sound", "Pickup sound"), "SoundDescriptor", edited.pickupSound);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.putdown_sound", "Putdown sound"), "SoundDescriptor", edited.putdownSound);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.effects", "Effects"))) {
+                changed |= DrawMagicEffectsEditor(edited);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderProjectileEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##projectileTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
+                changed |= InputString(Configuration::GetLoc("menu.model_path", "Model path"), edited.modelPath, 420.0F);
+                ImGui::TextUnformatted(Configuration::GetLoc("menu.projectile_types", "Projectile types"));
+                for (std::size_t i = 0; i < PROJECTILE_TYPE_ITEMS.size(); ++i) {
+                    changed |= FlagCheckbox(PROJECTILE_TYPE_ITEMS[i], edited.projectileTypes, 1u << i);
+                }
+
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.gravity", "Gravity"), &edited.projectileGravity);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.speed", "Speed"), &edited.projectileSpeed);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.range", "Range"), &edited.projectileRange);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.tracer_chance", "Tracer chance"), &edited.projectileTracerChance);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.force", "Force"), &edited.projectileForce);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.cone_spread", "Cone spread"), &edited.projectileConeSpread);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.collision_radius", "Collision radius"), &edited.projectileCollisionRadius);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.lifetime", "Lifetime"), &edited.projectileLifetime);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.relaunch_interval", "Relaunch interval"), &edited.projectileRelaunchInterval);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.default_weapon_source", "Default weapon source"), "Weapon", edited.projectileDefaultWeaponSource);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.collision_layer", "Collision layer"), "CollisionLayer", edited.projectileCollisionLayer);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.flags", "Flags"))) {
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_hitscan", "Hit Scan"), edited.projectileFlags, 1u << 0);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_explosion", "Explosion"), edited.projectileFlags, 1u << 1);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_explosion_alt_trigger", "Explosion Alt. Trigger"), edited.projectileFlags, 1u << 2);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_muzzle_flash", "Muzzle Flash"), edited.projectileFlags, 1u << 3);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_can_turn_off", "Can Turn Off"), edited.projectileFlags, 1u << 5);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_can_pick_up", "Can Pick Up"), edited.projectileFlags, 1u << 6);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_supersonic", "Supersonic"), edited.projectileFlags, 1u << 7);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_pins_limbs", "Pins Limbs"), edited.projectileFlags, 1u << 8);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_pass_small_transparent", "Pass Small Transparent"), edited.projectileFlags, 1u << 9);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_disable_combat_aim_correction", "Disable Combat Aim Correction"), edited.projectileFlags, 1u << 10);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_continuous_update", "Continuous Update"), edited.projectileFlags, 1u << 11);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.visuals", "Visuals"))) {
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.light", "Light"), "Light", edited.projectileLight);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.muzzle_flash_light", "Muzzle flash light"), "Light", edited.projectileMuzzleFlashLight);
+                changed |= InputString(Configuration::GetLoc("menu.muzzle_flash_model", "Muzzle flash model"), edited.projectileMuzzleFlashModel, 420.0F);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.muzzle_flash_duration", "Muzzle flash duration"), &edited.projectileMuzzleFlashDuration);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.fade_out_time", "Fade out time"), &edited.projectileFadeOutTime);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.explosion", "Explosion"), "Explosion", edited.projectileExplosionType);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.explosion_proximity", "Explosion proximity"), &edited.projectileExplosionProximity);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.explosion_timer", "Explosion timer"), &edited.projectileExplosionTimer);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.decal_data", "Decal data"), "TextureSet", edited.projectileDecalData);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.sounds", "Sounds"))) {
+                int soundLevel = static_cast<int>(std::min<std::uint32_t>(edited.projectileSoundLevel, static_cast<std::uint32_t>(SOUND_LEVEL_ITEMS.size() - 1)));
+                SetStableComboWidth(SOUND_LEVEL_ITEMS, 180.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.sound_level", "Sound level"), &soundLevel, SOUND_LEVEL_ITEMS.data(), static_cast<int>(SOUND_LEVEL_ITEMS.size()))) {
+                    edited.projectileSoundLevel = static_cast<std::uint32_t>(soundLevel);
+                    changed = true;
+                }
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.active_sound_loop", "Active sound loop"), "SoundDescriptor", edited.projectileActiveSoundLoop);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.countdown_sound", "Countdown sound"), "SoundDescriptor", edited.projectileCountdownSound);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.deactivate_sound", "Deactivate sound"), "SoundDescriptor", edited.projectileDeactivateSound);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderAdditionalReadyEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false; auto edited = form;
+        const auto inputInt = [&](const char* label, auto& value, const int minValue, const int maxValue) {
+            int temporary = static_cast<int>(value); ImGui::SetNextItemWidth(180.0F);
+            if (!ImGui::InputInt(label, &temporary)) return false; value = static_cast<std::remove_reference_t<decltype(value)>>(std::clamp(temporary, minValue, maxValue)); return true;
+        };
+        const auto inputFloat = [&](const char* label, float& value) { ImGui::SetNextItemWidth(180.0F); return ImGui::InputFloat(label, &value); };
+        const auto inputFloatArray = [&](const char*, auto& values, const auto& labels) {
+            bool result = false;
+            for (std::size_t i = 0; i < values.size(); ++i) { ImGui::PushID(static_cast<int>(i)); result |= inputFloat(labels[i], values[i]); ImGui::PopID(); }
+            return result;
+        };
+        using FK = DynamicForms::FormKind;
+        if (form.kind == FK::ImpactDataSet) {
+            for (std::size_t i = 0; i < edited.impactDataSetEntries.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i)); changed |= DrawFormReferencePicker("Material", "MaterialType", edited.impactDataSetEntries[i].key); changed |= DrawFormReferencePicker("Impact", "ImpactData", edited.impactDataSetEntries[i].value);
+                ImGui::SameLine(); if (ImGui::SmallButton("Remove")) { edited.impactDataSetEntries.erase(edited.impactDataSetEntries.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::Separator(); ImGui::PopID();
+            }
+            if (ImGui::Button("Add material impact")) { edited.impactDataSetEntries.emplace_back(); changed = true; }
+        } else if (form.kind == FK::CollisionLayer) {
+            changed |= inputInt("Collision index", edited.collisionLayerIndex, 0, 255); changed |= InputString("Name", edited.collisionLayerName);
+            std::array<float, 4> color{ ((edited.collisionLayerColor >> 24) & 0xFF) / 255.0F, ((edited.collisionLayerColor >> 16) & 0xFF) / 255.0F, ((edited.collisionLayerColor >> 8) & 0xFF) / 255.0F, (edited.collisionLayerColor & 0xFF) / 255.0F };
+            if (ImGui::ColorEdit4("Debug color", color.data())) { edited.collisionLayerColor = (static_cast<std::uint32_t>(color[0] * 255) << 24) | (static_cast<std::uint32_t>(color[1] * 255) << 16) | (static_cast<std::uint32_t>(color[2] * 255) << 8) | static_cast<std::uint32_t>(color[3] * 255); changed = true; }
+            changed |= FlagCheckbox("Trigger Volume", edited.collisionLayerFlags, 1u << 0); changed |= FlagCheckbox("Sensor", edited.collisionLayerFlags, 1u << 1); changed |= FlagCheckbox("Navmesh Obstacle", edited.collisionLayerFlags, 1u << 2);
+            changed |= DrawReferenceArrayEditor("Collides with", "CollisionLayer", edited.collisionLayers);
+        } else if (form.kind == FK::Footstep) {
+            changed |= InputString("Tag", edited.footstepTag); changed |= DrawFormReferencePicker("Impact data set", "ImpactDataSet", edited.footstepImpactDataSet);
+        } else if (form.kind == FK::FootstepSet) {
+            constexpr std::array labels{ "Walk", "Run", "Sneak", "Bleedout", "Swim" };
+            for (std::size_t i = 0; i < labels.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= DrawReferenceArrayEditor(labels[i], "Footstep", edited.footstepSets[i]); ImGui::Separator(); ImGui::PopID(); }
+        } else if (form.kind == FK::ReverbParameters) {
+            changed |= inputInt("Decay time (ms)", edited.reverbDecayTime, 0, 65535); changed |= inputInt("HF reference (Hz)", edited.reverbHFReference, 0, 65535);
+            constexpr std::array labels{ "Room filter", "Room HF filter", "Reflections", "Reverb", "Decay HF ratio", "Reflection delay", "Reverb delay", "Diffusion percent", "Density percent" };
+            for (std::size_t i = 0; i < labels.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= inputInt(labels[i], edited.reverbValues[i], -128, 127); ImGui::PopID(); }
+        } else if (form.kind == FK::AcousticSpace) {
+            changed |= DrawFormReferencePicker("Looping sound", "SoundDescriptor", edited.acousticLoopingSound); changed |= DrawFormReferencePicker("Sound region", "Region", edited.acousticSoundRegion); changed |= DrawFormReferencePicker("Reverb", "ReverbParameters", edited.acousticReverb);
+        } else if (form.kind == FK::Apparatus) {
+            changed |= DrawCommonItemFields(edited); constexpr std::array quality{ "Novice", "Apprentice", "Journeyman", "Expert", "Master" }; int selected = static_cast<int>(std::min(edited.apparatusQuality, 4u)); SetStableComboWidth(quality, 180.0F); if (ImGui::Combo("Quality", &selected, quality.data(), static_cast<int>(quality.size()))) { edited.apparatusQuality = static_cast<std::uint32_t>(selected); changed = true; } changed |= DrawReferenceArrayEditor("Keywords", "Keyword", edited.keywords);
+        } else if (form.kind == FK::StaticCollection) {
+            changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= FlagCheckbox("Has distant LOD", edited.recordFlags, 1u << 19);
+        } else if (form.kind == FK::Grass) {
+            changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= inputInt("Density", edited.grassDensity, 0, 100); changed |= inputInt("Minimum slope", edited.grassMinSlope, 0, 90); changed |= inputInt("Maximum slope", edited.grassMaxSlope, 0, 90); changed |= inputInt("Distance from water", edited.grassDistanceFromWater, 0, 65535);
+            constexpr std::array waterStates{ "Above: at least", "Above: at most", "Below: at least", "Below: at most", "Both: at least", "Both: at most", "Both: at most above", "Both: at most below" }; int state = static_cast<int>(std::min(edited.grassWaterState, 7u)); SetStableComboWidth(waterStates, 220.0F); if (ImGui::Combo("Water state", &state, waterStates.data(), static_cast<int>(waterStates.size()))) { edited.grassWaterState = static_cast<std::uint32_t>(state); changed = true; }
+            changed |= inputFloat("Position range", edited.grassPositionRange); changed |= inputFloat("Height range", edited.grassHeightRange); changed |= inputFloat("Color range", edited.grassColorRange); changed |= inputFloat("Wave period", edited.grassWavePeriod);
+            changed |= FlagCheckbox("Vertex Lighting", edited.grassFlags, 1u << 0); changed |= FlagCheckbox("Uniform Scale", edited.grassFlags, 1u << 1); changed |= FlagCheckbox("Fit Slope", edited.grassFlags, 1u << 2);
+        } else if (form.kind == FK::IdleMarker) {
+            changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= inputFloat("Idle timer", edited.idleTimer); changed |= DrawReferenceArrayEditor("Idle animations", "Idle", edited.idleAnimations);
+            changed |= FlagCheckbox("Pick Sequence", edited.idleFlags, 1u << 0); changed |= FlagCheckbox("Old Pick Conditions", edited.idleFlags, 1u << 1); changed |= FlagCheckbox("Do Once", edited.idleFlags, 1u << 2); changed |= FlagCheckbox("Loose Only", edited.idleFlags, 1u << 3); changed |= FlagCheckbox("No Sandbox", edited.idleFlags, 1u << 4); changed |= FlagCheckbox("Child Can Use", edited.recordFlags, 1u << 29);
+        } else if (form.kind == FK::EncounterZone) {
+            changed |= DrawFormReferencePicker("Owner", "Faction", edited.encounterOwner); changed |= DrawFormReferencePicker("Location", "Location", edited.encounterLocation); changed |= inputInt("Owner rank", edited.encounterOwnerRank, -128, 127); changed |= inputInt("Minimum level", edited.encounterMinLevel, 0, 127); changed |= inputInt("Maximum level", edited.encounterMaxLevel, 0, 127);
+            changed |= FlagCheckbox("Never Resets", edited.encounterFlags, 1u << 0); changed |= FlagCheckbox("Match PC Below Minimum", edited.encounterFlags, 1u << 1); changed |= FlagCheckbox("Disable Combat Boundary", edited.encounterFlags, 1u << 2);
+        } else if (form.kind == FK::Relationship) {
+            changed |= DrawFormReferencePicker("NPC 1", "NPC", edited.relationshipNpc1); changed |= DrawFormReferencePicker("NPC 2", "NPC", edited.relationshipNpc2); changed |= DrawFormReferencePicker("Association", "AssociationType", edited.relationshipAssociation);
+            constexpr std::array levels{ "Lover", "Ally", "Confidant", "Friend", "Acquaintance", "Rival", "Foe", "Enemy", "Archnemesis" }; int level = static_cast<int>(std::min(edited.relationshipLevel, 8u)); SetStableComboWidth(levels, 180.0F); if (ImGui::Combo("Level", &level, levels.data(), static_cast<int>(levels.size()))) { edited.relationshipLevel = static_cast<std::uint32_t>(level); changed = true; } changed |= FlagCheckbox("Secret", edited.relationshipFlags, 1u << 7);
+        } else if (form.kind == FK::AssociationType) {
+            constexpr std::array labels{ "Parent male", "Parent female", "Child male", "Child female" }; for (std::size_t i = 0; i < labels.size(); ++i) changed |= InputString(labels[i], edited.associationLabels[i]); changed |= FlagCheckbox("Family", edited.associationFlags, 1u << 0);
+        } else if (form.kind == FK::MovementType) {
+            changed |= InputString("Movement name", edited.movementName); constexpr std::array labels{ "Left walk", "Left run", "Right walk", "Right run", "Forward walk", "Forward run", "Back walk", "Back run", "Rotation walk", "Rotation run" }; changed |= inputFloatArray("speeds", edited.movementSpeeds, labels); changed |= inputFloat("Rotate while moving", edited.movementRotateWhileMoving); changed |= inputFloat("Directional", edited.movementDirectional); changed |= inputFloat("Movement speed", edited.movementSpeed); changed |= inputFloat("Rotation speed", edited.movementRotationSpeed);
+        } else if (form.kind == FK::WordOfPower) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Translation", edited.wordTranslation);
+        } else if (form.kind == FK::Water) {
+            changed |= InputString("Name", edited.fullName); for (std::size_t i = 0; i < edited.waterNoiseTextures.size(); ++i) { ImGui::PushID(static_cast<int>(i)); const auto label = std::format("Noise texture {}", i + 1); changed |= InputString(label.c_str(), edited.waterNoiseTextures[i], 520.0F); ImGui::PopID(); }
+            changed |= inputInt("Alpha", edited.waterAlpha, 0, 255); changed |= FlagCheckbox("Causes Damage", edited.waterFlags, 1u << 0); changed |= FlagCheckbox("Enable Flowmap", edited.waterFlags, 1u << 3); changed |= FlagCheckbox("Blend Normals", edited.waterFlags, 1u << 4);
+            changed |= DrawFormReferencePicker("Material", "MaterialType", edited.waterMaterial); changed |= DrawFormReferencePicker("Sound", "SoundDescriptor", edited.waterSound); changed |= DrawFormReferencePicker("Contact spell", "Spell", edited.waterContactSpell); changed |= DrawFormReferencePicker("Image space", "ImageSpace", edited.waterImageSpace);
+            constexpr std::array xyz{ "X", "Y", "Z" }; ImGui::TextUnformatted("Linear velocity"); changed |= inputFloatArray("linear", edited.waterLinearVelocity, xyz); ImGui::TextUnformatted("Angular velocity"); changed |= inputFloatArray("angular", edited.waterAngularVelocity, xyz);
+        } else if (form.kind == FK::ImageSpace) {
+            constexpr std::array hdr{ "Eye adapt speed", "Bloom blur radius", "Bloom threshold", "Bloom scale", "Receive bloom threshold", "White", "Sunlight scale", "Sky scale", "Eye adapt strength" }; changed |= inputFloatArray("hdr", edited.imageSpaceHDR, hdr);
+            constexpr std::array cinematic{ "Saturation", "Brightness", "Contrast" }; changed |= inputFloatArray("cinematic", edited.imageSpaceCinematic, cinematic); changed |= inputFloat("Tint amount", edited.imageSpaceTintAmount); constexpr std::array rgb{ "Tint red", "Tint green", "Tint blue" }; changed |= inputFloatArray("tint", edited.imageSpaceTintColor, rgb); constexpr std::array dof{ "DOF strength", "DOF distance", "DOF range" }; changed |= inputFloatArray("dof", edited.imageSpaceDOF, dof); changed |= inputInt("DOF flags", edited.imageSpaceDOFFlags, 0, 65535); changed |= inputInt("Sky blur value", edited.imageSpaceSkyBlur, 0, 65535);
+        } else if (form.kind == FK::LightingTemplate) {
+            constexpr std::array colorLabels{ "Ambient color", "Directional color", "Near fog color", "Far fog color", "Unused color 1", "Unused color 2", "Unused color 3" };
+            for (std::size_t i = 0; i < 4; ++i) { ImGui::ImVec4 color{}; ImGui::ColorConvertU32ToFloat4(&color, edited.lightingColors[i]); if (ImGui::ColorEdit4(colorLabels[i], &color.x)) { edited.lightingColors[i] = ImGui::ColorConvertFloat4ToU32(color); changed = true; } }
+            constexpr std::array values{ "Fog near", "Fog far", "Directional fade", "Clip distance", "Fog power", "Fog clamp", "Light fade start", "Light fade end" }; changed |= inputFloatArray("lighting", edited.lightingValues, values); changed |= inputInt("Directional XY", edited.lightingDirectionalXY, 0, std::numeric_limits<int>::max()); changed |= inputInt("Directional Z", edited.lightingDirectionalZ, 0, std::numeric_limits<int>::max());
+            constexpr std::array inherit{ "Ambient Color", "Directional Color", "Fog Color", "Fog Near", "Fog Far", "Directional Rotation", "Directional Fade", "Clip Distance", "Fog Power", "Fog Max", "Light Fade Distances" }; for (std::size_t i = 0; i < inherit.size(); ++i) changed |= FlagCheckbox(inherit[i], edited.lightingInheritanceFlags, 1u << i);
+        } else if (form.kind == FK::Shout) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Description", edited.description, 520.0F);
+            changed |= DrawFormReferencePicker("Equip slot", "EquipSlot", edited.equipSlot); changed |= DrawAnyFormReferencePicker("Menu display object", edited.menuDisplayObject);
+            changed |= FlagCheckbox("Treat Spells as Powers", edited.recordFlags, 1u << 7);
+            constexpr std::array stages{ "First word", "Second word", "Third word" };
+            for (std::size_t i = 0; i < stages.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i)); ImGui::Separator(); ImGui::TextUnformatted(stages[i]);
+                changed |= DrawFormReferencePicker("Word of power", "WordOfPower", edited.shoutWords[i]); changed |= DrawFormReferencePicker("Spell", "Spell", edited.shoutSpells[i]); changed |= inputFloat("Recovery time", edited.shoutRecoveryTimes[i]); ImGui::PopID();
+            }
+        } else if (form.kind == FK::LeveledItem || form.kind == FK::LeveledNPC || form.kind == FK::LeveledSpell) {
+            if (form.kind == FK::LeveledNPC) changed |= InputString("Model path", edited.modelPath, 520.0F);
+            changed |= inputInt("Chance none", edited.leveledChanceNone, 0, 100); changed |= DrawFormReferencePicker("Chance global", "Global", edited.leveledChanceGlobal);
+            changed |= FlagCheckbox("Calculate from all levels <= player", edited.leveledFlags, 1u << 0); changed |= FlagCheckbox("Calculate for each item in count", edited.leveledFlags, 1u << 1); changed |= FlagCheckbox("Use All", edited.leveledFlags, 1u << 2); changed |= FlagCheckbox("Special Loot", edited.leveledFlags, 1u << 3);
+            ImGui::Separator(); ImGui::Text("Entries: %zu", edited.leveledEntries.size());
+            for (std::size_t i = 0; i < edited.leveledEntries.size(); ++i) {
+                auto& entry = edited.leveledEntries[i]; ImGui::PushID(static_cast<int>(i));
+                const char* expected = form.kind == FK::LeveledNPC ? "NPC or Leveled NPC" : (form.kind == FK::LeveledSpell ? "Spell or Leveled Spell" : "Item or Leveled Item");
+                ImGui::Text("Entry %zu (%s)", i + 1, expected); changed |= DrawAnyFormReferencePicker("Form", entry.form);
+                changed |= inputInt("Level", entry.level, 1, 65535); changed |= inputInt("Count", entry.count, 1, 65535);
+                changed |= DrawAnyFormReferencePicker("Owner", entry.owner); changed |= DrawFormReferencePicker("Condition global", "Global", entry.conditionGlobal); changed |= inputInt("Required rank", entry.requiredRank, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()); changed |= inputFloat("Health multiplier", entry.healthMult);
+                if (ImGui::SmallButton("Remove entry")) { edited.leveledEntries.erase(edited.leveledEntries.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; }
+                ImGui::Separator(); ImGui::PopID();
+            }
+            if (ImGui::Button("Add entry")) { edited.leveledEntries.emplace_back(); changed = true; }
+        } else if (form.kind == FK::Action) {
+            changed |= inputInt("Action index", edited.actionIndex, 0, std::numeric_limits<int>::max());
+        } else if (form.kind == FK::MenuIcon) {
+            changed |= InputString("Icon path", edited.inventoryIcon, 520.0F);
+        } else if (form.kind == FK::Eyes) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Texture path", edited.eyesTexture, 520.0F);
+            changed |= FlagCheckbox("Playable", edited.eyesFlags, 1u << 0); changed |= FlagCheckbox("Not Male", edited.eyesFlags, 1u << 1); changed |= FlagCheckbox("Not Female", edited.eyesFlags, 1u << 2); changed |= FlagCheckbox("Non-Playable Record", edited.recordFlags, 1u << 2);
+        } else if (form.kind == FK::Note) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= InputString("Icon path", edited.inventoryIcon, 520.0F); changed |= DrawFormReferencePicker("Pickup sound", "SoundDescriptor", edited.pickupSound); changed |= DrawFormReferencePicker("Putdown sound", "SoundDescriptor", edited.putdownSound);
+        } else if (form.kind == FK::AnimatedObject) {
+            changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= InputString("Unload event", edited.animatedUnloadEvent);
+        } else if (form.kind == FK::LoadScreen) {
+            changed |= InputString("Loading text", edited.loadScreenText, 520.0F); changed |= DrawAnyFormReferencePicker("Load object", edited.loadScreenObject); changed |= inputFloat("Initial scale", edited.loadScreenInitialScale);
+            constexpr std::array rotationLabels{ "Rotation X", "Rotation Y", "Rotation Z" }; for (std::size_t i = 0; i < edited.loadScreenRotationConstraints.size(); ++i) changed |= inputInt(rotationLabels[i], edited.loadScreenRotationConstraints[i], -32768, 32767);
+            constexpr std::array offsetLabels{ "Rotation offset min", "Rotation offset max" }; for (std::size_t i = 0; i < edited.loadScreenRotationOffsetConstraints.size(); ++i) changed |= inputInt(offsetLabels[i], edited.loadScreenRotationOffsetConstraints[i], -32768, 32767);
+            constexpr std::array translationLabels{ "Translation X", "Translation Y", "Translation Z" }; changed |= inputFloatArray("translation", edited.loadScreenTranslationOffset, translationLabels); changed |= InputString("Camera path model", edited.loadScreenCameraPath, 520.0F); changed |= FlagCheckbox("Displays In Main Menu", edited.recordFlags, 1u << 10); changed |= DrawPerkConditions(edited.conditions);
+        } else if (form.kind == FK::ShaderParticleGeometry) {
+            changed |= InputString("Particle texture", edited.shaderParticleTexture, 520.0F);
+            constexpr std::array labels{ "Gravity velocity", "Rotation velocity", "Particle size X", "Particle size Y", "Center offset min", "Center offset max", "Start rotation range", "Subtextures X", "Subtextures Y", "Particle type", "Box size", "Particle density" };
+            for (std::size_t i = 0; i < edited.shaderParticleSettings.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i));
+                if (i == 9) { constexpr std::array particleTypes{ "Rain", "Snow" }; int selected = static_cast<int>(std::clamp(edited.shaderParticleSettings[i], 0.0F, 1.0F)); SetStableComboWidth(particleTypes, 160.0F); if (ImGui::Combo(labels[i], &selected, particleTypes.data(), static_cast<int>(particleTypes.size()))) { edited.shaderParticleSettings[i] = static_cast<float>(selected); changed = true; } }
+                else if (i == 7 || i == 8) { int integer = static_cast<int>(edited.shaderParticleSettings[i]); ImGui::SetNextItemWidth(180.0F); if (ImGui::InputInt(labels[i], &integer)) { edited.shaderParticleSettings[i] = static_cast<float>(std::max(integer, 0)); changed = true; } }
+                else changed |= inputFloat(labels[i], edited.shaderParticleSettings[i]);
+                ImGui::PopID();
+            }
+        } else if (form.kind == FK::AddonNode) {
+            changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= inputInt("Node index", edited.addonIndex, 0, std::numeric_limits<int>::max()); changed |= DrawFormReferencePicker("Sound", "SoundDescriptor", edited.addonSound); changed |= inputInt("Master particle cap", edited.addonMasterParticleCap, 0, 65535); changed |= FlagCheckbox("Always Loaded", edited.addonFlags, 3u);
+        }
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderReadyFormEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        const auto inputFloat = [&](const char* label, float& value) {
+            ImGui::SetNextItemWidth(180.0F);
+            return ImGui::InputFloat(label, &value);
+        };
+        const auto inputUInt = [&](const char* label, std::uint32_t& value, const int minValue = 0, const int maxValue = std::numeric_limits<int>::max()) {
+            int temporary = static_cast<int>(std::min<std::uint32_t>(value, static_cast<std::uint32_t>(maxValue)));
+            ImGui::SetNextItemWidth(180.0F);
+            if (!ImGui::InputInt(label, &temporary)) return false;
+            value = static_cast<std::uint32_t>(std::clamp(temporary, minValue, maxValue));
+            return true;
+        };
+        const auto comboUInt = [&](const char* label, std::uint32_t& value, const auto& items) {
+            int selected = static_cast<int>(std::min<std::uint32_t>(value, static_cast<std::uint32_t>(items.size() - 1)));
+            SetStableComboWidth(items, 240.0F);
+            if (!ImGui::Combo(label, &selected, items.data(), static_cast<int>(items.size()))) return false;
+            value = static_cast<std::uint32_t>(selected);
+            return true;
+        };
+        const auto drawDecal = [&]() {
+            bool decalChanged = false;
+            decalChanged |= inputFloat("Minimum width", edited.decalMinWidth);
+            decalChanged |= inputFloat("Maximum width", edited.decalMaxWidth);
+            decalChanged |= inputFloat("Minimum height", edited.decalMinHeight);
+            decalChanged |= inputFloat("Maximum height", edited.decalMaxHeight);
+            decalChanged |= inputFloat("Depth", edited.decalDepth);
+            decalChanged |= inputFloat("Shininess", edited.decalShininess);
+            decalChanged |= inputFloat("Parallax scale", edited.decalParallaxScale);
+            ImGui::SetNextItemWidth(180.0F);
+            decalChanged |= ImGui::InputInt("Parallax passes", &edited.decalParallaxPasses);
+            decalChanged |= FlagCheckbox("Parallax", edited.decalFlags, 1u << 0);
+            decalChanged |= FlagCheckbox("Alpha Blending", edited.decalFlags, 1u << 1);
+            decalChanged |= FlagCheckbox("Alpha Testing", edited.decalFlags, 1u << 2);
+            decalChanged |= FlagCheckbox("No Subtextures", edited.decalFlags, 1u << 3);
+            decalChanged |= DrawRGBAColorEditor("Decal color", edited.decalRed, edited.decalGreen, edited.decalBlue, edited.decalAlpha);
+            return decalChanged;
+        };
+
+        if (form.kind == DynamicForms::FormKind::TextureSet) {
+            for (std::size_t i = 0; i < edited.textureSetPaths.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i));
+                changed |= InputString(TEXTURE_SLOT_ITEMS[i], edited.textureSetPaths[i], 520.0F);
+                ImGui::PopID();
+            }
+            ImGui::Separator();
+            changed |= FlagCheckbox("No Specular Map", edited.textureSetFlags, 1u << 0);
+            changed |= FlagCheckbox("Facegen Textures", edited.textureSetFlags, 1u << 1);
+            changed |= FlagCheckbox("Model Space Normal Map", edited.textureSetFlags, 1u << 2);
+            changed |= ImGui::Checkbox("Has decal data", &edited.textureSetHasDecal);
+            if (edited.textureSetHasDecal) changed |= drawDecal();
+        } else if (form.kind == DynamicForms::FormKind::Hazard) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Model path", edited.modelPath, 520.0F);
+            changed |= inputUInt("Limit", edited.hazardLimit); changed |= inputFloat("Radius", edited.hazardRadius);
+            changed |= inputFloat("Lifetime", edited.hazardLifetime); changed |= inputFloat("Image space radius", edited.hazardImageSpaceRadius);
+            changed |= inputFloat("Target interval", edited.hazardTargetInterval);
+            changed |= FlagCheckbox("Player Only", edited.hazardFlags, 1u << 0); changed |= FlagCheckbox("Inherit Duration", edited.hazardFlags, 1u << 1);
+            changed |= FlagCheckbox("Align to Normal", edited.hazardFlags, 1u << 2); changed |= FlagCheckbox("Inherit Radius", edited.hazardFlags, 1u << 3);
+            changed |= FlagCheckbox("Drop to Ground", edited.hazardFlags, 1u << 4);
+            changed |= DrawFormReferencePicker("Spell", "Spell", edited.hazardSpell); changed |= DrawFormReferencePicker("Light", "Light", edited.hazardLight);
+            changed |= DrawFormReferencePicker("Impact data set", "ImpactDataSet", edited.hazardImpactDataSet);
+            changed |= DrawFormReferencePicker("Sound", "SoundDescriptor", edited.hazardSound);
+            changed |= DrawFormReferencePicker("Image space modifier", "ImageSpaceModifier", edited.hazardImageSpaceModifier);
+        } else if (form.kind == DynamicForms::FormKind::ImpactData) {
+            changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= inputFloat("Effect duration", edited.impactEffectDuration);
+            changed |= comboUInt("Orientation", edited.impactOrientation, IMPACT_ORIENTATION_ITEMS);
+            changed |= inputFloat("Angle threshold", edited.impactAngleThreshold); changed |= inputFloat("Placement radius", edited.impactPlacementRadius);
+            changed |= comboUInt("Sound level", edited.impactSoundLevel, SOUND_LEVEL_ITEMS); changed |= comboUInt("Result override", edited.impactResultOverride, IMPACT_RESULT_ITEMS);
+            changed |= FlagCheckbox("No Decal Data", edited.impactFlags, 1u << 0);
+            changed |= DrawFormReferencePicker("Primary decal", "TextureSet", edited.impactDecalTextureSet);
+            changed |= DrawFormReferencePicker("Secondary decal", "TextureSet", edited.impactDecalTextureSet2);
+            changed |= DrawFormReferencePicker("Primary sound", "SoundDescriptor", edited.impactSound1);
+            changed |= DrawFormReferencePicker("Secondary sound", "SoundDescriptor", edited.impactSound2);
+            changed |= DrawFormReferencePicker("Hazard", "Hazard", edited.impactHazard);
+            if ((edited.impactFlags & 1u) == 0) { ImGui::Separator(); changed |= drawDecal(); }
+        } else if (form.kind == DynamicForms::FormKind::ReferenceEffect) {
+            changed |= DrawFormReferencePicker("Art object", "ArtObject", edited.referenceEffectArtObject);
+            changed |= DrawFormReferencePicker("Effect shader", "EffectShader", edited.referenceEffectShader);
+            changed |= FlagCheckbox("Face Target", edited.referenceEffectFlags, 1u << 0);
+            changed |= FlagCheckbox("Attach to Camera", edited.referenceEffectFlags, 1u << 1);
+            changed |= FlagCheckbox("Inherit Rotation", edited.referenceEffectFlags, 1u << 2);
+        } else if (form.kind == DynamicForms::FormKind::DualCastData) {
+            changed |= DrawFormReferencePicker("Projectile", "Projectile", edited.dualCastProjectile);
+            changed |= DrawFormReferencePicker("Explosion", "Explosion", edited.dualCastExplosion);
+            changed |= DrawFormReferencePicker("Effect shader", "EffectShader", edited.dualCastEffectShader);
+            changed |= DrawFormReferencePicker("Hit effect art", "ArtObject", edited.dualCastHitEffectArt);
+            changed |= DrawFormReferencePicker("Impact data set", "ImpactDataSet", edited.dualCastImpactDataSet);
+            changed |= FlagCheckbox("Hit Effect Inherits Scale", edited.dualCastFlags, 1u << 0);
+            changed |= FlagCheckbox("Projectile Inherits Scale", edited.dualCastFlags, 1u << 1);
+            changed |= FlagCheckbox("Explosion Inherits Scale", edited.dualCastFlags, 1u << 2);
+        } else if (form.kind == DynamicForms::FormKind::Static || form.kind == DynamicForms::FormKind::MovableStatic) {
+            if (form.kind == DynamicForms::FormKind::MovableStatic) changed |= InputString("Name", edited.fullName);
+            changed |= InputString("Model path", edited.modelPath, 520.0F);
+            changed |= inputFloat("Material threshold angle", edited.staticMaterialThresholdAngle);
+            changed |= DrawFormReferencePicker("Material object", "MaterialObject", edited.staticMaterialObject);
+            changed |= FlagCheckbox("Considered Snow", edited.staticFlags, 1u << 0);
+            if (form.kind == DynamicForms::FormKind::Static) {
+                changed |= FlagCheckbox("Never Fades", edited.recordFlags, 1u << 2); changed |= FlagCheckbox("Sky Object", edited.recordFlags, 1u << 5);
+                changed |= FlagCheckbox("Has Tree LOD", edited.recordFlags, 1u << 6); changed |= FlagCheckbox("Add-on LOD Object", edited.recordFlags, 1u << 7);
+                changed |= FlagCheckbox("Hidden from Local Map", edited.recordFlags, 1u << 9); changed |= FlagCheckbox("Has Distant LOD", edited.recordFlags, 1u << 15);
+                changed |= FlagCheckbox("Uses HD LOD Texture", edited.recordFlags, 1u << 17); changed |= FlagCheckbox("Has Currents", edited.recordFlags, 1u << 19);
+                changed |= FlagCheckbox("Marker", edited.recordFlags, 1u << 23); changed |= FlagCheckbox("Obstacle", edited.recordFlags, 1u << 25);
+                changed |= FlagCheckbox("Navmesh Filter", edited.recordFlags, 1u << 26); changed |= FlagCheckbox("Navmesh Bounding Box", edited.recordFlags, 1u << 27);
+                changed |= FlagCheckbox("Show in World Map", edited.recordFlags, 1u << 28); changed |= FlagCheckbox("Navmesh Ground", edited.recordFlags, 1u << 30);
+            }
+            if (form.kind == DynamicForms::FormKind::MovableStatic) {
+                changed |= DrawFormReferencePicker("Loop sound", "SoundDescriptor", edited.movableStaticSoundLoop);
+                changed |= FlagCheckbox("On Local Map", edited.movableStaticFlags, 1u << 0);
+                changed |= FlagCheckbox("Must Update Animations", edited.recordFlags, 1u << 8); changed |= FlagCheckbox("Hidden from Local Map", edited.recordFlags, 1u << 9);
+                changed |= FlagCheckbox("Has Distant LOD", edited.recordFlags, 1u << 15); changed |= FlagCheckbox("Random Animation Start", edited.recordFlags, 1u << 16);
+                changed |= FlagCheckbox("Has Currents", edited.recordFlags, 1u << 19); changed |= FlagCheckbox("Obstacle", edited.recordFlags, 1u << 25);
+                changed |= FlagCheckbox("Navmesh Filter", edited.recordFlags, 1u << 26); changed |= FlagCheckbox("Navmesh Bounding Box", edited.recordFlags, 1u << 27);
+                changed |= FlagCheckbox("Navmesh Ground", edited.recordFlags, 1u << 30);
+            }
+        } else if (form.kind == DynamicForms::FormKind::Door) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Model path", edited.modelPath, 520.0F);
+            changed |= DrawFormReferencePicker("Open sound", "SoundDescriptor", edited.doorOpenSound);
+            changed |= DrawFormReferencePicker("Close sound", "SoundDescriptor", edited.doorCloseSound);
+            changed |= DrawFormReferencePicker("Loop sound", "SoundDescriptor", edited.doorLoopSound);
+            changed |= FlagCheckbox("Automatic", edited.doorFlags, 1u << 1); changed |= FlagCheckbox("Hidden", edited.doorFlags, 1u << 2);
+            changed |= FlagCheckbox("Minimal Use", edited.doorFlags, 1u << 3); changed |= FlagCheckbox("Sliding", edited.doorFlags, 1u << 4);
+            changed |= FlagCheckbox("Do Not Open in Combat Search", edited.doorFlags, 1u << 5);
+            changed |= FlagCheckbox("Has Distant LOD", edited.recordFlags, 1u << 15); changed |= FlagCheckbox("Random Animation Start", edited.recordFlags, 1u << 16);
+            changed |= FlagCheckbox("Marker", edited.recordFlags, 1u << 23);
+        } else if (form.kind == DynamicForms::FormKind::CombatStyle) {
+            if (ImGui::BeginTabBar("##combatStyleTabs")) {
+                if (ImGui::BeginTabItem("General")) { for (std::size_t i = 0; i < edited.combatGeneral.size(); ++i) changed |= inputFloat(COMBAT_GENERAL_ITEMS[i], edited.combatGeneral[i]); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Melee")) { for (std::size_t i = 0; i < edited.combatMelee.size(); ++i) changed |= inputFloat(COMBAT_MELEE_ITEMS[i], edited.combatMelee[i]); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Range")) { for (std::size_t i = 0; i < edited.combatCloseRange.size(); ++i) changed |= inputFloat(COMBAT_CLOSE_ITEMS[i], edited.combatCloseRange[i]); changed |= inputFloat("Strafe", edited.combatLongRangeStrafe); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Flight")) { for (std::size_t i = 0; i < edited.combatFlight.size(); ++i) changed |= inputFloat(COMBAT_FLIGHT_ITEMS[i], edited.combatFlight[i]); ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Flags")) { changed |= FlagCheckbox("Dueling Style", edited.combatStyleFlags, 1u << 0); changed |= FlagCheckbox("Flanking Style", edited.combatStyleFlags, 1u << 1); changed |= FlagCheckbox("Allow Dual Wielding", edited.combatStyleFlags, 1u << 2); ImGui::EndTabItem(); }
+                ImGui::EndTabBar();
+            }
+        } else if (form.kind == DynamicForms::FormKind::SoundCategory) {
+            changed |= InputString("Name", edited.fullName); changed |= DrawFormReferencePicker("Parent category", "SoundCategory", edited.soundCategoryParent);
+            changed |= FlagCheckbox("Mute When Submerged", edited.soundCategoryFlags, 1u << 0); changed |= FlagCheckbox("Appear on Menu", edited.soundCategoryFlags, 1u << 1);
+            std::uint32_t attenuation = edited.soundCategoryAttenuation; if (inputUInt("Attenuation", attenuation, 0, 65535)) { edited.soundCategoryAttenuation = static_cast<std::uint16_t>(attenuation); changed = true; }
+            changed |= inputFloat("Static volume multiplier", edited.soundCategoryStaticMult); changed |= inputFloat("Default menu value", edited.soundCategoryDefaultMenuValue);
+            changed |= inputFloat("Volume multiplier", edited.soundCategoryVolumeMult); changed |= inputFloat("Frequency multiplier", edited.soundCategoryFrequencyMult);
+        } else if (form.kind == DynamicForms::FormKind::Class) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Description", edited.description, 520.0F); changed |= InputString("Icon", edited.classIconPath, 520.0F);
+            changed |= comboUInt("Teaches", edited.classTeachesSkill, NPC_SKILL_NAMES);
+            std::uint32_t level = edited.classMaximumTrainingLevel; if (inputUInt("Maximum training level", level, 0, 255)) { edited.classMaximumTrainingLevel = static_cast<std::uint8_t>(level); changed = true; }
+            changed |= inputFloat("Bleedout default", edited.classBleedoutDefault); changed |= inputUInt("Voice points", edited.classVoicePoints);
+            if (ImGui::BeginTabBar("##classWeights")) {
+                if (ImGui::BeginTabItem("Skill weights")) { for (std::size_t i = 0; i < edited.classSkillWeights.size(); ++i) { std::uint32_t value = edited.classSkillWeights[i]; if (inputUInt(NPC_SKILL_NAMES[i], value, 0, 255)) { edited.classSkillWeights[i] = static_cast<std::uint8_t>(value); changed = true; } } ImGui::EndTabItem(); }
+                if (ImGui::BeginTabItem("Attribute weights")) { constexpr std::array names{ "Health", "Magicka", "Stamina" }; for (std::size_t i = 0; i < names.size(); ++i) { std::uint32_t value = edited.classAttributeWeights[i]; if (inputUInt(names[i], value, 0, 255)) { edited.classAttributeWeights[i] = static_cast<std::uint8_t>(value); changed = true; } } ImGui::EndTabItem(); }
+                ImGui::EndTabBar();
+            }
+        } else if (form.kind == DynamicForms::FormKind::Flora || form.kind == DynamicForms::FormKind::Tree) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Model path", edited.modelPath, 520.0F);
+            changed |= DrawAnyFormReferencePicker("Produced item", edited.produceItem); changed |= DrawFormReferencePicker("Harvest sound", "SoundDescriptor", edited.harvestSound);
+            constexpr std::array seasons{ "Spring chance", "Summer chance", "Fall chance", "Winter chance" };
+            for (std::size_t i = 0; i < edited.produceChance.size(); ++i) { int value = edited.produceChance[i]; ImGui::SetNextItemWidth(180.0F); if (ImGui::InputInt(seasons[i], &value)) { edited.produceChance[i] = static_cast<std::int8_t>(std::clamp(value, 0, 100)); changed = true; } }
+            if (form.kind == DynamicForms::FormKind::Flora) {
+                changed |= DrawReferenceArrayEditor("Keywords", "Keyword", edited.keywords);
+                changed |= DrawFormReferencePicker("Loop sound", "SoundDescriptor", edited.floraSoundLoop); changed |= DrawFormReferencePicker("Activate sound", "SoundDescriptor", edited.floraSoundActivate);
+                changed |= DrawFormReferencePicker("Water type", "Water", edited.floraWaterType);
+                changed |= FlagCheckbox("No Displacement", edited.floraFlags, 1u << 0); changed |= FlagCheckbox("Ignored by Sandbox", edited.floraFlags, 1u << 1);
+                changed |= FlagCheckbox("Procedural Water", edited.floraFlags, 1u << 2); changed |= FlagCheckbox("LOD Water", edited.floraFlags, 1u << 3);
+            } else {
+                changed |= comboUInt("Tree type", edited.treeType, TREE_TYPE_ITEMS);
+                changed |= FlagCheckbox("Has Distant LOD", edited.recordFlags, 1u << 15);
+                constexpr std::array animationNames{ "Trunk Flexibility", "Branch Flexibility", "Trunk Amplitude", "Front Amplitude", "Back Amplitude", "Side Amplitude", "Front Frequency", "Back Frequency", "Side Frequency", "Leaf Flexibility", "Leaf Amplitude", "Leaf Frequency" };
+                for (std::size_t i = 0; i < edited.treeAnimation.size(); ++i) changed |= inputFloat(animationNames[i], edited.treeAnimation[i]);
+            }
+        }
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderConstructibleObjectEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        if (ImGui::BeginTabBar("##constructibleObjectTabs")) {
+            if (ImGui::BeginTabItem("Recipe")) {
+                changed |= DrawAnyFormReferencePicker("Created item", edited.createdItem);
+                changed |= DrawFormReferencePicker("Workbench keyword", "Keyword", edited.benchKeyword);
+                int count = edited.numConstructed;
+                ImGui::SetNextItemWidth(180.0F);
+                if (ImGui::InputInt("Quantity produced", &count)) {
+                    edited.numConstructed = static_cast<std::uint16_t>(std::clamp(count, 1, 65535));
+                    changed = true;
+                }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Components")) {
+                if (ImGui::Button("Add component")) {
+                    edited.requiredItems.emplace_back();
+                    changed = true;
+                }
+                for (std::size_t i = 0; i < edited.requiredItems.size(); ++i) {
+                    ImGui::PushID(static_cast<int>(i));
+                    ImGui::Separator();
+                    if (i > 0 && ImGui::SmallButton("^")) {
+                        std::swap(edited.requiredItems[i], edited.requiredItems[i - 1]);
+                        changed = true;
+                    }
+                    if (i > 0) ImGui::SameLine();
+                    if (i + 1 < edited.requiredItems.size() && ImGui::SmallButton("v")) {
+                        std::swap(edited.requiredItems[i], edited.requiredItems[i + 1]);
+                        changed = true;
+                    }
+                    if (i + 1 < edited.requiredItems.size()) ImGui::SameLine();
+                    if (ImGui::SmallButton("X")) {
+                        edited.requiredItems.erase(edited.requiredItems.begin() + static_cast<std::ptrdiff_t>(i));
+                        changed = true;
+                        ImGui::PopID();
+                        break;
+                    }
+                    changed |= DrawAnyFormReferencePicker("Item", edited.requiredItems[i].item);
+                    ImGui::SetNextItemWidth(180.0F);
+                    if (ImGui::InputInt("Required quantity", &edited.requiredItems[i].count)) {
+                        edited.requiredItems[i].count = std::max(1, edited.requiredItems[i].count);
+                        changed = true;
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Conditions")) {
+                changed |= DrawPerkConditions(edited.conditions);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderContainerEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+        if (ImGui::BeginTabBar("##containerTabs")) {
+            if (ImGui::BeginTabItem("Data")) {
+                changed |= InputString("Name", edited.fullName);
+                changed |= InputString("Model path", edited.modelPath, 520.0F);
+                ImGui::SetNextItemWidth(180.0F);
+                changed |= ImGui::InputFloat("Weight", &edited.itemWeight);
+                changed |= DrawFormReferencePicker("Open sound", "SoundDescriptor", edited.containerOpenSound);
+                changed |= DrawFormReferencePicker("Close sound", "SoundDescriptor", edited.containerCloseSound);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Items")) {
+                if (ImGui::Button("Add item")) {
+                    edited.containerItems.emplace_back();
+                    changed = true;
+                }
+                for (std::size_t i = 0; i < edited.containerItems.size(); ++i) {
+                    ImGui::PushID(static_cast<int>(i));
+                    ImGui::Separator();
+                    if (i > 0 && ImGui::SmallButton("^")) {
+                        std::swap(edited.containerItems[i], edited.containerItems[i - 1]);
+                        changed = true;
+                    }
+                    if (i > 0) ImGui::SameLine();
+                    if (i + 1 < edited.containerItems.size() && ImGui::SmallButton("v")) {
+                        std::swap(edited.containerItems[i], edited.containerItems[i + 1]);
+                        changed = true;
+                    }
+                    if (i + 1 < edited.containerItems.size()) ImGui::SameLine();
+                    if (ImGui::SmallButton("X")) {
+                        edited.containerItems.erase(edited.containerItems.begin() + static_cast<std::ptrdiff_t>(i));
+                        changed = true;
+                        ImGui::PopID();
+                        break;
+                    }
+                    auto& entry = edited.containerItems[i];
+                    changed |= DrawAnyFormReferencePicker("Item", entry.item);
+                    ImGui::SetNextItemWidth(180.0F);
+                    if (ImGui::InputInt("Count", &entry.count)) {
+                        entry.count = std::max(1, entry.count);
+                        changed = true;
+                    }
+                    changed |= DrawAnyFormReferencePicker("Owner", entry.owner);
+                    changed |= DrawFormReferencePicker("Condition global", "Global", entry.conditionGlobal);
+                    ImGui::SetNextItemWidth(180.0F);
+                    changed |= ImGui::InputInt("Required rank", &entry.requiredRank);
+                    ImGui::SetNextItemWidth(180.0F);
+                    changed |= ImGui::InputFloat("Health multiplier", &entry.healthMult);
+                    ImGui::PopID();
+                }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Flags")) {
+                changed |= FlagCheckbox("Allows Sounds During Animation", edited.containerFlags, 1u << 0);
+                changed |= FlagCheckbox("Respawn", edited.containerFlags, 1u << 1);
+                changed |= FlagCheckbox("Show Owner", edited.containerFlags, 1u << 2);
+                changed |= ImGui::Checkbox("Allow stolen items", &edited.containerAllowStolenItems);
+                changed |= FlagCheckbox("Has Distant LOD", edited.recordFlags, 1u << 15);
+                changed |= FlagCheckbox("Random Animation Start", edited.recordFlags, 1u << 16);
+                changed |= FlagCheckbox("Obstacle", edited.recordFlags, 1u << 25);
+                changed |= FlagCheckbox("Navmesh Filter", edited.recordFlags, 1u << 26);
+                changed |= FlagCheckbox("Navmesh Bounding Box", edited.recordFlags, 1u << 27);
+                changed |= FlagCheckbox("Navmesh Ground", edited.recordFlags, 1u << 30);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+        return CommitEditedForm(index, form, edited, changed);
+    }
+
+    bool RenderMagicEffectEditor(std::size_t index, DynamicForms::DynamicForm& form) {
+        bool changed = false;
+        auto edited = form;
+
+        if (ImGui::BeginTabBar("##magicEffectTabs")) {
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                changed |= InputString(Configuration::GetLoc("menu.full_name", "Name"), edited.fullName);
+                changed |= InputString(Configuration::GetLoc("menu.magic_item_description", "Magic item description"), edited.magicItemDescription, 520.0F);
+                changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.keywords", "Keywords"), "Keyword", edited.keywords);
+                changed |= DrawAnyFormReferencePicker(Configuration::GetLoc("menu.menu_display_object", "Menu display object"), edited.menuDisplayObject);
+
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.base_cost", "Base cost"), &edited.magicEffectBaseCost);
+
+                ImGui::TextUnformatted(Configuration::GetLoc("menu.magic_effect_flags", "Magic effect flags"));
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_hostile", "Hostile"), edited.magicEffectFlags, 1u << 0);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_recover", "Recover"), edited.magicEffectFlags, 1u << 1);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_detrimental", "Detrimental"), edited.magicEffectFlags, 1u << 2);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_snap_to_navmesh", "Snap to Navmesh"), edited.magicEffectFlags, 1u << 3);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_hit_event", "No Hit Event"), edited.magicEffectFlags, 1u << 4);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_dispel_with_keywords", "Dispel with Keywords"), edited.magicEffectFlags, 1u << 8);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_duration", "No Duration"), edited.magicEffectFlags, 1u << 9);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_magnitude", "No Magnitude"), edited.magicEffectFlags, 1u << 10);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_area", "No Area"), edited.magicEffectFlags, 1u << 11);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_fx_persist", "FX Persist"), edited.magicEffectFlags, 1u << 12);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_gory_visuals", "Gory Visuals"), edited.magicEffectFlags, 1u << 14);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_hide_in_ui", "Hide in UI"), edited.magicEffectFlags, 1u << 15);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_recast", "No Recast"), edited.magicEffectFlags, 1u << 17);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_power_affects_magnitude", "Power Affects Magnitude"), edited.magicEffectFlags, 1u << 21);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_power_affects_duration", "Power Affects Duration"), edited.magicEffectFlags, 1u << 22);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_painless", "Painless"), edited.magicEffectFlags, 1u << 26);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_hit_effect", "No Hit Effect"), edited.magicEffectFlags, 1u << 27);
+                changed |= FlagCheckbox(Configuration::GetLoc("menu.flag_no_death_dispel", "No Death Dispel"), edited.magicEffectFlags, 1u << 28);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.archetype", "Archetype"))) {
+                int archetypeIndex = std::clamp(edited.magicEffectArchetype + 1, 0, static_cast<int>(MAGIC_EFFECT_ARCHETYPE_ITEMS.size() - 1));
+                SetStableComboWidth(MAGIC_EFFECT_ARCHETYPE_ITEMS, 260.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.archetype", "Archetype"), &archetypeIndex, MAGIC_EFFECT_ARCHETYPE_ITEMS.data(), static_cast<int>(MAGIC_EFFECT_ARCHETYPE_ITEMS.size()))) {
+                    edited.magicEffectArchetype = archetypeIndex - 1;
+                    changed = true;
+                }
+                changed |= DrawAnyFormReferencePicker(Configuration::GetLoc("menu.associated_form", "Associated form"), edited.magicEffectAssociatedForm);
+                changed |= DrawFullActorValueCombo(Configuration::GetLoc("menu.associated_skill", "Associated skill"), edited.magicEffectAssociatedSkill);
+                changed |= DrawFullActorValueCombo(Configuration::GetLoc("menu.resist_variable", "Resist variable"), edited.magicEffectResistVariable);
+                changed |= DrawFullActorValueCombo(Configuration::GetLoc("menu.primary_actor_value", "Primary actor value"), edited.magicEffectPrimaryAV);
+                changed |= DrawFullActorValueCombo(Configuration::GetLoc("menu.secondary_actor_value", "Secondary actor value"), edited.magicEffectSecondaryAV);
+
+                int castingType = static_cast<int>(std::min<std::uint32_t>(edited.magicEffectCastingType, static_cast<std::uint32_t>(SPELL_CASTING_TYPE_ITEMS.size() - 1)));
+                SetStableComboWidth(SPELL_CASTING_TYPE_ITEMS, 220.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.casting_type", "Casting type"), &castingType, SPELL_CASTING_TYPE_ITEMS.data(), static_cast<int>(SPELL_CASTING_TYPE_ITEMS.size()))) {
+                    edited.magicEffectCastingType = static_cast<std::uint32_t>(castingType);
+                    changed = true;
+                }
+                int delivery = static_cast<int>(std::min<std::uint32_t>(edited.magicEffectDelivery, static_cast<std::uint32_t>(SPELL_DELIVERY_ITEMS.size() - 1)));
+                SetStableComboWidth(SPELL_DELIVERY_ITEMS, 220.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.delivery", "Delivery"), &delivery, SPELL_DELIVERY_ITEMS.data(), static_cast<int>(SPELL_DELIVERY_ITEMS.size()))) {
+                    edited.magicEffectDelivery = static_cast<std::uint32_t>(delivery);
+                    changed = true;
+                }
+
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputInt(Configuration::GetLoc("menu.minimum_skill", "Minimum skill"), &edited.magicEffectMinimumSkill);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputInt(Configuration::GetLoc("menu.spellmaking_area", "Spellmaking area"), &edited.magicEffectSpellmakingArea);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.spellmaking_charge_time", "Spellmaking charge time"), &edited.magicEffectSpellmakingChargeTime);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.taper_weight", "Taper weight"), &edited.magicEffectTaperWeight);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.taper_curve", "Taper curve"), &edited.magicEffectTaperCurve);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.taper_duration", "Taper duration"), &edited.magicEffectTaperDuration);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.second_av_weight", "Second AV weight"), &edited.magicEffectSecondAVWeight);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.skill_usage_multiplier", "Skill usage multiplier"), &edited.magicEffectSkillUsageMult);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.dual_cast_scale", "Dual cast scale"), &edited.magicEffectDualCastScale);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.ai_score", "AI score"), &edited.magicEffectAIScore);
+                ImGui::SetNextItemWidth(160.0F);
+                changed |= ImGui::InputFloat(Configuration::GetLoc("menu.ai_delay_time", "AI delay time"), &edited.magicEffectAIDelayTime);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.dual_cast_data", "Dual cast data"), "DualCastData", edited.magicEffectDualCastData);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.perk", "Perk"), "Perk", edited.magicEffectPerk);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.equip_ability", "Equip ability"), "Spell", edited.magicEffectEquipAbility);
+                changed |= DrawReferenceArrayEditor(Configuration::GetLoc("menu.counter_effects", "Counter effects"), "MagicEffect", edited.magicEffectCounterEffects);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.visuals", "Visuals"))) {
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.casting_light", "Casting light"), "Light", edited.magicEffectLight);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.effect_shader", "Effect shader"), "EffectShader", edited.magicEffectShader);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.enchant_shader", "Enchant shader"), "EffectShader", edited.magicEffectEnchantShader);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.projectile", "Projectile"), "Projectile", edited.magicEffectProjectile);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.explosion", "Explosion"), "Explosion", edited.magicEffectExplosion);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.casting_art", "Casting art"), "ArtObject", edited.magicEffectCastingArt);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.hit_effect_art", "Hit effect art"), "ArtObject", edited.magicEffectHitEffectArt);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.enchant_effect_art", "Enchant effect art"), "ArtObject", edited.magicEffectEnchantEffectArt);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.impact_data_set", "Impact data set"), "ImpactDataSet", edited.magicEffectImpactDataSet);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.hit_visuals", "Hit visuals"), "ReferenceEffect", edited.magicEffectHitVisuals);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.enchant_visuals", "Enchant visuals"), "ReferenceEffect", edited.magicEffectEnchantVisuals);
+                changed |= DrawFormReferencePicker(Configuration::GetLoc("menu.image_space_modifier", "Image space modifier"), "ImageSpaceModifier", edited.magicEffectImageSpaceMod);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.sounds", "Sounds"))) {
+                int soundLevel = static_cast<int>(std::min<std::uint32_t>(edited.magicEffectCastingSoundLevel, static_cast<std::uint32_t>(SOUND_LEVEL_ITEMS.size() - 1)));
+                SetStableComboWidth(SOUND_LEVEL_ITEMS, 180.0F);
+                if (ImGui::Combo(Configuration::GetLoc("menu.casting_sound_level", "Casting sound level"), &soundLevel, SOUND_LEVEL_ITEMS.data(), static_cast<int>(SOUND_LEVEL_ITEMS.size()))) {
+                    edited.magicEffectCastingSoundLevel = static_cast<std::uint32_t>(soundLevel);
+                    changed = true;
+                }
+                for (std::size_t i = 0; i < edited.magicEffectSounds.size(); ++i) {
+                    changed |= DrawFormReferencePicker(MAGIC_EFFECT_SOUND_ITEMS[i], "SoundDescriptor", edited.magicEffectSounds[i]);
+                }
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem(Configuration::GetLoc("menu.conditions", "Conditions"))) {
+                changed |= DrawPerkConditions(edited.conditions);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+
         return CommitEditedForm(index, form, edited, changed);
     }
 

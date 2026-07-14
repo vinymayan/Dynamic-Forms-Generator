@@ -12,7 +12,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
     }
 }
 
-SKSEPluginLoad(const SKSE::LoadInterface *skse) {
+SKSEPluginLoad(const SKSE::LoadInterface* skse) {
 
     SetupLog();
     logger::info("Plugin loaded");

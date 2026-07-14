@@ -240,6 +240,10 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     PopulateList<RE::TESObjectSTAT>("Static", [](RE::TESObjectSTAT* stat) -> bool {
         return stat != nullptr;
     });
+    PopulateList<RE::BGSMovableStatic>("MovableStatic", [](RE::BGSMovableStatic* stat) -> bool { return stat != nullptr; });
+    PopulateList<RE::TESObjectDOOR>("Door", [](RE::TESObjectDOOR* door) -> bool { return door != nullptr; });
+    PopulateList<RE::TESFlora>("Flora", [](RE::TESFlora* flora) -> bool { return flora != nullptr; });
+    PopulateList<RE::TESObjectTREE>("Tree", [](RE::TESObjectTREE* tree) -> bool { return tree != nullptr; });
 
     PopulateList<RE::TESLevItem>("LeveledItem", [](RE::TESLevItem* leveledItem) -> bool {
         return leveledItem != nullptr;
@@ -259,6 +263,10 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
 
     PopulateList<RE::SpellItem>("Spell", [](RE::SpellItem* spell) -> bool {
         return spell != nullptr;
+    });
+
+    PopulateList<RE::ScrollItem>("Scroll", [](RE::ScrollItem* scroll) -> bool {
+        return scroll != nullptr;
     });
 
     PopulateList<RE::BGSHeadPart>("HeadPart", [](RE::BGSHeadPart* headPart) -> bool {
@@ -336,9 +344,15 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     PopulateList<RE::BGSImpactDataSet>("ImpactDataSet", [](RE::BGSImpactDataSet* impactDataSet) -> bool {
         return impactDataSet != nullptr;
     });
+    PopulateList<RE::BGSImpactData>("ImpactData", [](RE::BGSImpactData* impactData) -> bool { return impactData != nullptr; });
+    PopulateList<RE::BGSHazard>("Hazard", [](RE::BGSHazard* hazard) -> bool { return hazard != nullptr; });
 
     PopulateList<RE::BGSProjectile>("Projectile", [](RE::BGSProjectile* projectile) -> bool {
         return projectile != nullptr;
+    });
+
+    PopulateList<RE::BGSCollisionLayer>("CollisionLayer", [](RE::BGSCollisionLayer* layer) -> bool {
+        return layer != nullptr;
     });
 
     PopulateList<RE::TESImageSpaceModifier>("ImageSpaceModifier", [](RE::TESImageSpaceModifier* imageSpaceModifier) -> bool {
@@ -363,6 +377,14 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
         return effect != nullptr;
     });
 
+    PopulateList<RE::BGSDualCastData>("DualCastData", [](RE::BGSDualCastData* data) -> bool {
+        return data != nullptr;
+    });
+
+    PopulateList<RE::BGSReferenceEffect>("ReferenceEffect", [](RE::BGSReferenceEffect* effect) -> bool {
+        return effect != nullptr;
+    });
+
     PopulateList<RE::BGSEquipSlot>("EquipSlot", [](RE::BGSEquipSlot* equipSlot) -> bool {
         return equipSlot != nullptr;
     });
@@ -370,10 +392,33 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     PopulateList<RE::BGSFootstepSet>("FootstepSet", [](RE::BGSFootstepSet* footstepSet) -> bool {
         return footstepSet != nullptr;
     });
+    PopulateList<RE::BGSFootstep>("Footstep", [](RE::BGSFootstep* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSReverbParameters>("ReverbParameters", [](RE::BGSReverbParameters* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSAcousticSpace>("AcousticSpace", [](RE::BGSAcousticSpace* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSAssociationType>("AssociationType", [](RE::BGSAssociationType* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESImageSpace>("ImageSpace", [](RE::TESImageSpace* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESRegion>("Region", [](RE::TESRegion* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSLocation>("Location", [](RE::BGSLocation* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESIdleForm>("Idle", [](RE::TESIdleForm* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESShout>("Shout", [](RE::TESShout* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESWordOfPower>("WordOfPower", [](RE::TESWordOfPower* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESLevItem>("LeveledItem", [](RE::TESLevItem* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESLevCharacter>("LeveledNPC", [](RE::TESLevCharacter* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESLevSpell>("LeveledSpell", [](RE::TESLevSpell* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSLocationRefType>("LocationRefType", [](RE::BGSLocationRefType* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSAction>("Action", [](RE::BGSAction* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSMenuIcon>("MenuIcon", [](RE::BGSMenuIcon* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESEyes>("Eyes", [](RE::TESEyes* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSNote>("Note", [](RE::BGSNote* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESObjectANIO>("AnimatedObject", [](RE::TESObjectANIO* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESLoadScreen>("LoadScreen", [](RE::TESLoadScreen* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSShaderParticleGeometryData>("ShaderParticleGeometry", [](RE::BGSShaderParticleGeometryData* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSAddonNode>("AddonNode", [](RE::BGSAddonNode* value) -> bool { return value != nullptr; });
 
     PopulateList<RE::BGSMaterialType>("MaterialType", [](RE::BGSMaterialType* materialType) -> bool {
         return materialType != nullptr;
     });
+    PopulateList<RE::BGSMaterialObject>("MaterialObject", [](RE::BGSMaterialObject* materialObject) -> bool { return materialObject != nullptr; });
 
     PopulateList<RE::TESNPC>("NPC", [](RE::TESNPC* npc) -> bool {
         return npc != nullptr;
@@ -393,6 +438,12 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
 
     PopulateList<RE::TESCombatStyle>("CombatStyle", [](RE::TESCombatStyle* combatStyle) -> bool {
         return combatStyle != nullptr;
+    });
+    PopulateList<RE::BGSConstructibleObject>("ConstructibleObject", [](RE::BGSConstructibleObject* recipe) -> bool {
+        return recipe != nullptr;
+    });
+    PopulateList<RE::TESObjectCONT>("Container", [](RE::TESObjectCONT* container) -> bool {
+        return container != nullptr;
     });
 
     PopulateList<RE::TESFaction>("Faction", [](RE::TESFaction* faction) -> bool {

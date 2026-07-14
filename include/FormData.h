@@ -25,6 +25,7 @@ namespace DynamicForms {
         Weapon,
         AlchemyItem,
         Ingredient,
+        Spell,
         Color,
         ArtObject,
         Perk,
@@ -34,7 +35,57 @@ namespace DynamicForms {
         Explosion,
         Activator,
         EffectShader,
-        NPC
+        NPC,
+        MagicEffect,
+        Enchantment,
+        Scroll,
+        Projectile,
+        TextureSet,
+        Hazard,
+        ImpactData,
+        ReferenceEffect,
+        DualCastData,
+        Static,
+        MovableStatic,
+        Door,
+        CombatStyle,
+        SoundCategory,
+        Class,
+        Flora,
+        Tree,
+        ConstructibleObject,
+        Container,
+        ImpactDataSet,
+        CollisionLayer,
+        Footstep,
+        FootstepSet,
+        ReverbParameters,
+        AcousticSpace,
+        Apparatus,
+        StaticCollection,
+        Grass,
+        IdleMarker,
+        EncounterZone,
+        Relationship,
+        AssociationType,
+        MovementType,
+        WordOfPower,
+        Water,
+        ImageSpace,
+        LightingTemplate,
+        Shout,
+        LeveledItem,
+        LeveledNPC,
+        LeveledSpell,
+        LocationRefType,
+        Action,
+        MenuIcon,
+        Eyes,
+        Note,
+        AnimatedObject,
+        LoadScreen,
+        ShaderParticleGeometry,
+        AddonNode
     };
 
     enum class GlobalType
@@ -144,6 +195,7 @@ namespace DynamicForms {
         std::uint32_t area{ 0 };
         std::uint32_t duration{ 0 };
         float cost{ 0.0F };
+        std::vector<PerkCondition> conditions;
     };
 
     struct TintLayer
@@ -155,6 +207,33 @@ namespace DynamicForms {
         std::uint8_t green{ 0 };
         std::uint8_t blue{ 0 };
         std::uint8_t alpha{ 255 };
+    };
+
+    struct ContainerEntry
+    {
+        FormRef item;
+        std::int32_t count{ 1 };
+        FormRef owner;
+        FormRef conditionGlobal;
+        std::int32_t requiredRank{ 0 };
+        float healthMult{ 100.0F };
+    };
+
+    struct FormRefPair
+    {
+        FormRef key;
+        FormRef value;
+    };
+
+    struct LeveledEntry
+    {
+        FormRef form;
+        std::uint16_t level{ 1 };
+        std::uint16_t count{ 1 };
+        FormRef owner;
+        FormRef conditionGlobal;
+        std::int32_t requiredRank{ 0 };
+        float healthMult{ 100.0F };
     };
 
     struct DynamicForm
@@ -240,6 +319,288 @@ namespace DynamicForms {
         std::uint16_t playerUses{ 0 };
         bool magicEffectsOverride{ false };
         std::vector<MagicEffectEntry> magicEffects;
+        std::uint32_t spellFlags{ 0 };
+        std::uint32_t spellType{ 0 };
+        std::int32_t spellCostOverride{ 0 };
+        float spellChargeTime{ 0.0F };
+        std::uint32_t spellCastingType{ 1 };
+        std::uint32_t spellDelivery{ 0 };
+        float spellCastDuration{ 0.0F };
+        float spellRange{ 0.0F };
+        FormRef castingPerk;
+        FormRef menuDisplayObject;
+        std::uint32_t enchantmentFlags{ 0 };
+        std::int32_t enchantmentCostOverride{ 0 };
+        std::uint32_t enchantmentCastingType{ 1 };
+        std::int32_t enchantmentChargeOverride{ 0 };
+        std::uint32_t enchantmentDelivery{ 0 };
+        std::uint32_t enchantmentSpellType{ 6 };
+        float enchantmentChargeTime{ 0.0F };
+        FormRef baseEnchantment;
+        FormRef wornRestrictions;
+        std::uint32_t scrollFlags{ 0 };
+        std::int32_t scrollCostOverride{ 0 };
+        float scrollChargeTime{ 0.0F };
+        std::uint32_t scrollDelivery{ 0 };
+        float scrollCastDuration{ 0.0F };
+        float scrollRange{ 0.0F };
+        FormRef scrollCastingPerk;
+        std::uint32_t projectileFlags{ 0 };
+        std::uint32_t projectileTypes{ 1 };
+        float projectileGravity{ 0.0F };
+        float projectileSpeed{ 1000.0F };
+        float projectileRange{ 10000.0F };
+        FormRef projectileLight;
+        FormRef projectileMuzzleFlashLight;
+        float projectileTracerChance{ 0.0F };
+        float projectileExplosionProximity{ 0.0F };
+        float projectileExplosionTimer{ 0.0F };
+        FormRef projectileExplosionType;
+        FormRef projectileActiveSoundLoop;
+        float projectileMuzzleFlashDuration{ 0.0F };
+        float projectileFadeOutTime{ 0.0F };
+        float projectileForce{ 0.0F };
+        FormRef projectileCountdownSound;
+        FormRef projectileDeactivateSound;
+        FormRef projectileDefaultWeaponSource;
+        float projectileConeSpread{ 0.0F };
+        float projectileCollisionRadius{ 0.0F };
+        float projectileLifetime{ 0.0F };
+        float projectileRelaunchInterval{ 0.0F };
+        FormRef projectileDecalData;
+        FormRef projectileCollisionLayer;
+        std::string projectileMuzzleFlashModel;
+        std::uint32_t projectileSoundLevel{ 1 };
+        std::array<std::string, 8> textureSetPaths;
+        std::uint32_t textureSetFlags{ 0 };
+        bool textureSetHasDecal{ false };
+        float decalMinWidth{ 0.0F };
+        float decalMaxWidth{ 0.0F };
+        float decalMinHeight{ 0.0F };
+        float decalMaxHeight{ 0.0F };
+        float decalDepth{ 0.0F };
+        float decalShininess{ 0.0F };
+        float decalParallaxScale{ 0.0F };
+        std::int32_t decalParallaxPasses{ 0 };
+        std::uint32_t decalFlags{ 0 };
+        std::uint8_t decalRed{ 255 };
+        std::uint8_t decalGreen{ 255 };
+        std::uint8_t decalBlue{ 255 };
+        std::uint8_t decalAlpha{ 255 };
+        std::uint32_t hazardLimit{ 0 };
+        float hazardRadius{ 0.0F };
+        float hazardLifetime{ 0.0F };
+        float hazardImageSpaceRadius{ 0.0F };
+        float hazardTargetInterval{ 0.0F };
+        std::uint32_t hazardFlags{ 0 };
+        FormRef hazardSpell;
+        FormRef hazardLight;
+        FormRef hazardImpactDataSet;
+        FormRef hazardSound;
+        FormRef hazardImageSpaceModifier;
+        float impactEffectDuration{ 0.0F };
+        std::uint32_t impactOrientation{ 0 };
+        float impactAngleThreshold{ 0.0F };
+        float impactPlacementRadius{ 0.0F };
+        std::uint32_t impactSoundLevel{ 1 };
+        std::uint32_t impactFlags{ 0 };
+        std::uint32_t impactResultOverride{ 0 };
+        FormRef impactDecalTextureSet;
+        FormRef impactDecalTextureSet2;
+        FormRef impactSound1;
+        FormRef impactSound2;
+        FormRef impactHazard;
+        FormRef referenceEffectArtObject;
+        FormRef referenceEffectShader;
+        std::uint32_t referenceEffectFlags{ 0 };
+        FormRef dualCastProjectile;
+        FormRef dualCastExplosion;
+        FormRef dualCastEffectShader;
+        FormRef dualCastHitEffectArt;
+        FormRef dualCastImpactDataSet;
+        std::uint32_t dualCastFlags{ 0 };
+        float staticMaterialThresholdAngle{ 0.0F };
+        FormRef staticMaterialObject;
+        std::uint32_t staticFlags{ 0 };
+        std::uint32_t recordFlags{ 0 };
+        FormRef movableStaticSoundLoop;
+        std::uint32_t movableStaticFlags{ 0 };
+        FormRef doorOpenSound;
+        FormRef doorCloseSound;
+        FormRef doorLoopSound;
+        std::uint32_t doorFlags{ 0 };
+        std::array<float, 10> combatGeneral{};
+        std::array<float, 8> combatMelee{};
+        std::array<float, 4> combatCloseRange{};
+        float combatLongRangeStrafe{ 0.0F };
+        std::array<float, 8> combatFlight{};
+        std::uint32_t combatStyleFlags{ 0 };
+        std::uint32_t soundCategoryFlags{ 0 };
+        FormRef soundCategoryParent;
+        std::uint16_t soundCategoryAttenuation{ 0 };
+        float soundCategoryStaticMult{ 1.0F };
+        float soundCategoryDefaultMenuValue{ 1.0F };
+        float soundCategoryVolumeMult{ 1.0F };
+        float soundCategoryFrequencyMult{ 1.0F };
+        std::uint32_t classTeachesSkill{ 0 };
+        std::uint8_t classMaximumTrainingLevel{ 0 };
+        std::array<std::uint8_t, 18> classSkillWeights{};
+        float classBleedoutDefault{ 0.0F };
+        std::uint32_t classVoicePoints{ 0 };
+        std::array<std::uint8_t, 3> classAttributeWeights{};
+        std::string classIconPath;
+        FormRef produceItem;
+        FormRef harvestSound;
+        std::array<std::int8_t, 4> produceChance{};
+        std::uint32_t floraFlags{ 0 };
+        FormRef floraSoundLoop;
+        FormRef floraSoundActivate;
+        FormRef floraWaterType;
+        std::array<float, 12> treeAnimation{};
+        std::uint32_t treeType{ 0 };
+        FormRef createdItem;
+        FormRef benchKeyword;
+        std::uint16_t numConstructed{ 1 };
+        std::vector<ContainerEntry> requiredItems;
+        std::vector<ContainerEntry> containerItems;
+        std::uint32_t containerFlags{ 0 };
+        bool containerAllowStolenItems{ false };
+        FormRef containerOpenSound;
+        FormRef containerCloseSound;
+        std::vector<FormRefPair> impactDataSetEntries;
+        std::uint32_t collisionLayerIndex{ 0 };
+        std::uint32_t collisionLayerColor{ 0xFFFFFFFFu };
+        std::uint32_t collisionLayerFlags{ 0 };
+        std::string collisionLayerName;
+        std::vector<FormRef> collisionLayers;
+        std::string footstepTag;
+        FormRef footstepImpactDataSet;
+        std::array<std::vector<FormRef>, 5> footstepSets;
+        std::uint16_t reverbDecayTime{ 1000 };
+        std::uint16_t reverbHFReference{ 5000 };
+        std::array<std::int8_t, 9> reverbValues{};
+        FormRef acousticLoopingSound;
+        FormRef acousticSoundRegion;
+        FormRef acousticReverb;
+        std::uint32_t apparatusQuality{ 0 };
+        std::uint8_t grassDensity{ 50 };
+        std::uint8_t grassMinSlope{ 0 };
+        std::uint8_t grassMaxSlope{ 90 };
+        std::uint16_t grassDistanceFromWater{ 0 };
+        std::uint32_t grassWaterState{ 0 };
+        float grassPositionRange{ 0.0F };
+        float grassHeightRange{ 0.0F };
+        float grassColorRange{ 0.0F };
+        float grassWavePeriod{ 1.0F };
+        std::uint32_t grassFlags{ 0 };
+        std::uint32_t idleFlags{ 0 };
+        float idleTimer{ 0.0F };
+        std::vector<FormRef> idleAnimations;
+        FormRef encounterOwner;
+        FormRef encounterLocation;
+        std::int8_t encounterOwnerRank{ 0 };
+        std::int8_t encounterMinLevel{ 0 };
+        std::int8_t encounterMaxLevel{ 0 };
+        std::uint32_t encounterFlags{ 0 };
+        FormRef relationshipNpc1;
+        FormRef relationshipNpc2;
+        FormRef relationshipAssociation;
+        std::uint32_t relationshipLevel{ 4 };
+        std::uint32_t relationshipFlags{ 0 };
+        std::array<std::string, 4> associationLabels;
+        std::uint32_t associationFlags{ 0 };
+        std::string movementName;
+        std::array<float, 10> movementSpeeds{};
+        float movementRotateWhileMoving{ 0.0F };
+        float movementDirectional{ 0.0F };
+        float movementSpeed{ 0.0F };
+        float movementRotationSpeed{ 0.0F };
+        std::string wordTranslation;
+        std::array<std::string, 4> waterNoiseTextures;
+        std::uint8_t waterAlpha{ 255 };
+        std::uint32_t waterFlags{ 0 };
+        FormRef waterMaterial;
+        FormRef waterSound;
+        FormRef waterContactSpell;
+        FormRef waterImageSpace;
+        std::array<float, 3> waterLinearVelocity{};
+        std::array<float, 3> waterAngularVelocity{};
+        std::array<float, 9> imageSpaceHDR{};
+        std::array<float, 3> imageSpaceCinematic{};
+        float imageSpaceTintAmount{ 0.0F };
+        std::array<float, 3> imageSpaceTintColor{};
+        std::array<float, 3> imageSpaceDOF{};
+        std::uint16_t imageSpaceDOFFlags{ 0 };
+        std::uint16_t imageSpaceSkyBlur{ 16384 };
+        std::array<std::uint32_t, 7> lightingColors{};
+        std::array<float, 8> lightingValues{};
+        std::uint32_t lightingDirectionalXY{ 0 };
+        std::uint32_t lightingDirectionalZ{ 0 };
+        std::uint32_t lightingInheritanceFlags{ 0 };
+        std::array<FormRef, 3> shoutWords;
+        std::array<FormRef, 3> shoutSpells;
+        std::array<float, 3> shoutRecoveryTimes{};
+        std::vector<LeveledEntry> leveledEntries;
+        std::uint8_t leveledChanceNone{ 0 };
+        std::uint32_t leveledFlags{ 0 };
+        FormRef leveledChanceGlobal;
+        std::uint32_t actionIndex{ 0 };
+        std::string eyesTexture;
+        std::uint32_t eyesFlags{ 1 };
+        std::string animatedUnloadEvent;
+        std::string loadScreenText;
+        FormRef loadScreenObject;
+        float loadScreenInitialScale{ 1.0F };
+        std::array<std::int16_t, 3> loadScreenRotationConstraints{};
+        std::array<std::int16_t, 2> loadScreenRotationOffsetConstraints{};
+        std::array<float, 3> loadScreenTranslationOffset{};
+        std::string loadScreenCameraPath;
+        std::array<float, 12> shaderParticleSettings{};
+        std::string shaderParticleTexture;
+        std::uint32_t addonIndex{ 0 };
+        FormRef addonSound;
+        std::uint16_t addonMasterParticleCap{ 0 };
+        std::uint32_t addonFlags{ 0 };
+        std::uint32_t magicEffectFlags{ 0 };
+        float magicEffectBaseCost{ 0.0F };
+        FormRef magicEffectAssociatedForm;
+        std::int32_t magicEffectAssociatedSkill{ -1 };
+        std::int32_t magicEffectResistVariable{ -1 };
+        std::vector<FormRef> magicEffectCounterEffects;
+        FormRef magicEffectLight;
+        float magicEffectTaperWeight{ 0.0F };
+        FormRef magicEffectShader;
+        FormRef magicEffectEnchantShader;
+        std::int32_t magicEffectMinimumSkill{ 0 };
+        std::int32_t magicEffectSpellmakingArea{ 0 };
+        float magicEffectSpellmakingChargeTime{ 0.0F };
+        float magicEffectTaperCurve{ 0.0F };
+        float magicEffectTaperDuration{ 0.0F };
+        float magicEffectSecondAVWeight{ 0.0F };
+        std::int32_t magicEffectArchetype{ 0 };
+        std::int32_t magicEffectPrimaryAV{ -1 };
+        FormRef magicEffectProjectile;
+        FormRef magicEffectExplosion;
+        std::uint32_t magicEffectCastingType{ 1 };
+        std::uint32_t magicEffectDelivery{ 0 };
+        std::int32_t magicEffectSecondaryAV{ -1 };
+        FormRef magicEffectCastingArt;
+        FormRef magicEffectHitEffectArt;
+        FormRef magicEffectImpactDataSet;
+        float magicEffectSkillUsageMult{ 0.0F };
+        FormRef magicEffectDualCastData;
+        float magicEffectDualCastScale{ 1.0F };
+        FormRef magicEffectEnchantEffectArt;
+        FormRef magicEffectHitVisuals;
+        FormRef magicEffectEnchantVisuals;
+        FormRef magicEffectEquipAbility;
+        FormRef magicEffectImageSpaceMod;
+        FormRef magicEffectPerk;
+        std::uint32_t magicEffectCastingSoundLevel{ 1 };
+        float magicEffectAIScore{ 0.0F };
+        float magicEffectAIDelayTime{ 0.0F };
+        std::array<FormRef, 6> magicEffectSounds;
+        std::string magicItemDescription;
         std::uint32_t bookFlags{ 0 };
         std::uint32_t bookType{ 0 };
         FormRef teachesSpell;
