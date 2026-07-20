@@ -15,11 +15,14 @@ namespace Manager {
     constexpr const char* DPF_OWNER = "DynamicFormsGenerator";
 
     std::vector<DynamicForms::DynamicForm>& GetForms();
+    void InstallHooks();
     void LoadForms();
     bool SaveForm(const DynamicForms::DynamicForm& form);
     bool SaveForm(std::size_t index, bool dispatchUpdate = true);
     bool SaveAllForms(bool dispatchUpdate = true);
     bool AddForm(const DynamicForms::DynamicForm& form);
+    bool PopulateFormFromGameTemplate(DynamicForms::DynamicForm& form, const DynamicForms::FormRef& templateRef);
+    const char* GetListTypeName(DynamicForms::FormKind kind);
     bool UpdateForm(std::size_t index, const DynamicForms::DynamicForm& form);
     bool DeleteForm(std::size_t index);
     bool AssignFormToPackage(std::string_view editorId, std::string_view packageName, bool save = true);

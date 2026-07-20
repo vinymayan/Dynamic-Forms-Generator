@@ -1,6 +1,7 @@
 #include "Configuration.h"
 
 #include "ConditionCatalog.h"
+#include "DPFAPI.h"
 #include "ListManager.h"
 #include "Manager.h"
 #include "logger.h"
@@ -52,6 +53,10 @@ namespace {
     int pendingDeleteIndex = -1;
     std::unordered_map<std::string, std::string> outfitPieceFilters;
     std::unordered_map<std::string, std::string> formPickerFilters;
+    std::unordered_map<std::string, std::string> searchableComboFilters;
+    std::unordered_map<std::string, int> mixedPickerTypeIndices;
+    int outfitPieceTypeIndex = 0;
+    std::string createFormKindFilter;
     std::string conditionFunctionFilter;
     std::array<char, 128> exportFilterEditorIdBuffer{};
     int selectedExportFilterKind = 0;
@@ -65,6 +70,8 @@ namespace {
     bool deleteSelectionMode = false;
     bool requestBatchDeletePopup = false;
     bool requestCreateFormPopup = false;
+    bool createWithTemplate = false;
+    DynamicForms::FormRef createGameTemplate;
     bool requestCreatePatchPopup = false;
     std::set<std::string> selectedDeleteForms;
     std::set<std::string> selectedExportForms;
@@ -117,8 +124,8 @@ namespace {
     const ImGui::ImVec4 INHERITED_COLOR{ 0.6F, 0.78F, 1.0F, 1.0F };
     const ImGui::ImVec4 OVERRIDE_COLOR{ 1.0F, 0.62F, 0.22F, 1.0F };
     const ImGui::ImVec4 LOCAL_COLOR{ 0.55F, 0.9F, 0.65F, 1.0F };
-    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node" };
-    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node" };
+    constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node", "Faction", "Idle Animation", "Material Object", "Message", "Land Texture", "Sound Output Model", "Lens Flare", "Debris", "Image Space Modifier", "Camera Shot", "Camera Path", "Talking Activator", "Furniture", "Weather", "Climate", "Location", "Music Type", "Music Track", "Body Part Data", "Volumetric Lighting", "Sound", "Actor Value Information", "Dialogue Branch", "Dialogue Topic", "Dialogue Info", "Quest", "Scene", "Story Manager Branch", "Story Manager Quest", "Story Manager Event", "Package", "Race" };
+    constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node", "Faction", "Idle Animation", "Material Object", "Message", "Land Texture", "Sound Output Model", "Lens Flare", "Debris", "Image Space Modifier", "Camera Shot", "Camera Path", "Talking Activator", "Furniture", "Weather", "Climate", "Location", "Music Type", "Music Track", "Body Part Data", "Volumetric Lighting", "Sound", "Actor Value Information", "Dialogue Branch", "Dialogue Topic", "Dialogue Info", "Quest", "Scene", "Story Manager Branch", "Story Manager Quest", "Story Manager Event", "Package", "Race" };
     constexpr std::array FORM_KIND_TREE_ORDER{
         DynamicForms::FormKind::Global,
         DynamicForms::FormKind::Keyword,
@@ -168,7 +175,17 @@ namespace {
         DynamicForms::FormKind::Shout, DynamicForms::FormKind::LeveledItem, DynamicForms::FormKind::LeveledNPC, DynamicForms::FormKind::LeveledSpell,
         DynamicForms::FormKind::LocationRefType, DynamicForms::FormKind::Action, DynamicForms::FormKind::MenuIcon,
         DynamicForms::FormKind::Eyes, DynamicForms::FormKind::Note, DynamicForms::FormKind::AnimatedObject,
-        DynamicForms::FormKind::LoadScreen, DynamicForms::FormKind::ShaderParticleGeometry, DynamicForms::FormKind::AddonNode
+        DynamicForms::FormKind::LoadScreen, DynamicForms::FormKind::ShaderParticleGeometry, DynamicForms::FormKind::AddonNode,
+        DynamicForms::FormKind::Faction, DynamicForms::FormKind::IdleAnimation, DynamicForms::FormKind::MaterialObject,
+        DynamicForms::FormKind::Message, DynamicForms::FormKind::LandTexture, DynamicForms::FormKind::SoundOutputModel,
+        DynamicForms::FormKind::LensFlare, DynamicForms::FormKind::Debris, DynamicForms::FormKind::ImageSpaceModifier,
+        DynamicForms::FormKind::CameraShot, DynamicForms::FormKind::CameraPath,
+        DynamicForms::FormKind::TalkingActivator, DynamicForms::FormKind::Furniture, DynamicForms::FormKind::Weather,
+        DynamicForms::FormKind::Climate, DynamicForms::FormKind::Location, DynamicForms::FormKind::MusicType,
+        DynamicForms::FormKind::MusicTrack, DynamicForms::FormKind::BodyPartData, DynamicForms::FormKind::VolumetricLighting,
+        DynamicForms::FormKind::Sound, DynamicForms::FormKind::ActorValueInfo,
+        DynamicForms::FormKind::DialogueBranch, DynamicForms::FormKind::DialogueTopic, DynamicForms::FormKind::DialogueInfo
+        , DynamicForms::FormKind::Quest, DynamicForms::FormKind::Scene, DynamicForms::FormKind::StoryManagerBranchNode, DynamicForms::FormKind::StoryManagerQuestNode, DynamicForms::FormKind::StoryManagerEventNode, DynamicForms::FormKind::Package, DynamicForms::FormKind::Race
     };
     constexpr std::array FILTER_KIND_ORDER{
         DynamicForms::FormKind::Global, DynamicForms::FormKind::Keyword, DynamicForms::FormKind::FormList,
@@ -196,7 +213,17 @@ namespace {
         DynamicForms::FormKind::Shout, DynamicForms::FormKind::LeveledItem, DynamicForms::FormKind::LeveledNPC, DynamicForms::FormKind::LeveledSpell,
         DynamicForms::FormKind::LocationRefType, DynamicForms::FormKind::Action, DynamicForms::FormKind::MenuIcon,
         DynamicForms::FormKind::Eyes, DynamicForms::FormKind::Note, DynamicForms::FormKind::AnimatedObject,
-        DynamicForms::FormKind::LoadScreen, DynamicForms::FormKind::ShaderParticleGeometry, DynamicForms::FormKind::AddonNode
+        DynamicForms::FormKind::LoadScreen, DynamicForms::FormKind::ShaderParticleGeometry, DynamicForms::FormKind::AddonNode,
+        DynamicForms::FormKind::Faction, DynamicForms::FormKind::IdleAnimation, DynamicForms::FormKind::MaterialObject,
+        DynamicForms::FormKind::Message, DynamicForms::FormKind::LandTexture, DynamicForms::FormKind::SoundOutputModel,
+        DynamicForms::FormKind::LensFlare, DynamicForms::FormKind::Debris, DynamicForms::FormKind::ImageSpaceModifier,
+        DynamicForms::FormKind::CameraShot, DynamicForms::FormKind::CameraPath,
+        DynamicForms::FormKind::TalkingActivator, DynamicForms::FormKind::Furniture, DynamicForms::FormKind::Weather,
+        DynamicForms::FormKind::Climate, DynamicForms::FormKind::Location, DynamicForms::FormKind::MusicType,
+        DynamicForms::FormKind::MusicTrack, DynamicForms::FormKind::BodyPartData, DynamicForms::FormKind::VolumetricLighting,
+        DynamicForms::FormKind::Sound, DynamicForms::FormKind::ActorValueInfo,
+        DynamicForms::FormKind::DialogueBranch, DynamicForms::FormKind::DialogueTopic, DynamicForms::FormKind::DialogueInfo
+        , DynamicForms::FormKind::Quest, DynamicForms::FormKind::Scene, DynamicForms::FormKind::StoryManagerBranchNode, DynamicForms::FormKind::StoryManagerQuestNode, DynamicForms::FormKind::StoryManagerEventNode, DynamicForms::FormKind::Package, DynamicForms::FormKind::Race
     };
     constexpr std::array GLOBAL_TYPE_ITEMS{ "short", "long", "float" };
     constexpr std::array ART_TYPE_ITEMS{ "MagicCasting", "MagicHitEffect", "MagicEnchantEffect" };
@@ -204,6 +231,14 @@ namespace {
     constexpr std::array CONDITION_KIND_ITEMS{ "Raw", "GetGlobalValue", "GetActorValue", "GetBaseActorValue", "HasPerk", "GetQuestCompleted", "HasSpell" };
     constexpr std::array CONDITION_OP_ITEMS{ "==", "!=", ">", ">=", "<", "<=" };
     constexpr std::array CONDITION_RUN_ON_ITEMS{ "Subject", "Target", "Reference", "Combat Target", "Linked Ref", "Quest Alias", "Package Data", "Event Data", "Command Target" };
+    constexpr std::array DIALOGUE_TYPE_ITEMS{ "Player Dialogue", "Command Dialogue", "Scene Dialogue", "Combat", "Favors", "Detection", "Service", "Miscellaneous" };
+    constexpr std::array DIALOGUE_EMOTION_ITEMS{ "Neutral", "Anger", "Disgust", "Fear", "Sad", "Happy", "Surprise", "Puzzled" };
+    constexpr std::array DIALOGUE_FAVOR_ITEMS{ "None", "Small", "Medium", "Large" };
+    constexpr std::array DIALOGUE_SUBTYPE_ITEMS{
+        "Custom", "Force Greet", "Rumors", "Custom 3", "Intimidate", "Flatter", "Bribe", "Ask Gift", "Gift", "Ask Favor", "Favor", "Show Relationships", "Follow", "Reject", "Scene", "Show", "Agree", "Refuse", "Exit Favor State", "Moral Refusal",
+        "Flying Mount Land", "Flying Mount Cancel Land", "Flying Mount Accept Target", "Flying Mount Reject Target", "Flying Mount No Target", "Flying Mount Destination Reached", "Attack", "Power Attack", "Bash", "Hit", "Flee", "Bleedout", "Avoid Threat", "Death", "Group Strategy", "Block", "Taunt", "Ally Killed", "Steal", "Yield", "Accept Yield", "Pickpocket Combat", "Assault", "Murder", "Assault NPC", "Murder NPC", "Pickpocket NPC", "Steal From NPC", "Trespass Against NPC", "Trespass", "Werewolf Transform Crime",
+        "Voice Power Start Short", "Voice Power Start Long", "Voice Power End Short", "Voice Power End Long", "Alert Idle", "Lost Idle", "Normal To Alert", "Alert To Combat", "Normal To Combat", "Alert To Normal", "Combat To Normal", "Combat To Lost", "Lost To Normal", "Lost To Combat", "Detect Friend Die", "Service Refusal", "Repair", "Travel", "Training", "Barter Exit", "Repair Exit", "Recharge", "Recharge Exit", "Training Exit", "Observe Combat", "Notice Corpse", "Time To Go", "Goodbye", "Hello", "Swing Melee Weapon", "Shoot Bow", "Z-Key Object", "Jump", "Knock Over Object", "Destroy Object", "Stand On Furniture", "Locked Object", "Pickpocket Topic", "Pursue Idle Topic", "Shared Info", "Player Cast Projectile Spell", "Player Cast Self Spell", "Player Shout", "Idle", "Enter Sprint Breath", "Enter Bow Zoom Breath", "Exit Bow Zoom Breath", "Actor Collide With Actor", "Player In Iron Sights", "Out Of Breath", "Combat Grunt", "Leave Water Breath"
+    };
     constexpr std::array NPC_SKILL_NAMES{
         "One-Handed", "Two-Handed", "Archery", "Block", "Smithing", "Heavy Armor",
         "Light Armor", "Pickpocket", "Lockpicking", "Sneak", "Alchemy", "Speech",
@@ -313,7 +348,18 @@ namespace {
         PickerType{ "LoadScreen", "Load Screen" },
         PickerType{ "ShaderParticleGeometry", "Shader Particle Geometry" },
         PickerType{ "AddonNode", "Addon Node" },
+        PickerType{ "Faction", "Faction" },
         PickerType{ "MaterialObject", "Material Object" },
+        PickerType{ "Message", "Message" },
+        PickerType{ "LandTexture", "Land Texture" },
+        PickerType{ "SoundOutputModel", "Sound Output Model" },
+        PickerType{ "LensFlare", "Lens Flare" },
+        PickerType{ "Debris", "Debris" },
+        PickerType{ "ImageSpaceModifier", "Image Space Modifier" },
+        PickerType{ "CameraShot", "Camera Shot" },
+        PickerType{ "CameraPath", "Camera Path" },
+        PickerType{ "Grass", "Grass" },
+        PickerType{ "Quest", "Quest" },
         PickerType{ "CollisionLayer", "Collision Layer" },
         PickerType{ "MagicEffect", "Magic Effect" },
         PickerType{ "Color", "Color" },
@@ -325,7 +371,26 @@ namespace {
         PickerType{ "Explosion", "Explosion" },
         PickerType{ "Activator", "Activator" },
         PickerType{ "EffectShader", "Effect Shader" },
-        PickerType{ "NPC", "NPC" }
+        PickerType{ "NPC", "NPC" },
+        PickerType{ "TalkingActivator", "Talking Activator" },
+        PickerType{ "Furniture", "Furniture" },
+        PickerType{ "Weather", "Weather" },
+        PickerType{ "Climate", "Climate" },
+        PickerType{ "MusicType", "Music Type" },
+        PickerType{ "MusicTrack", "Music Track" },
+        PickerType{ "BodyPartData", "Body Part Data" },
+        PickerType{ "VolumetricLighting", "Volumetric Lighting" },
+        PickerType{ "Sound", "Sound" },
+        PickerType{ "ActorValueInfo", "Actor Value Information" },
+        PickerType{ "DialogueBranch", "Dialogue Branch" },
+        PickerType{ "DialogueTopic", "Dialogue Topic" },
+        PickerType{ "DialogueInfo", "Dialogue Info" },
+        PickerType{ "Scene", "Scene" },
+        PickerType{ "StoryManagerBranchNode", "Story Manager Branch" },
+        PickerType{ "StoryManagerQuestNode", "Story Manager Quest" },
+        PickerType{ "StoryManagerEventNode", "Story Manager Event" },
+        PickerType{ "Package", "Package" },
+        PickerType{ "Race", "Race" }
     };
     constexpr std::array BIPED_SLOT_ITEMS{
         "Head", "Hair", "Body", "Hands", "Forearms", "Amulet", "Ring", "Feet",
@@ -617,6 +682,38 @@ namespace {
         case DynamicForms::FormKind::LoadScreen: return "Load Screen";
         case DynamicForms::FormKind::ShaderParticleGeometry: return "Shader Particle Geometry";
         case DynamicForms::FormKind::AddonNode: return "Addon Node";
+        case DynamicForms::FormKind::Faction: return "Faction";
+        case DynamicForms::FormKind::IdleAnimation: return "Idle Animation";
+        case DynamicForms::FormKind::MaterialObject: return "Material Object";
+        case DynamicForms::FormKind::Message: return "Message";
+        case DynamicForms::FormKind::LandTexture: return "Land Texture";
+        case DynamicForms::FormKind::SoundOutputModel: return "Sound Output Model";
+        case DynamicForms::FormKind::LensFlare: return "Lens Flare";
+        case DynamicForms::FormKind::Debris: return "Debris";
+        case DynamicForms::FormKind::ImageSpaceModifier: return "Image Space Modifier";
+        case DynamicForms::FormKind::CameraShot: return "Camera Shot";
+        case DynamicForms::FormKind::CameraPath: return "Camera Path";
+        case DynamicForms::FormKind::TalkingActivator: return "Talking Activator";
+        case DynamicForms::FormKind::Furniture: return "Furniture";
+        case DynamicForms::FormKind::Weather: return "Weather";
+        case DynamicForms::FormKind::Climate: return "Climate";
+        case DynamicForms::FormKind::Location: return "Location";
+        case DynamicForms::FormKind::MusicType: return "Music Type";
+        case DynamicForms::FormKind::MusicTrack: return "Music Track";
+        case DynamicForms::FormKind::BodyPartData: return "Body Part Data";
+        case DynamicForms::FormKind::VolumetricLighting: return "Volumetric Lighting";
+        case DynamicForms::FormKind::Sound: return "Sound";
+        case DynamicForms::FormKind::ActorValueInfo: return "Actor Value Information";
+        case DynamicForms::FormKind::DialogueBranch: return "Dialogue Branch";
+        case DynamicForms::FormKind::DialogueTopic: return "Dialogue Topic";
+        case DynamicForms::FormKind::DialogueInfo: return "Dialogue Info";
+        case DynamicForms::FormKind::Quest: return "Quest";
+        case DynamicForms::FormKind::Scene: return "Scene";
+        case DynamicForms::FormKind::StoryManagerBranchNode: return "Story Manager Branch";
+        case DynamicForms::FormKind::StoryManagerQuestNode: return "Story Manager Quest";
+        case DynamicForms::FormKind::StoryManagerEventNode: return "Story Manager Event";
+        case DynamicForms::FormKind::Package: return "Package";
+        case DynamicForms::FormKind::Race: return "Race";
         case DynamicForms::FormKind::Color:
             return "Color";
         case DynamicForms::FormKind::ArtObject:
@@ -882,7 +979,78 @@ namespace {
     }
 
     void SetFixedComboPopupWidth(const float width = 360.0F) {
-        ImGui::SetNextWindowSize({ width, 0.0F }, ImGui::ImGuiCond_Always);
+        const auto* style = ImGui::GetStyle();
+        const float paddingY = style ? style->WindowPadding.y : 8.0F;
+        const float maxHeight = ImGui::GetTextLineHeightWithSpacing() * 12.0F + paddingY * 2.0F;
+        ImGui::SetNextWindowSizeConstraints({ width, 0.0F }, { width, maxHeight });
+    }
+
+    bool DrawSearchableCombo(
+        const char* label,
+        const char* stateKey,
+        int& selectedIndex,
+        const char* const* items,
+        const int itemCount,
+        const float width,
+        const float popupWidth = 360.0F)
+    {
+        if (!items || itemCount <= 0) {
+            return false;
+        }
+
+        selectedIndex = std::clamp(selectedIndex, 0, itemCount - 1);
+        ImGui::SetNextItemWidth(width);
+        SetFixedComboPopupWidth(popupWidth);
+        if (!ImGui::BeginCombo(label, items[selectedIndex])) {
+            return false;
+        }
+
+        auto& filter = searchableComboFilters[stateKey];
+        if (ImGui::IsWindowAppearing()) {
+            filter.clear();
+            ImGui::SetKeyboardFocusHere();
+        }
+
+        std::array<char, 256> searchBuffer{};
+        strcpy_s(searchBuffer.data(), searchBuffer.size(), filter.c_str());
+        ImGui::SetNextItemWidth(-1.0F);
+        const auto searchLabel = std::format("{}##{}_search", Configuration::GetLoc("common.search_placeholder", "Filter..."), stateKey);
+        if (ImGui::InputText(searchLabel.c_str(), searchBuffer.data(), searchBuffer.size())) {
+            filter = searchBuffer.data();
+        }
+        ImGui::Separator();
+
+        const auto search = ToLower(filter);
+        std::vector<int> visibleRows;
+        visibleRows.reserve(static_cast<std::size_t>(itemCount));
+        for (int index = 0; index < itemCount; ++index) {
+            if (search.empty() || ToLower(items[index]).find(search) != std::string::npos) {
+                visibleRows.push_back(index);
+            }
+        }
+
+        bool changed = false;
+        if (visibleRows.empty()) {
+            ImGui::TextDisabled("%s", Configuration::GetLoc("menu.no_filter_results", "No matching options."));
+        } else {
+            auto* clipper = ImGui::ImGuiListClipperManager::Create();
+            ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(visibleRows.size()), 0.0F);
+            while (ImGui::ImGuiListClipperManager::Step(clipper)) {
+                for (int row = clipper->DisplayStart; row < clipper->DisplayEnd; ++row) {
+                    const int itemIndex = visibleRows[static_cast<std::size_t>(row)];
+                    if (ImGui::Selectable(items[itemIndex], selectedIndex == itemIndex)) {
+                        selectedIndex = itemIndex;
+                        filter.clear();
+                        changed = true;
+                    }
+                }
+            }
+            ImGui::ImGuiListClipperManager::End(clipper);
+            ImGui::ImGuiListClipperManager::Destroy(clipper);
+        }
+
+        ImGui::EndCombo();
+        return changed;
     }
 
     std::optional<DynamicForms::FormKind> FormKindFromFilterIndex(const int kindFilter) {
@@ -1223,8 +1391,13 @@ namespace {
                 break;
             }
         }
-        ImGui::SetNextItemWidth(260.0F);
-        if (ImGui::Combo(Configuration::GetLoc("menu.working_package_select", "Working package"), &workingIndex, workingItems.data(), static_cast<int>(workingItems.size()))) {
+        if (DrawSearchableCombo(
+                Configuration::GetLoc("menu.working_package_select", "Working package"),
+                "working_package",
+                workingIndex,
+                workingItems.data(),
+                static_cast<int>(workingItems.size()),
+                260.0F)) {
             if (workingIndex >= 0 && static_cast<std::size_t>(workingIndex) < previewPackages.size()) {
                 SetWorkingPackage(previewPackages[static_cast<std::size_t>(workingIndex)]);
             }
@@ -1232,6 +1405,17 @@ namespace {
         ImGui::SameLine();
         if (ImGui::Button(Configuration::GetLoc("menu.create_form", "Create form"))) {
             createError.clear();
+            createWithTemplate = false;
+            createFormKindFilter.clear();
+            createGameTemplate = {};
+            requestCreateFormPopup = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.create_form_template", "Create with template"))) {
+            createError.clear();
+            createWithTemplate = true;
+            createFormKindFilter.clear();
+            createGameTemplate = {};
             requestCreateFormPopup = true;
         }
         ImGui::SameLine();
@@ -1239,23 +1423,6 @@ namespace {
             selectedPatchForms.clear();
             requestCreatePatchPopup = true;
         }
-
-        auto filterItems = PackageComboItems(true);
-        ImGui::SetNextItemWidth(210.0F);
-        ImGui::Combo(Configuration::GetLoc("menu.package_filter", "Package"), &selectedPackageFilter, filterItems.data(), static_cast<int>(filterItems.size()));
-        ImGui::SameLine();
-        SetStableComboWidth(FILTER_KIND_ITEMS, 180.0F);
-        ImGui::Combo(Configuration::GetLoc("menu.filter_type", "Type"), &selectedFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(220.0F);
-        ImGui::InputText(Configuration::GetLoc("menu.filter_package_name", "Package name"), filterPackageNameBuffer.data(), filterPackageNameBuffer.size());
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(240.0F);
-        ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "EditorID"), filterEditorIdBuffer.data(), filterEditorIdBuffer.size());
-
-        ImGui::Checkbox(Configuration::GetLoc("menu.show_sources", "Show sources"), &showSourceDetails);
-        ImGui::SameLine();
-        ImGui::Checkbox(Configuration::GetLoc("menu.only_override_drafts", "Only override drafts"), &showOnlyOverrideDrafts);
 
         ImGui::Text("%s: %s", Configuration::GetLoc("menu.edit_target", "Edit target"), ActiveWorkingPackageName());
         ImGui::TextDisabled("%s", Configuration::GetLoc(
@@ -1373,6 +1540,7 @@ namespace {
     bool RenderActivatorEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderEffectShaderEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderNPCEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    bool DrawFormRefListEditor(const char* label, const char* typeName, std::vector<DynamicForms::FormRef>& values);
     bool FlagCheckbox(const char* label, std::uint32_t& flags, std::uint32_t bit);
 
     void RenderFormTreeItem(const std::size_t index, DynamicForms::DynamicForm& form) {
@@ -1411,7 +1579,10 @@ namespace {
                 ImGui::TextColored(DIRTY_COLOR, "%s", Configuration::GetLoc("menu.unsaved_form", "Unsaved changes"));
             }
             ImGui::Text("%s: %s", Configuration::GetLoc("menu.form_type", "Form type"), FormKindLabel(form.kind));
-            ImGui::Text("%s: %u", Configuration::GetLoc("menu.local_id", "Local ID"), form.localId);
+            ImGui::Text("%s: %u:%06X", Configuration::GetLoc("menu.dpf_slot", "DPF slot"), form.pluginNumber, form.localId);
+            if (form.pluginNumber != 0) {
+                ImGui::Text("%s: %s", Configuration::GetLoc("menu.dpf_plugin", "DPF plugin"), DPF::PluginNameForNumber(form.pluginNumber).c_str());
+            }
             RenderResolvedFormPanel(form, index);
             if (CanAddToInventory(form.kind)) {
                 if (ImGui::Button(Configuration::GetLoc("menu.add_to_inventory", "Add to inventory"))) {
@@ -1586,7 +1757,54 @@ namespace {
         createHeadPartFemale = false;
         createHeadPartIsExtraPart = false;
         createHeadPartUseSolidTint = false;
+        createWithTemplate = false;
+        createGameTemplate = {};
+        createFormKindFilter.clear();
         createError.clear();
+    }
+
+    bool DrawFormReferencePicker(const char* label, const char* typeName, DynamicForms::FormRef& value);
+
+    bool DrawCreateFormKindPicker() {
+        bool changed = false;
+        const int safeIndex = std::clamp(selectedFormKind, 0, static_cast<int>(FORM_KIND_ITEMS.size()) - 1);
+        SetAvailableComboWidth(300.0F);
+        SetFixedComboPopupWidth(380.0F);
+        if (ImGui::BeginCombo("##formType", FORM_KIND_ITEMS[static_cast<std::size_t>(safeIndex)])) {
+            std::array<char, 256> filterBuffer{};
+            strcpy_s(filterBuffer.data(), filterBuffer.size(), createFormKindFilter.c_str());
+            ImGui::SetNextItemWidth(-1.0F);
+            if (ImGui::InputText("##formTypeFilter", filterBuffer.data(), filterBuffer.size())) {
+                createFormKindFilter = filterBuffer.data();
+            }
+            ImGui::Separator();
+
+            const auto search = ToLower(createFormKindFilter);
+            std::vector<int> rows;
+            rows.reserve(FORM_KIND_ITEMS.size());
+            for (std::size_t i = 0; i < FORM_KIND_ITEMS.size(); ++i) {
+                if (search.empty() || ToLower(FORM_KIND_ITEMS[i]).find(search) != std::string::npos) {
+                    rows.push_back(static_cast<int>(i));
+                }
+            }
+
+            auto* clipper = ImGui::ImGuiListClipperManager::Create();
+            ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
+            while (ImGui::ImGuiListClipperManager::Step(clipper)) {
+                for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
+                    const int kindIndex = rows[static_cast<std::size_t>(rowIndex)];
+                    if (ImGui::Selectable(FORM_KIND_ITEMS[static_cast<std::size_t>(kindIndex)], selectedFormKind == kindIndex)) {
+                        selectedFormKind = kindIndex;
+                        createFormKindFilter.clear();
+                        changed = true;
+                    }
+                }
+            }
+            ImGui::ImGuiListClipperManager::End(clipper);
+            ImGui::ImGuiListClipperManager::Destroy(clipper);
+            ImGui::EndCombo();
+        }
+        return changed;
     }
 
     bool InputString(const char* label, std::string& value, const float width = 320.0F) {
@@ -1657,11 +1875,21 @@ namespace {
         }
 
         ImGui::Text("%s", Configuration::GetLoc("menu.form_type", "Form type"));
-        SetStableComboWidth(FORM_KIND_ITEMS, 220.0F);
-        ImGui::Combo("##formType", &selectedFormKind, FORM_KIND_ITEMS.data(), static_cast<int>(FORM_KIND_ITEMS.size()));
+        if (DrawCreateFormKindPicker()) {
+            createGameTemplate = {};
+        }
+
+        const auto selectedKind = SelectedFormKind();
+        if (createWithTemplate) {
+            DrawFormReferencePicker(
+                Configuration::GetLoc("menu.form_template", "Template form"),
+                Manager::GetListTypeName(selectedKind),
+                createGameTemplate);
+        }
 
         ImGui::Separator();
-        if (!validEditorId || duplicateEditorId) {
+        const bool missingTemplate = createWithTemplate && createGameTemplate.empty();
+        if (!validEditorId || duplicateEditorId || missingTemplate) {
             ImGui::BeginDisabled();
         }
         if (ImGui::Button(Configuration::GetLoc("menu.confirm", "Confirm"))) {
@@ -1799,7 +2027,11 @@ namespace {
                 form.skills.fill(15);
                 form.skillOffsets.fill(0);
             }
-            if (Manager::AddForm(form)) {
+            const bool templatePopulated = !createWithTemplate ||
+                Manager::PopulateFormFromGameTemplate(form, createGameTemplate);
+            if (!templatePopulated) {
+                createError = Configuration::GetLoc("menu.template_failed", "Could not read the selected game form template.");
+            } else if (Manager::AddForm(form)) {
                 if (auto& forms = Manager::GetForms(); !forms.empty()) {
                     AssignFormToWorkingPackage(forms.back());
                 }
@@ -1810,7 +2042,7 @@ namespace {
                 createError = Configuration::GetLoc("menu.create_failed", "Could not create form. Check if DPF is available.");
             }
         }
-        if (!validEditorId || duplicateEditorId) {
+        if (!validEditorId || duplicateEditorId || missingTemplate) {
             ImGui::EndDisabled();
         }
 
@@ -1838,8 +2070,14 @@ namespace {
         ImGui::SetNextItemWidth(220.0F);
         ImGui::InputText(Configuration::GetLoc("menu.filter_package_name", "Package name"), patchFilterPackageNameBuffer.data(), patchFilterPackageNameBuffer.size());
         ImGui::SameLine();
-        SetStableComboWidth(FILTER_KIND_ITEMS, 180.0F);
-        ImGui::Combo(Configuration::GetLoc("menu.filter_type", "Type"), &selectedPatchFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
+        DrawSearchableCombo(
+            Configuration::GetLoc("menu.filter_type", "Type"),
+            "patch_type_filter",
+            selectedPatchFilterKind,
+            FILTER_KIND_ITEMS.data(),
+            static_cast<int>(FILTER_KIND_ITEMS.size()),
+            180.0F,
+            300.0F);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(240.0F);
         ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "EditorID"), patchFilterEditorIdBuffer.data(), patchFilterEditorIdBuffer.size());
@@ -2085,19 +2323,14 @@ namespace {
         return rows;
     }
 
-    bool DrawPieceTab(const char* typeName, const char* tabLabel, DynamicForms::DynamicForm& edited, const std::string& search) {
+    bool DrawPieceRows(const char* typeName, DynamicForms::DynamicForm& edited, const std::string& search) {
         bool changed = false;
-        if (!ImGui::BeginTabItem(tabLabel)) {
-            return false;
-        }
-
         auto rows = BuildPieceRows(typeName, edited, search);
         ImGui::Text("%s: %zu", Configuration::GetLoc("menu.available", "Available"), rows.size());
         ImGui::Separator();
 
         if (rows.empty()) {
             ImGui::TextDisabled("%s", Configuration::GetLoc("menu.no_pieces_found", "No pieces found."));
-            ImGui::EndTabItem();
             return false;
         }
 
@@ -2119,7 +2352,6 @@ namespace {
         ImGui::EndChild();
         ImGui::PopID();
 
-        ImGui::EndTabItem();
         return changed;
     }
 
@@ -2127,6 +2359,8 @@ namespace {
         bool changed = false;
         auto& filter = outfitPieceFilters[label];
         const auto preview = Configuration::GetLoc("menu.add_piece", "Add piece");
+        constexpr std::array pieceTypeNames{ "Armor", "LeveledItem" };
+        constexpr std::array pieceTypeLabels{ "Armor", "Leveled Item" };
 
         SetAvailableComboWidth(360.0F);
         SetFixedComboPopupWidth(360.0F);
@@ -2138,22 +2372,26 @@ namespace {
             if (ImGui::InputText("##filter", searchBuf, sizeof(searchBuf))) {
                 filter = searchBuf;
             }
+            outfitPieceTypeIndex = std::clamp(outfitPieceTypeIndex, 0, static_cast<int>(pieceTypeNames.size()) - 1);
+            DrawSearchableCombo(
+                Configuration::GetLoc("menu.filter_type", "Type"),
+                "outfit_piece_type_filter",
+                outfitPieceTypeIndex,
+                pieceTypeLabels.data(),
+                static_cast<int>(pieceTypeLabels.size()),
+                -1.0F,
+                320.0F);
             ImGui::Separator();
 
             const auto search = ToLower(filter);
 
             if (!listsReady) {
                 ImGui::TextDisabled("%s", Configuration::GetLoc("menu.dpf_lists_unavailable", "DPF is not available yet."));
-            } else if (ImGui::BeginTabBar("##pieceTabs")) {
-                if (DrawPieceTab("Armor", Configuration::GetLoc("menu.armor_tab", "Armor"), edited, search)) {
+            } else {
+                if (DrawPieceRows(pieceTypeNames[static_cast<std::size_t>(outfitPieceTypeIndex)], edited, search)) {
                     filter.clear();
                     changed = true;
                 }
-                if (DrawPieceTab("LeveledItem", Configuration::GetLoc("menu.leveled_item_tab", "LeveledItem"), edited, search)) {
-                    filter.clear();
-                    changed = true;
-                }
-                ImGui::EndTabBar();
             }
             ImGui::EndCombo();
         }
@@ -2235,6 +2473,20 @@ namespace {
             if (ImGui::InputText("##filter", searchBuf, sizeof(searchBuf))) {
                 filter = searchBuf;
             }
+            auto& typeIndex = mixedPickerTypeIndices[std::string(label)];
+            typeIndex = std::clamp(typeIndex, 0, static_cast<int>(FORM_REFERENCE_PICKER_TYPES.size()) - 1);
+            std::array<const char*, FORM_REFERENCE_PICKER_TYPES.size()> typeLabels{};
+            for (std::size_t i = 0; i < FORM_REFERENCE_PICKER_TYPES.size(); ++i) {
+                typeLabels[i] = FORM_REFERENCE_PICKER_TYPES[i].label;
+            }
+            DrawSearchableCombo(
+                Configuration::GetLoc("menu.filter_type", "Type"),
+                (std::string("mixed_picker_type:") + label).c_str(),
+                typeIndex,
+                typeLabels.data(),
+                static_cast<int>(typeLabels.size()),
+                -1.0F,
+                420.0F);
             ImGui::Separator();
 
             if (ImGui::Selectable(Configuration::GetLoc("common.none", "None"), value.empty())) {
@@ -2245,35 +2497,28 @@ namespace {
 
             if (!listsReady) {
                 ImGui::TextDisabled("%s", Configuration::GetLoc("menu.dpf_lists_unavailable", "DPF is not available yet."));
-            } else if (ImGui::BeginTabBar("##anyFormTabs")) {
+            } else {
                 const auto search = ToLower(filter);
-                for (const auto& pickerType : FORM_REFERENCE_PICKER_TYPES) {
-                    if (!ImGui::BeginTabItem(pickerType.label)) {
-                        continue;
-                    }
+                const auto& pickerType = FORM_REFERENCE_PICKER_TYPES[static_cast<std::size_t>(typeIndex)];
+                const auto& rows = CachedPickerRows(pickerType.typeName, search);
 
-                    const auto& rows = CachedPickerRows(pickerType.typeName, search);
-
-                    ImGui::Text("%s: %zu", Configuration::GetLoc("menu.available", "Available"), rows.size());
-                    ImGui::BeginChild("##anyFormRows", { 0.0F, 220.0F }, false);
-                    auto* clipper = ImGui::ImGuiListClipperManager::Create();
-                    ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
-                    while (ImGui::ImGuiListClipperManager::Step(clipper)) {
-                        for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
-                            const auto& row = rows[static_cast<std::size_t>(rowIndex)];
-                            if (ImGui::Selectable(row.label.c_str(), SameFormRef(value, row.ref))) {
-                                value = row.ref;
-                                filter.clear();
-                                changed = true;
-                            }
+                ImGui::Text("%s: %zu", Configuration::GetLoc("menu.available", "Available"), rows.size());
+                ImGui::BeginChild("##anyFormRows", { 0.0F, 220.0F }, false);
+                auto* clipper = ImGui::ImGuiListClipperManager::Create();
+                ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
+                while (ImGui::ImGuiListClipperManager::Step(clipper)) {
+                    for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
+                        const auto& row = rows[static_cast<std::size_t>(rowIndex)];
+                        if (ImGui::Selectable(row.label.c_str(), SameFormRef(value, row.ref))) {
+                            value = row.ref;
+                            filter.clear();
+                            changed = true;
                         }
                     }
-                    ImGui::ImGuiListClipperManager::End(clipper);
-                    ImGui::ImGuiListClipperManager::Destroy(clipper);
-                    ImGui::EndChild();
-                    ImGui::EndTabItem();
                 }
-                ImGui::EndTabBar();
+                ImGui::ImGuiListClipperManager::End(clipper);
+                ImGui::ImGuiListClipperManager::Destroy(clipper);
+                ImGui::EndChild();
             }
             ImGui::EndCombo();
         }
@@ -3124,6 +3369,703 @@ namespace {
             }
         } else if (form.kind == FK::AddonNode) {
             changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= inputInt("Node index", edited.addonIndex, 0, std::numeric_limits<int>::max()); changed |= DrawFormReferencePicker("Sound", "SoundDescriptor", edited.addonSound); changed |= inputInt("Master particle cap", edited.addonMasterParticleCap, 0, 65535); changed |= FlagCheckbox("Always Loaded", edited.addonFlags, 3u);
+        } else if (form.kind == FK::Faction) {
+            changed |= InputString("Name", edited.fullName);
+            constexpr std::array factionFlags{ "Hidden From NPC", "Special Combat", "Player Is Expelled", "Player Is Enemy", "Track Crime", "Ignores Murder", "Ignores Assault", "Ignores Stealing", "Ignores Trespass", "Do Not Report Crimes Against Members", "Crime Gold Uses Defaults", "Ignores Pickpocket", "Vendor", "Can Be Owner", "Ignores Werewolf" };
+            constexpr std::array<std::uint32_t, factionFlags.size()> factionFlagBits{ 1u << 0, 1u << 1, 1u << 2, 1u << 3, 1u << 6, 1u << 7, 1u << 8, 1u << 9, 1u << 10, 1u << 11, 1u << 12, 1u << 13, 1u << 14, 1u << 15, 1u << 16 };
+            for (std::size_t i = 0; i < factionFlags.size(); ++i) changed |= FlagCheckbox(factionFlags[i], edited.factionFlags, factionFlagBits[i]);
+            ImGui::Separator(); ImGui::Text("Reactions: %zu", edited.factionReactions.size());
+            constexpr std::array fightReactions{ "Neutral", "Enemy", "Ally", "Friend" };
+            for (std::size_t i = 0; i < edited.factionReactions.size(); ++i) { auto& reaction = edited.factionReactions[i]; ImGui::PushID(static_cast<int>(i)); changed |= DrawFormReferencePicker("Faction", "Faction", reaction.faction); changed |= inputInt("Reaction value", reaction.reaction, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()); int selected = static_cast<int>(std::min(reaction.fightReaction, 3u)); SetStableComboWidth(fightReactions, 180.0F); if (ImGui::Combo("Fight reaction", &selected, fightReactions.data(), static_cast<int>(fightReactions.size()))) { reaction.fightReaction = static_cast<std::uint32_t>(selected); changed = true; } if (ImGui::SmallButton("Remove reaction")) { edited.factionReactions.erase(edited.factionReactions.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::Separator(); ImGui::PopID(); }
+            if (ImGui::Button("Add reaction")) { edited.factionReactions.emplace_back(); changed = true; }
+            ImGui::Separator(); ImGui::Text("Ranks: %zu", edited.factionRanks.size());
+            for (std::size_t i = 0; i < edited.factionRanks.size(); ++i) { auto& rank = edited.factionRanks[i]; ImGui::PushID(static_cast<int>(i)); ImGui::Text("Rank %zu", i); changed |= InputString("Male title", rank.maleTitle); changed |= InputString("Female title", rank.femaleTitle); changed |= InputString("Insignia texture", rank.insigniaPath, 520.0F); if (ImGui::SmallButton("Remove rank")) { edited.factionRanks.erase(edited.factionRanks.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::Separator(); ImGui::PopID(); }
+            if (ImGui::Button("Add rank")) { edited.factionRanks.emplace_back(); changed = true; }
+            ImGui::Separator(); ImGui::TextUnformatted("Crime"); changed |= DrawAnyFormReferencePicker("Jail marker", edited.factionJailMarker); changed |= DrawAnyFormReferencePicker("Wait marker", edited.factionWaitMarker); changed |= DrawAnyFormReferencePicker("Stolen goods container", edited.factionStolenContainer); changed |= DrawAnyFormReferencePicker("Player inventory container", edited.factionPlayerInventoryContainer); changed |= DrawFormReferencePicker("Crime group", "FormList", edited.factionCrimeGroup); changed |= DrawFormReferencePicker("Jail outfit", "Outfit", edited.factionJailOutfit); changed |= ImGui::Checkbox("Arrest", &edited.factionArrest); changed |= ImGui::Checkbox("Attack on sight", &edited.factionAttackOnSight); changed |= inputInt("Murder gold", edited.factionMurderCrimeGold, 0, 65535); changed |= inputInt("Assault gold", edited.factionAssaultCrimeGold, 0, 65535); changed |= inputInt("Trespass gold", edited.factionTrespassCrimeGold, 0, 65535); changed |= inputInt("Pickpocket gold", edited.factionPickpocketCrimeGold, 0, 65535); changed |= inputFloat("Steal gold multiplier", edited.factionStealCrimeGoldMult); changed |= inputInt("Escape gold", edited.factionEscapeCrimeGold, 0, 65535); changed |= inputInt("Werewolf gold", edited.factionWerewolfCrimeGold, 0, 65535);
+            ImGui::Separator(); ImGui::TextUnformatted("Vendor"); changed |= inputInt("Start hour", edited.factionVendorStartHour, 0, 24); changed |= inputInt("End hour", edited.factionVendorEndHour, 0, 24); changed |= inputInt("Location radius", edited.factionVendorRadius, 0, std::numeric_limits<int>::max()); changed |= ImGui::Checkbox("Buys stolen items", &edited.factionVendorBuysStolen); changed |= ImGui::Checkbox("Do not buy or sell", &edited.factionVendorNotBuySell); changed |= ImGui::Checkbox("Buys non-stolen items", &edited.factionVendorBuysNonStolen); changed |= DrawFormReferencePicker("Buy/sell list", "FormList", edited.factionVendorSellBuyList); changed |= DrawAnyFormReferencePicker("Merchant container", edited.factionMerchantContainer); changed |= DrawPerkConditions(edited.factionVendorConditions);
+        } else if (form.kind == FK::IdleAnimation) {
+            changed |= inputInt("Loop minimum", edited.idleLoopMin, -128, 127); changed |= inputInt("Loop maximum", edited.idleLoopMax, -128, 127); changed |= FlagCheckbox("Parent", edited.idleAnimationFlags, 1u << 0); changed |= FlagCheckbox("Sequence", edited.idleAnimationFlags, 1u << 1); changed |= FlagCheckbox("No Attacking", edited.idleAnimationFlags, 1u << 2); changed |= FlagCheckbox("Blocking", edited.idleAnimationFlags, 1u << 3); changed |= inputInt("Animation group selection", edited.idleAnimationGroupSelection, 0, 255); changed |= inputInt("Replay delay", edited.idleReplayDelay, 0, 65535); changed |= DrawFormReferencePicker("Parent idle", "Idle", edited.idleParent); changed |= DrawFormReferencePicker("Previous idle", "Idle", edited.idlePrevious); changed |= InputString("Animation file", edited.idleAnimationFile, 520.0F); changed |= InputString("Animation event", edited.idleAnimationEvent); changed |= DrawPerkConditions(edited.conditions);
+        } else if (form.kind == FK::MaterialObject) {
+            changed |= InputString("Model path", edited.modelPath, 520.0F); constexpr std::array labels{ "Falloff scale", "Falloff bias", "Noise UV scale", "Material UV scale", "Projection X", "Projection Y", "Projection Z", "Normal dampener", "Single pass red", "Single pass green", "Single pass blue" }; changed |= inputFloatArray("material", edited.materialDirectionalData, labels); changed |= inputInt("Single pass", edited.materialSinglePass, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()); changed |= FlagCheckbox("Snow", edited.materialObjectFlags, 1u << 0);
+        } else if (form.kind == FK::Message) {
+            changed |= InputString("Title", edited.fullName); changed |= InputString("Description", edited.description, 520.0F); changed |= DrawFormReferencePicker("Icon", "MenuIcon", edited.messageMenuIcon); changed |= DrawFormReferencePicker("Owner quest", "Quest", edited.messageOwnerQuest); changed |= FlagCheckbox("Message Box", edited.messageFlags, 1u << 0); changed |= FlagCheckbox("Initial Delay", edited.messageFlags, 1u << 1); changed |= inputInt("Display time", edited.messageDisplayTime, 0, std::numeric_limits<int>::max());
+            for (std::size_t i = 0; i < edited.messageButtons.size(); ++i) { auto& button = edited.messageButtons[i]; ImGui::PushID(static_cast<int>(i)); ImGui::Separator(); changed |= InputString("Button text", button.text); changed |= DrawPerkConditions(button.conditions); if (ImGui::SmallButton("Remove button")) { edited.messageButtons.erase(edited.messageButtons.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (ImGui::Button("Add button")) { edited.messageButtons.emplace_back(); changed = true; }
+        } else if (form.kind == FK::LandTexture) {
+            changed |= DrawFormReferencePicker("Texture set", "TextureSet", edited.landTextureSet); changed |= inputInt("Friction", edited.landFriction, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()); changed |= inputInt("Restitution", edited.landRestitution, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()); changed |= DrawFormReferencePicker("Material type", "MaterialType", edited.landMaterialType); changed |= inputInt("Specular exponent", edited.landSpecularExponent, -128, 127); changed |= inputInt("Shader texture index", edited.landShaderTextureIndex, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+            for (std::size_t i = 0; i < edited.landGrasses.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= DrawFormReferencePicker("Grass", "Grass", edited.landGrasses[i]); if (ImGui::SmallButton("Remove grass")) { edited.landGrasses.erase(edited.landGrasses.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (ImGui::Button("Add grass")) { edited.landGrasses.emplace_back(); changed = true; }
+        } else if (form.kind == FK::SoundOutputModel) {
+            constexpr std::array types{ "Uses HRTF", "Defined Speaker Output" }; int selected = static_cast<int>(std::min(edited.soundOutputType, 1u)); SetStableComboWidth(types, 240.0F); if (ImGui::Combo("Type", &selected, types.data(), static_cast<int>(types.size()))) { edited.soundOutputType = static_cast<std::uint32_t>(selected); changed = true; } changed |= FlagCheckbox("Attenuates With Distance", edited.soundOutputFlags, 1u << 0); changed |= FlagCheckbox("Allows Rumble", edited.soundOutputFlags, 1u << 1); changed |= inputInt("Reverb send percent", edited.soundOutputReverbSend, 0, 100); changed |= inputFloat("Minimum distance", edited.soundOutputMinDistance); changed |= inputFloat("Maximum distance", edited.soundOutputMaxDistance); for (std::size_t i = 0; i < edited.soundOutputCurve.size(); ++i) { const auto label = std::format("Curve {}", i + 1); changed |= inputInt(label.c_str(), edited.soundOutputCurve[i], 0, 255); } for (std::size_t i = 0; i < edited.soundOutputSpeakers.size(); ++i) { const auto label = std::format("Speaker channel {}", i + 1); changed |= inputInt(label.c_str(), edited.soundOutputSpeakers[i], 0, 255); }
+        } else if (form.kind == FK::LensFlare) {
+            changed |= inputFloat("Fade distance radius scale", edited.lensFlareFadeDistanceRadiusScale); changed |= inputFloat("Color influence", edited.lensFlareColorInfluence);
+        } else if (form.kind == FK::Debris) {
+            for (std::size_t i = 0; i < edited.debrisEntries.size(); ++i) { auto& entry = edited.debrisEntries[i]; ImGui::PushID(static_cast<int>(i)); ImGui::Separator(); changed |= inputInt("Percentage", entry.percentage, -128, 127); changed |= FlagCheckbox("Has Collision Data", entry.flags, 1u << 0); changed |= InputString("Model path", entry.modelPath, 520.0F); if (ImGui::SmallButton("Remove debris")) { edited.debrisEntries.erase(edited.debrisEntries.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (ImGui::Button("Add debris")) { edited.debrisEntries.emplace_back(); changed = true; }
+        } else if (form.kind == FK::ImageSpaceModifier) {
+            changed |= ImGui::Checkbox("Animatable", &edited.imageModifierAnimatable); changed |= inputFloat("Duration", edited.imageModifierDuration); constexpr std::array hdr{ "Eye adapt mult", "Eye adapt add", "Bloom radius mult", "Bloom radius add", "Bloom threshold mult", "Bloom threshold add", "Bloom scale mult", "Bloom scale add", "Target luminance min mult", "Target luminance min add", "Target luminance max mult", "Target luminance max add", "Sunlight mult", "Sunlight add", "Sky mult", "Sky add" }; changed |= inputFloatArray("imad-hdr", edited.imageModifierHDR, hdr); constexpr std::array cinematic{ "Saturation mult", "Saturation add", "Brightness mult", "Brightness add", "Contrast mult", "Contrast add" }; changed |= inputFloatArray("imad-cinematic", edited.imageModifierCinematic, cinematic); changed |= inputInt("Tint color raw", edited.imageModifierTintColor, 0, std::numeric_limits<int>::max()); changed |= inputInt("Blur radius raw", edited.imageModifierBlurRadius, 0, std::numeric_limits<int>::max()); changed |= inputInt("Double vision raw", edited.imageModifierDoubleVisionStrength, 0, std::numeric_limits<int>::max()); changed |= inputInt("Radial blur strength raw", edited.imageModifierRadialBlurStrength, 0, std::numeric_limits<int>::max()); changed |= inputInt("Radial blur ramp up raw", edited.imageModifierRadialBlurRampUp, 0, std::numeric_limits<int>::max()); changed |= inputInt("Radial blur start raw", edited.imageModifierRadialBlurStart, 0, std::numeric_limits<int>::max()); changed |= ImGui::Checkbox("Use target for radial blur", &edited.imageModifierUseTargetForRadialBlur); constexpr std::array center{ "Radial center X", "Radial center Y" }; changed |= inputFloatArray("imad-center", edited.imageModifierRadialBlurCenter, center); changed |= inputInt("DOF strength raw", edited.imageModifierDofStrength, 0, std::numeric_limits<int>::max()); changed |= inputInt("DOF distance raw", edited.imageModifierDofDistance, 0, std::numeric_limits<int>::max()); changed |= inputInt("DOF range raw", edited.imageModifierDofRange, 0, std::numeric_limits<int>::max()); changed |= ImGui::Checkbox("DOF use target", &edited.imageModifierDofUseTarget); changed |= inputInt("DOF flags", edited.imageModifierDofFlags, 0, 255); changed |= inputInt("Radial ramp down raw", edited.imageModifierRadialBlurRampDown, 0, std::numeric_limits<int>::max()); changed |= inputInt("Radial down start raw", edited.imageModifierRadialBlurDownStart, 0, std::numeric_limits<int>::max()); changed |= inputInt("Fade color raw", edited.imageModifierFadeColor, 0, std::numeric_limits<int>::max()); changed |= inputInt("Motion blur raw", edited.imageModifierMotionBlurStrength, 0, std::numeric_limits<int>::max());
+        } else if (form.kind == FK::CameraShot) {
+            changed |= InputString("Camera model", edited.modelPath, 520.0F); changed |= DrawFormReferencePicker("Image space modifier", "ImageSpaceModifier", edited.cameraImageSpaceModifier); constexpr std::array actions{ "Shoot", "Fly", "Hit", "Zoom" }; constexpr std::array objects{ "Attacker", "Projectile", "Target", "Lead Actor" }; int action = static_cast<int>(std::min(edited.cameraAction, 3u)), location = static_cast<int>(std::min(edited.cameraLocation, 3u)), target = static_cast<int>(std::min(edited.cameraTarget, 3u)); SetStableComboWidth(actions, 180.0F); if (ImGui::Combo("Action", &action, actions.data(), 4)) { edited.cameraAction = action; changed = true; } SetStableComboWidth(objects, 180.0F); if (ImGui::Combo("Location", &location, objects.data(), 4)) { edited.cameraLocation = location; changed = true; } SetStableComboWidth(objects, 180.0F); if (ImGui::Combo("Target", &target, objects.data(), 4)) { edited.cameraTarget = target; changed = true; } constexpr std::array flags{ "Position Follows Location", "Rotation Follows Target", "Don't Follow Bone", "First Person Camera", "No Tracer", "Start At Time Zero" }; for (std::size_t i = 0; i < flags.size(); ++i) changed |= FlagCheckbox(flags[i], edited.cameraFlags, 1u << i); constexpr std::array timing{ "Player time multiplier", "Target time multiplier", "Global time multiplier", "Maximum time", "Minimum time", "Percent between actors", "Near target distance" }; changed |= inputFloatArray("camera-timing", edited.cameraTiming, timing);
+        } else if (form.kind == FK::CameraPath) {
+            changed |= FlagCheckbox("Zoom Disable", edited.cameraPathFlags, 1u << 0); changed |= FlagCheckbox("Zoom Shot List", edited.cameraPathFlags, 1u << 1); changed |= FlagCheckbox("Dynamic Times", edited.cameraPathFlags, 1u << 2); changed |= FlagCheckbox("Random Paths", edited.cameraPathFlags, 1u << 6); changed |= FlagCheckbox("Allow No Shots", edited.cameraPathFlags, 1u << 7); changed |= DrawFormReferencePicker("Parent path", "CameraPath", edited.cameraPathParent); changed |= DrawFormReferencePicker("Previous path", "CameraPath", edited.cameraPathPrevious); for (std::size_t i = 0; i < edited.cameraPathShots.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= DrawFormReferencePicker("Camera shot", "CameraShot", edited.cameraPathShots[i]); if (ImGui::SmallButton("Remove shot")) { edited.cameraPathShots.erase(edited.cameraPathShots.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (ImGui::Button("Add shot")) { edited.cameraPathShots.emplace_back(); changed = true; } changed |= DrawPerkConditions(edited.conditions);
+        } else if (form.kind == FK::TalkingActivator) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= DrawFormRefListEditor("Keyword", "Keyword", edited.keywords); changed |= DrawFormReferencePicker("Voice type", "VoiceType", edited.talkingVoiceType); changed |= DrawFormReferencePicker("Loop sound", "SoundDescriptor", edited.soundLoop); changed |= DrawFormReferencePicker("Activation sound", "SoundDescriptor", edited.soundActivate); changed |= FlagCheckbox("Hidden From Local Map", edited.recordFlags, 1u << 9); changed |= FlagCheckbox("Random Animation Start", edited.recordFlags, 1u << 16); changed |= FlagCheckbox("Radio Station", edited.recordFlags, 1u << 17);
+        } else if (form.kind == FK::Furniture) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Model path", edited.modelPath, 520.0F); changed |= DrawFormRefListEditor("Keyword", "Keyword", edited.keywords); changed |= DrawFormReferencePicker("Loop sound", "SoundDescriptor", edited.soundLoop); changed |= DrawFormReferencePicker("Activation sound", "SoundDescriptor", edited.soundActivate); constexpr std::array benches{ "None", "Create Object", "Smithing Weapon", "Enchanting", "Enchanting Experiment", "Alchemy", "Alchemy Experiment", "Smithing Armor" }; int bench = static_cast<int>(std::min(edited.furnitureWorkbenchType, 7u)); SetStableComboWidth(benches, 260.0F); if (ImGui::Combo("Workbench type", &bench, benches.data(), static_cast<int>(benches.size()))) { edited.furnitureWorkbenchType = bench; changed = true; } changed |= inputInt("Workbench actor value", edited.furnitureWorkbenchSkill, -1, 255); changed |= DrawFormReferencePicker("Associated spell", "Spell", edited.furnitureAssociatedSpell); changed |= FlagCheckbox("Disables Activation", edited.furnitureFlags, 1u << 25); changed |= FlagCheckbox("Is Perch", edited.furnitureFlags, 1u << 26); changed |= FlagCheckbox("Must Exit To Talk", edited.furnitureFlags, 1u << 27); changed |= FlagCheckbox("Can Lean", edited.furnitureFlags, 1u << 29); changed |= FlagCheckbox("Can Sit", edited.furnitureFlags, 1u << 30); changed |= FlagCheckbox("Can Sleep", edited.furnitureFlags, 1u << 31); changed |= FlagCheckbox("Child Can Use", edited.recordFlags, 1u << 29);
+        } else if (form.kind == FK::Weather) {
+            changed |= FlagCheckbox("Pleasant", edited.weatherFlags, 1u << 0); changed |= FlagCheckbox("Cloudy", edited.weatherFlags, 1u << 1); changed |= FlagCheckbox("Rainy", edited.weatherFlags, 1u << 2); changed |= FlagCheckbox("Snow", edited.weatherFlags, 1u << 3); changed |= FlagCheckbox("Permanent Aurora", edited.weatherFlags, 1u << 4); changed |= FlagCheckbox("Aurora Follows Sun", edited.weatherFlags, 1u << 5); changed |= inputInt("Wind speed", edited.weatherWindSpeed, 0, 255); changed |= inputInt("Transition delta", edited.weatherTransitionDelta, 0, 255); changed |= inputInt("Sun glare", edited.weatherSunGlare, 0, 255); changed |= inputInt("Sun damage", edited.weatherSunDamage, 0, 255); constexpr std::array fogLabels{ "Day fog near", "Day fog far", "Night fog near", "Night fog far", "Day fog power", "Night fog power", "Day fog maximum", "Night fog maximum" }; changed |= inputFloatArray("weather-fog", edited.weatherFogData, fogLabels); changed |= DrawFormReferencePicker("Precipitation", "ShaderParticleGeometry", edited.weatherPrecipitation); changed |= DrawFormReferencePicker("Reference effect", "ReferenceEffect", edited.weatherReferenceEffect); changed |= DrawFormReferencePicker("Sun glare lens flare", "LensFlare", edited.weatherLensFlare); constexpr std::array times{ "Sunrise", "Day", "Sunset", "Night" }; for (std::size_t i = 0; i < 4; ++i) { ImGui::PushID(static_cast<int>(i)); changed |= DrawFormReferencePicker(std::format("{} image space", times[i]).c_str(), "ImageSpace", edited.weatherImageSpaces[i]); changed |= DrawFormReferencePicker(std::format("{} volumetric lighting", times[i]).c_str(), "VolumetricLighting", edited.weatherVolumetricLighting[i]); ImGui::PopID(); }
+        } else if (form.kind == FK::Climate) {
+            changed |= InputString("Night sky model", edited.climateNightSkyModel, 520.0F); changed |= InputString("Sun texture", edited.climateSunTexture, 520.0F); changed |= InputString("Sun glare texture", edited.climateSunGlareTexture, 520.0F); constexpr std::array timeLabels{ "Sunrise begin", "Sunrise end", "Sunset begin", "Sunset end" }; for (std::size_t i = 0; i < 4; ++i) changed |= inputInt(timeLabels[i], edited.climateTimes[i], 0, 255); changed |= inputInt("Volatility", edited.climateVolatility, 0, 255); changed |= inputInt("Moon phase flags and length", edited.climateMoonPhaseLength, 0, 255); for (std::size_t i = 0; i < edited.climateWeatherEntries.size(); ++i) { auto& entry = edited.climateWeatherEntries[i]; ImGui::PushID(static_cast<int>(i)); ImGui::Separator(); changed |= DrawFormReferencePicker("Weather", "Weather", entry.weather); changed |= inputInt("Chance", entry.chance, 0, 100); changed |= DrawFormReferencePicker("Chance global", "Global", entry.global); if (ImGui::SmallButton("Remove weather")) { edited.climateWeatherEntries.erase(edited.climateWeatherEntries.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (ImGui::Button("Add weather")) { edited.climateWeatherEntries.emplace_back(); changed = true; }
+        } else if (form.kind == FK::Location) {
+            changed |= InputString("Name", edited.fullName); changed |= DrawFormRefListEditor("Keyword", "Keyword", edited.keywords); changed |= DrawFormReferencePicker("Parent location", "Location", edited.locationParent); changed |= DrawFormReferencePicker("Crime faction", "Faction", edited.locationCrimeFaction); changed |= DrawFormReferencePicker("Music type", "MusicType", edited.locationMusicType); changed |= inputFloat("World marker radius", edited.locationWorldRadius);
+        } else if (form.kind == FK::MusicType) {
+            changed |= FlagCheckbox("Plays Once", edited.musicTypeFlags, 1u << 0); changed |= FlagCheckbox("Abrupt Transition", edited.musicTypeFlags, 1u << 1); changed |= FlagCheckbox("Cycle Tracks", edited.musicTypeFlags, 1u << 2); changed |= FlagCheckbox("Use Track Order", edited.musicTypeFlags, 1u << 3); changed |= FlagCheckbox("Plays Over", edited.musicTypeFlags, 1u << 5); changed |= FlagCheckbox("Doesn't Queue", edited.musicTypeFlags, 1u << 6); changed |= inputInt("Priority", edited.musicTypePriority, 0, 255); changed |= inputInt("Ducks other music by", edited.musicTypeDucking, 0, 65535); changed |= inputFloat("Fade time", edited.musicTypeFadeTime); changed |= DrawFormRefListEditor("Track", "MusicTrack", edited.musicTypeTracks);
+        } else if (form.kind == FK::MusicTrack) {
+            changed |= InputString("Track path", edited.musicTrackPath, 520.0F); changed |= InputString("Finale path", edited.musicTrackFinalePath, 520.0F); changed |= inputFloat("Loop begin", edited.musicTrackLoopBegin); changed |= inputFloat("Loop end", edited.musicTrackLoopEnd); changed |= inputInt("Loop count", edited.musicTrackLoopCount, 0, std::numeric_limits<int>::max()); for (std::size_t i = 0; i < edited.musicTrackCuePoints.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= inputFloat("Cue point", edited.musicTrackCuePoints[i]); if (ImGui::SmallButton("Remove cue")) { edited.musicTrackCuePoints.erase(edited.musicTrackCuePoints.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (ImGui::Button("Add cue point")) { edited.musicTrackCuePoints.push_back(0.0F); changed = true; } changed |= DrawPerkConditions(edited.conditions);
+        } else if (form.kind == FK::BodyPartData) {
+            changed |= InputString("Skeleton model", edited.modelPath, 520.0F); changed |= DrawAnyFormReferencePicker("Ragdoll", edited.bodyPartRagdoll);
+        } else if (form.kind == FK::VolumetricLighting) {
+            constexpr std::array labels{ "Intensity", "Custom color contribution", "Color red", "Color green", "Color blue", "Density contribution", "Density size", "Wind speed", "Falling speed", "Phase contribution" }; changed |= inputFloatArray("volumetric", edited.volumetricLightingData, labels);
+        } else if (form.kind == FK::Sound) {
+            changed |= DrawFormReferencePicker("Sound descriptor", "SoundDescriptor", edited.legacySoundDescriptor);
+        } else if (form.kind == FK::ActorValueInfo) {
+            changed |= InputString("Name", edited.fullName); changed |= InputString("Description", edited.description, 520.0F); changed |= InputString("Icon path", edited.inventoryIcon, 520.0F); changed |= InputString("Abbreviation", edited.actorValueAbbreviation); constexpr std::array types{ "Attribute", "Skill", "AI Temperament", "Damage Resistance", "Limb Condition", "Status", "Miscellaneous" }; int type = static_cast<int>(std::min(edited.actorValueType, 6u)); SetStableComboWidth(types, 240.0F); if (ImGui::Combo("Actor value type", &type, types.data(), static_cast<int>(types.size()))) { edited.actorValueType = type; changed = true; } constexpr std::array avFlags{ "Hostile Effects Scale With Difficulty", "Special Stat Clamps Nonzero", "Clamp As Special Stat", "Clamp As Skill", "Can Have Modifiers", "Dynamic Base Plus Current", "Base Computed From Actor", "Enumeration", "Inverted", "Base Computed From Race", "Cannot Be Altered By Scripts", "Base Always Zero", "Base Always One", "Base Always One Hundred", "Cache Current Value", "Cache Maximum Value", "Protected By God Mode", "Display Effect Magnitude x100" }; constexpr std::array<std::uint32_t, avFlags.size()> avBits{ 1u << 1, 1u << 2, 1u << 3, 1u << 4, 1u << 5, 1u << 6, 1u << 7, 1u << 8, 1u << 9, 1u << 11, 1u << 14, 1u << 15, 1u << 16, 1u << 17, 1u << 18, 1u << 19, 1u << 20, 1u << 21 }; for (std::size_t i = 0; i < avFlags.size(); ++i) changed |= FlagCheckbox(avFlags[i], edited.actorValueFlags, avBits[i]); if ((edited.actorValueFlags & (1u << 8)) != 0) { changed |= InputString("Enum name", edited.actorValueEnumName); for (std::size_t i = 0; i < edited.actorValueEnumValues.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= InputString("Enum value", edited.actorValueEnumValues[i]); if (ImGui::SmallButton("Remove enum value")) { edited.actorValueEnumValues.erase(edited.actorValueEnumValues.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (edited.actorValueEnumValues.size() < 10 && ImGui::Button("Add enum value")) { edited.actorValueEnumValues.emplace_back(); changed = true; } } changed |= ImGui::Checkbox("Has skill data", &edited.actorValueHasSkillData); if (edited.actorValueHasSkillData) { constexpr std::array skillLabels{ "Use multiplier", "Offset multiplier", "Improve multiplier", "Improve offset" }; changed |= inputFloatArray("av-skill", edited.actorValueSkillData, skillLabels); }
+        } else if (form.kind == FK::DialogueBranch) {
+            int type = static_cast<int>(std::min(edited.dialogueBranchType, 7u)); SetStableComboWidth(DIALOGUE_TYPE_ITEMS, 240.0F); if (ImGui::Combo("Dialogue type", &type, DIALOGUE_TYPE_ITEMS.data(), static_cast<int>(DIALOGUE_TYPE_ITEMS.size()))) { edited.dialogueBranchType = type; changed = true; }
+            changed |= FlagCheckbox("Top Level", edited.dialogueBranchFlags, 1u << 0); changed |= FlagCheckbox("Blocking", edited.dialogueBranchFlags, 1u << 1); changed |= FlagCheckbox("Exclusive", edited.dialogueBranchFlags, 1u << 2); changed |= DrawFormReferencePicker("Quest", "Quest", edited.dialogueBranchQuest); changed |= DrawFormReferencePicker("Starting topic", "DialogueTopic", edited.dialogueBranchStartingTopic);
+        } else if (form.kind == FK::DialogueTopic) {
+            changed |= InputString("Topic text", edited.fullName, 520.0F); int type = static_cast<int>(std::min(edited.dialogueTopicType, 7u)); SetStableComboWidth(DIALOGUE_TYPE_ITEMS, 240.0F); if (ImGui::Combo("Dialogue type", &type, DIALOGUE_TYPE_ITEMS.data(), static_cast<int>(DIALOGUE_TYPE_ITEMS.size()))) { edited.dialogueTopicType = type; changed = true; } int subtype = static_cast<int>(std::min(edited.dialogueTopicSubtype, 102u)); SetStableComboWidth(DIALOGUE_SUBTYPE_ITEMS, 310.0F); if (ImGui::Combo("Subtype", &subtype, DIALOGUE_SUBTYPE_ITEMS.data(), static_cast<int>(DIALOGUE_SUBTYPE_ITEMS.size()))) { edited.dialogueTopicSubtype = subtype; changed = true; }
+            changed |= FlagCheckbox("Do All Before Repeating", edited.dialogueTopicFlags, 1u << 0); changed |= inputInt("Priority", edited.dialogueTopicPriority, 0, 100); changed |= inputInt("Journal index", edited.dialogueTopicJournalIndex, 0, 0x00FFFFFF); changed |= DrawFormReferencePicker("Branch", "DialogueBranch", edited.dialogueTopicBranch); changed |= DrawFormReferencePicker("Quest", "Quest", edited.dialogueTopicQuest); changed |= DrawFormRefListEditor("Info", "DialogueInfo", edited.dialogueTopicInfos);
+        } else if (form.kind == FK::DialogueInfo) {
+            changed |= DrawFormReferencePicker("Parent topic", "DialogueTopic", edited.dialogueInfoTopic); changed |= DrawFormReferencePicker("Shared info", "DialogueInfo", edited.dialogueInfoSharedInfo); changed |= inputInt("Info index", edited.dialogueInfoIndex, 0, 65535); int favor = static_cast<int>(std::min(edited.dialogueInfoFavorLevel, 3u)); SetStableComboWidth(DIALOGUE_FAVOR_ITEMS, 180.0F); if (ImGui::Combo("Favor level", &favor, DIALOGUE_FAVOR_ITEMS.data(), static_cast<int>(DIALOGUE_FAVOR_ITEMS.size()))) { edited.dialogueInfoFavorLevel = favor; changed = true; }
+            constexpr std::array infoFlagNames{ "Start Scene On End", "Random", "Say Once", "Requires Player Activation", "Info Refusal", "Random End", "End Running Scene", "Force Greet", "Player Address", "Force Subtitle", "Can Move While Greeting", "No LIP File", "Post Process", "Custom Sound Output", "Spends Favor Points" }; for (std::size_t i = 0; i < infoFlagNames.size(); ++i) changed |= FlagCheckbox(infoFlagNames[i], edited.dialogueInfoFlags, 1u << i); changed |= inputInt("Reset hours", edited.dialogueInfoResetHours, 0, 65535); changed |= DrawPerkConditions(edited.conditions);
+            for (std::size_t i = 0; i < edited.dialogueResponses.size(); ++i) { auto& response = edited.dialogueResponses[i]; ImGui::PushID(static_cast<int>(i)); ImGui::Separator(); ImGui::Text("Response %zu", i + 1); changed |= InputString("Text", response.text, 520.0F); int emotion = static_cast<int>(std::min(response.emotionType, 7u)); SetStableComboWidth(DIALOGUE_EMOTION_ITEMS, 180.0F); if (ImGui::Combo("Emotion", &emotion, DIALOGUE_EMOTION_ITEMS.data(), static_cast<int>(DIALOGUE_EMOTION_ITEMS.size()))) { response.emotionType = emotion; changed = true; } changed |= inputInt("Emotion value", response.emotionValue, 0, 100); changed |= inputInt("Response number", response.responseNumber, 0, 255); changed |= FlagCheckbox("Use Emotion Animation", response.flags, 1u << 0); changed |= DrawFormReferencePicker("Sound", "SoundDescriptor", response.sound); changed |= DrawFormReferencePicker("Speaker idle", "Idle", response.speakerIdle); changed |= DrawFormReferencePicker("Listener idle", "Idle", response.listenerIdle); if (ImGui::SmallButton("Remove response")) { edited.dialogueResponses.erase(edited.dialogueResponses.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); }
+            if (ImGui::Button("Add response")) { edited.dialogueResponses.emplace_back(); changed = true; }
+        } else if (form.kind == FK::Quest) {
+            changed |= InputString("Name", edited.fullName); constexpr std::array questTypes{"None","Main Quest","Mages Guild","Thieves Guild","Dark Brotherhood","Companions","Miscellaneous","Daedric","Side Quest","Civil War","Dawnguard","Dragonborn"}; int type=static_cast<int>(std::min(edited.questType,11u));SetStableComboWidth(questTypes,220);if(ImGui::Combo("Quest type",&type,questTypes.data(),static_cast<int>(questTypes.size()))){edited.questType=type;changed=true;} changed|=inputInt("Priority",edited.questPriority,-128,127);changed|=inputFloat("Delay time",edited.questDelayTime);
+            constexpr std::array questFlagNames{"Enabled",
+                                                "Completed",
+                                                "Add Idle To Hello",
+                                                "Allow Repeat Stages",
+                                                "Starts Enabled",
+                                                "Displayed In HUD",
+                                                "Failed",
+                                                "Stage Wait",
+                                                "Run Once",
+                                                "Exclude From Export",
+                                                "Warn On Alias Fill Failure",
+                                                "Active",
+                                                "Repeats Conditions",
+                                                "Keep Instance",
+                                                "Want Dormant",
+                                                "Has Dialogue Data"};
+            for (std::size_t i = 0; i < questFlagNames.size(); ++i)
+                changed |= FlagCheckbox(questFlagNames[i], edited.questFlags, 1u << i);
+            changed |= DrawPerkConditions(edited.conditions);
+            ImGui::Text("Story manager conditions");
+            changed |= DrawPerkConditions(edited.questStoryConditions);
+            changed |= DrawFormRefListEditor("Text global", "Global", edited.questTextGlobals);
+            for (std::size_t i = 0; i < edited.questStages.size(); ++i) {
+                auto& stage = edited.questStages[i];
+                ImGui::PushID(static_cast<int>(i) + 30000);
+                ImGui::Separator();
+                ImGui::Text("Stage %zu", i + 1);
+                changed |= inputInt("Stage index", stage.index, 0, 65535);
+                changed |= FlagCheckbox("Start Up Stage", stage.flags, 1u << 1);
+                changed |= FlagCheckbox("Shut Down Stage", stage.flags, 1u << 2);
+                changed |= FlagCheckbox("Keep Instance Data From Here On", stage.flags, 1u << 3);
+                if (ImGui::SmallButton("Remove stage")) {
+                    edited.questStages.erase(edited.questStages.begin() + static_cast<std::ptrdiff_t>(i));
+                    changed = true;
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::PopID();
+            }
+            if (ImGui::Button("Add stage")) {
+                edited.questStages.emplace_back();
+                changed = true;
+            }
+            for (std::size_t i = 0; i < edited.questAliases.size(); ++i) {
+                auto& alias = edited.questAliases[i];
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::Separator();
+                ImGui::Text("Alias %zu", i + 1);
+                changed |= inputInt("Alias ID", alias.id, 0, 65535);
+                changed |= InputString("Alias name", alias.name);
+                constexpr std::array fillTypes{"Conditions",        "Forced Reference", "From Alias",   "From Event",
+                                               "Created Reference", "External Quest",   "Unique Actor", "Near Alias"};
+                int fill = static_cast<int>(std::min(alias.fillType, 7u));
+                SetStableComboWidth(fillTypes, 220);
+                if (ImGui::Combo("Fill type", &fill, fillTypes.data(), static_cast<int>(fillTypes.size()))) {
+                    alias.fillType = fill;
+                    changed = true;
+                }
+                constexpr std::array aliasFlags{"Reserves",        "Optional",
+                                                "Quest Object",    "Allow Reuse",
+                                                "Allow Dead",      "Loaded Only",
+                                                "Essential",       "Allow Disabled",
+                                                "Store Name",      "Allow Reserved",
+                                                "Protected",       "Forced From Alias",
+                                                "Allow Destroyed", "Find Player Closest",
+                                                "Uses Names",      "Initially Disabled",
+                                                "Allow Cleared",   "Clear Name On Remove",
+                                                "Actors Only",     "Transient",
+                                                "External Link",   "No Pickpocket",
+                                                "Data Alias"};
+                for (std::size_t bit = 0; bit < aliasFlags.size(); ++bit)
+                    changed |= FlagCheckbox(aliasFlags[bit], alias.flags, 1u << bit);
+                changed |= FlagCheckbox("Optional For Scene", alias.flags, 1u << 24);
+                changed |= FlagCheckbox("Create At Quest Object", alias.flags, 1u << 31);
+                if (alias.fillType == 1)
+                    changed |= DrawAnyFormReferencePicker("Forced reference", alias.forcedReference);
+                if (alias.fillType == 2 || alias.fillType == 7) {
+                    changed |= inputInt("Source alias", alias.sourceAliasId, 0, 65535);
+                    if (alias.fillType == 2)
+                        changed |= DrawFormReferencePicker("Reference type", "LocationRefType", alias.sourceRefType);
+                }
+                if (alias.fillType == 5) {
+                    changed |= DrawFormReferencePicker("External quest", "Quest", alias.externalQuest);
+                    changed |= inputInt("External alias", alias.externalAliasId, 0, 65535);
+                }
+                if (alias.fillType == 6) changed |= DrawFormReferencePicker("Unique actor", "NPC", alias.uniqueActor);
+                changed |= DrawPerkConditions(alias.conditions);
+                if (ImGui::SmallButton("Remove alias")) {
+                    edited.questAliases.erase(edited.questAliases.begin() + static_cast<std::ptrdiff_t>(i));
+                    changed = true;
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::PopID();
+            }
+            if (ImGui::Button("Add alias")) {
+                edited.questAliases.emplace_back();
+                changed = true;
+            }
+            for (std::size_t i = 0; i < edited.questObjectives.size(); ++i) {
+                auto& objective = edited.questObjectives[i];
+                ImGui::PushID(static_cast<int>(i) + 10000);
+                ImGui::Separator();
+                ImGui::Text("Objective %zu", i + 1);
+                changed |= inputInt("Objective index", objective.index, 0, 65535);
+                changed |= InputString("Display text", objective.text, 520);
+                changed |= FlagCheckbox("OR With Previous", objective.flags, 1u << 0);
+                changed |= FlagCheckbox("No Stats Tracking", objective.flags, 1u << 1);
+                for (std::size_t j = 0; j < objective.targets.size(); ++j) {
+                    auto& target = objective.targets[j];
+                    ImGui::PushID(static_cast<int>(j));
+                    changed |= inputInt("Target alias", target.aliasId, 0, 65535);
+                    changed |= FlagCheckbox("Compass Ignores Locks", target.flags, 1u << 0);
+                    changed |= DrawPerkConditions(target.conditions);
+                    if (ImGui::SmallButton("Remove target")) {
+                        objective.targets.erase(objective.targets.begin() + static_cast<std::ptrdiff_t>(j));
+                        changed = true;
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::PopID();
+                }
+                if (ImGui::SmallButton("Add target")) {
+                    objective.targets.emplace_back();
+                    changed = true;
+                }
+                if (ImGui::SmallButton("Remove objective")) {
+                    edited.questObjectives.erase(edited.questObjectives.begin() + static_cast<std::ptrdiff_t>(i));
+                    changed = true;
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::PopID();
+            }
+            if (ImGui::Button("Add objective")) {
+                edited.questObjectives.emplace_back();
+                changed = true;
+            }
+        } else if (form.kind == FK::Scene) {
+            changed|=DrawFormReferencePicker("Parent quest","Quest",edited.sceneParentQuest);changed|=FlagCheckbox("Begin On Quest Start",edited.sceneFlags,1u<<0);changed|=FlagCheckbox("Stop On Quest End",edited.sceneFlags,1u<<1);changed|=FlagCheckbox("Repeat Conditions While True",edited.sceneFlags,1u<<3);changed|=FlagCheckbox("Interruptible",edited.sceneFlags,1u<<4);changed|=DrawPerkConditions(edited.conditions);
+            for(std::size_t i=0;i<edited.sceneActors.size();++i){ImGui::PushID(static_cast<int>(i));if(edited.sceneActorFlags.size()<=i)edited.sceneActorFlags.resize(i+1);if(edited.sceneActorBehaviorFlags.size()<=i)edited.sceneActorBehaviorFlags.resize(i+1);changed|=inputInt("Actor alias ID",edited.sceneActors[i],0,65535);constexpr std::array actorFlags{"No Player Activation","Optional","Run Only Scene Packages","No Command State"};for(std::size_t bit=0;bit<actorFlags.size();++bit)changed|=FlagCheckbox(actorFlags[bit],edited.sceneActorFlags[i],1u<<bit);constexpr std::array behaviorFlags{"Death Pause","Death End","Combat Pause","Combat End","Dialogue Pause","Dialogue End","Observe Combat Pause","Observe Combat End"};for(std::size_t bit=0;bit<behaviorFlags.size();++bit)changed|=FlagCheckbox(behaviorFlags[bit],edited.sceneActorBehaviorFlags[i],1u<<bit);if(ImGui::SmallButton("Remove actor")){edited.sceneActors.erase(edited.sceneActors.begin()+i);edited.sceneActorFlags.erase(edited.sceneActorFlags.begin()+i);edited.sceneActorBehaviorFlags.erase(edited.sceneActorBehaviorFlags.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::Button("Add actor")){edited.sceneActors.push_back(0);edited.sceneActorFlags.push_back(0);edited.sceneActorBehaviorFlags.push_back(0);changed=true;}
+            for(std::size_t i=0;i<edited.scenePhases.size();++i){auto& phase=edited.scenePhases[i];ImGui::PushID(static_cast<int>(i)+1000);ImGui::Separator();ImGui::Text("Phase %zu",i);ImGui::Text("Start conditions");changed|=DrawPerkConditions(phase.startConditions);ImGui::Text("Completion conditions");changed|=DrawPerkConditions(phase.completionConditions);changed|=DrawFormReferencePicker("Quest node","StoryManagerQuestNode",phase.questNode);if(ImGui::SmallButton("Remove phase")){edited.scenePhases.erase(edited.scenePhases.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::Button("Add phase")){edited.scenePhases.emplace_back();changed=true;}
+            for(std::size_t i=0;i<edited.sceneActions.size();++i){auto& action=edited.sceneActions[i];ImGui::PushID(static_cast<int>(i)+2000);ImGui::Separator();constexpr std::array actionTypes{"Dialogue","Package","Timer"};int actionType=static_cast<int>(std::min(action.type,2u));if(ImGui::Combo("Action type",&actionType,actionTypes.data(),static_cast<int>(actionTypes.size()))){action.type=actionType;changed=true;}changed|=inputInt("Actor alias",action.actorId,0,65535);changed|=inputInt("Start phase",action.startPhase,0,65535);changed|=inputInt("End phase",action.endPhase,0,65535);changed|=inputInt("Action index",action.index,0,65535);changed|=FlagCheckbox("Face Target",action.flags,1u<<15);changed|=FlagCheckbox("Looping",action.flags,1u<<16);changed|=FlagCheckbox("Head Track Player",action.flags,1u<<17);if(action.type==0){changed|=DrawFormReferencePicker("Topic","DialogueTopic",action.topic);changed|=inputInt("Headtrack alias",action.headtrackActorId,-1,65535);changed|=inputFloat("Loop minimum",action.loopingMin);changed|=inputFloat("Loop maximum",action.loopingMax);int emotion=static_cast<int>(std::min(action.emotionType,7u));if(ImGui::Combo("Emotion",&emotion,DIALOGUE_EMOTION_ITEMS.data(),static_cast<int>(DIALOGUE_EMOTION_ITEMS.size()))){action.emotionType=emotion;changed=true;}changed|=inputInt("Emotion value",action.emotionValue,0,100);}else if(action.type==1)changed|=DrawFormRefListEditor("Package","Package",action.packages);else changed|=inputFloat("Timer seconds",action.timerSeconds);if(ImGui::SmallButton("Remove action")){edited.sceneActions.erase(edited.sceneActions.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::Button("Add action")){edited.sceneActions.emplace_back();changed=true;}
+        } else if (form.kind == FK::StoryManagerBranchNode || form.kind == FK::StoryManagerQuestNode || form.kind == FK::StoryManagerEventNode) {
+            changed |= DrawFormReferencePicker("Parent", "StoryManagerBranchNode", edited.storyParent);
+            changed |= DrawAnyFormReferencePicker("Previous sibling", edited.storyPreviousSibling);
+            changed |= inputInt("Maximum quests", edited.storyMaxQuests, 0, std::numeric_limits<int>::max());
+            changed |= FlagCheckbox("Random", edited.storyNodeFlags, 1u << 0);
+            changed |= FlagCheckbox("Warn If No Child Quest Started", edited.storyNodeFlags, 1u << 1);
+            changed |= FlagCheckbox("Do All Before Repeating", edited.storyQuestFlags, 1u << 0);
+            changed |= FlagCheckbox("Shares Event", edited.storyQuestFlags, 1u << 1);
+            changed |= FlagCheckbox("Use Number Of Quests", edited.storyQuestFlags, 1u << 2);
+            changed |= DrawPerkConditions(edited.conditions);
+            if (form.kind == FK::StoryManagerBranchNode || form.kind == FK::StoryManagerEventNode)
+                changed |= DrawReferenceArrayEditor("Child node", nullptr, edited.storyChildren);
+            if (form.kind == FK::StoryManagerEventNode)
+                changed |= InputString("Registered event ID", edited.storyEventId);
+            if (form.kind == FK::StoryManagerQuestNode) {
+                changed |=
+                    inputInt("Quests to start", edited.storyNumQuestsToStart, 0, std::numeric_limits<int>::max());
+                for (std::size_t i = 0; i < edited.storyQuests.size(); ++i) {
+                    auto& entry = edited.storyQuests[i];
+                    ImGui::PushID(static_cast<int>(i));
+                    changed |= DrawFormReferencePicker("Quest", "Quest", entry.quest);
+                    changed |= FlagCheckbox("Run Once", entry.flags, 1u << 0);
+                    changed |= FlagCheckbox("Exclude From Random", entry.flags, 1u << 1);
+                    changed |= inputFloat("Hours until reset", entry.hoursUntilReset);
+                    if (ImGui::SmallButton("Remove quest")) {
+                        edited.storyQuests.erase(edited.storyQuests.begin() + i);
+                        changed = true;
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::PopID();
+                }
+                if (ImGui::Button("Add quest")) {
+                    edited.storyQuests.emplace_back();
+                    changed = true;
+                }
+            }
+        } else if (form.kind == FK::Package) {
+            constexpr std::array packageTypes{"Explore",
+                                              "Follow",
+                                              "Escort",
+                                              "Eat",
+                                              "Sleep",
+                                              "Wander",
+                                              "Travel",
+                                              "Accompany",
+                                              "Use Item At",
+                                              "Ambush",
+                                              "Flee Not Combat",
+                                              "Cast Magic",
+                                              "Sandbox",
+                                              "Patrol",
+                                              "Guard",
+                                              "Dialogue",
+                                              "Use Weapon",
+                                              "Find",
+                                              "Package",
+                                              "Package Template",
+                                              "Activate",
+                                              "Alarm",
+                                              "Flee",
+                                              "Trespass",
+                                              "Spectator",
+                                              "React To Dead",
+                                              "Get Up",
+                                              "Do Nothing",
+                                              "In Game Dialogue",
+                                              "Surface",
+                                              "Search For Attacker",
+                                              "Avoid Player",
+                                              "React To Destroyed Object",
+                                              "React To Grenade",
+                                              "Steal Warning",
+                                              "Pickpocket Warning",
+                                              "Movement Blocked",
+                                              "Vampire Feed",
+                                              "Cannibal",
+                                              "Landing",
+                                              "Unused",
+                                              "Mount Actor",
+                                              "Dismount Actor",
+                                              "Clear Mount"};
+            int packageType = static_cast<int>(std::min(edited.packageType, 43u));
+            if (ImGui::Combo("Package type", &packageType, packageTypes.data(),
+                             static_cast<int>(packageTypes.size()))) {
+                edited.packageType = packageType;
+                changed = true;
+            }
+            constexpr std::array procedures{"Explore Travel",
+                                            "Explore Wander",
+                                            "Explore Activate",
+                                            "Explore Acquire",
+                                            "Sleep",
+                                            "Eat",
+                                            "Follow With Escort",
+                                            "Ambush Follow",
+                                            "Escort Actor",
+                                            "Escort Object",
+                                            "Dialogue",
+                                            "Alarm",
+                                            "Activate",
+                                            "Greet",
+                                            "Observe Combat",
+                                            "Observe Dialogue",
+                                            "Talk To Dead",
+                                            "Flee",
+                                            "Trespass",
+                                            "Get Up",
+                                            "Explore NPC",
+                                            "Mount Actor",
+                                            "Dismount Actor",
+                                            "Do Nothing",
+                                            "Explore Acquire Generic",
+                                            "Accompany",
+                                            "Use Item At",
+                                            "Vampire Feed",
+                                            "Ambush",
+                                            "Surface",
+                                            "Flee Not Combat",
+                                            "Search For Attacker",
+                                            "Clear Mount",
+                                            "Wait For Dialogue",
+                                            "Avoid Player",
+                                            "Sandbox",
+                                            "Patrol",
+                                            "React To Destroyed Object",
+                                            "React To Grenade",
+                                            "Guard",
+                                            "Steal Warning",
+                                            "Pickpocket Warning",
+                                            "Use Weapon",
+                                            "Follow Without Escort",
+                                            "Movement Blocked",
+                                            "Cannibal",
+                                            "Package",
+                                            "Landing",
+                                            "Keep An Eye On"};
+            int procedure = static_cast<int>(std::min(edited.packageProcedureType, 48u));
+            if (ImGui::Combo("Procedure", &procedure, procedures.data(), static_cast<int>(procedures.size()))) {
+                edited.packageProcedureType = procedure;
+                changed = true;
+            }
+            constexpr std::array speeds{"Walk", "Jog", "Run", "Fast Walk"};
+            int speed = std::min<int>(edited.packagePreferredSpeed, 3);
+            if (ImGui::Combo("Preferred speed", &speed, speeds.data(), static_cast<int>(speeds.size()))) {
+                edited.packagePreferredSpeed = speed;
+                changed = true;
+            }
+            constexpr std::array interruptTargets{"None", "Spectator", "Observe Dead", "Guard Warn", "Combat"};
+            constexpr std::array<std::uint32_t, interruptTargets.size()> interruptTargetIds{
+                0xFFFFFFFFu, 0u, 1u, 2u, 3u};
+            int interruptTargetIndex = 0;
+            for (std::size_t i = 0; i < interruptTargetIds.size(); ++i)
+                if (interruptTargetIds[i] == edited.packageInterruptType) interruptTargetIndex = static_cast<int>(i);
+            if (ImGui::Combo("Interrupt override", &interruptTargetIndex, interruptTargets.data(),
+                             static_cast<int>(interruptTargets.size()))) {
+                edited.packageInterruptType = interruptTargetIds[interruptTargetIndex];
+                changed = true;
+            }
+            constexpr std::array generalFlags{"Offers Services",        "Must Complete",
+                                              "Maintain Speed At Goal", "Unlock Doors At Start",
+                                              "Unlock Doors At End",    "Continue If Player Near",
+                                              "Once Per Day",           "Created",
+                                              "Preferred Speed",        "Always Sneak",
+                                              "Allow Swimming",         "Ignore Combat",
+                                              "Weapons Unequipped",     "Weapon Drawn",
+                                              "No Combat Alert",        "Wear Sleep Outfit"};
+            constexpr std::array<std::uint32_t, generalFlags.size()> generalBits{
+                1u << 0,  1u << 2,  1u << 3,  1u << 6,  1u << 7,  1u << 9,  1u << 10, 1u << 11,
+                1u << 13, 1u << 17, 1u << 18, 1u << 20, 1u << 21, 1u << 23, 1u << 27, 1u << 29};
+            for (std::size_t i = 0; i < generalFlags.size(); ++i)
+                changed |= FlagCheckbox(generalFlags[i], edited.packageFlags, generalBits[i]);
+            constexpr std::array interruptFlags{"Hellos To Player", "Random Conversations",    "Observe Combat",
+                                                "Greet Corpse",     "React To Player Actions", "Friendly Fire Comments",
+                                                "Aggro Radius",     "Allow Idle Chatter",      "World Interactions"};
+            constexpr std::array<std::uint32_t, interruptFlags.size()> interruptBits{
+                1u << 0, 1u << 1, 1u << 2, 1u << 3, 1u << 4, 1u << 5, 1u << 6, 1u << 7, 1u << 9};
+            for (std::size_t i = 0; i < interruptFlags.size(); ++i)
+                changed |= FlagCheckbox(interruptFlags[i], edited.packageInterruptFlags, interruptBits[i]);
+            changed |= inputInt("Specific flags", edited.packageSpecificFlags, 0, 65535);
+            changed |= DrawFormReferencePicker("Package template", "Package", edited.packageTemplate);
+            ImGui::Separator();
+            ImGui::TextUnformatted("Idle collection");
+            changed |= FlagCheckbox("Pick Sequence", edited.packageIdleFlags, 1u << 0);
+            changed |= FlagCheckbox("Old Pick Conditions", edited.packageIdleFlags, 1u << 1);
+            changed |= FlagCheckbox("Do Once", edited.packageIdleFlags, 1u << 2);
+            changed |= FlagCheckbox("Loose Only", edited.packageIdleFlags, 1u << 3);
+            changed |= FlagCheckbox("No Sandbox", edited.packageIdleFlags, 1u << 4);
+            changed |= inputFloat("Idle timer", edited.packageIdleTimer);
+            changed |= DrawFormRefListEditor("Idle animation", "Idle", edited.packageIdles);
+            changed |= inputInt("Month", edited.packageMonth, -1, 11);
+            changed |= inputInt("Day of week", edited.packageDayOfWeek, -1, 10);
+            changed |= inputInt("Date", edited.packageDate, -1, 31);
+            changed |= inputInt("Hour", edited.packageHour, -1, 23);
+            changed |= inputInt("Minute", edited.packageMinute, -1, 59);
+            changed |= inputInt("Duration minutes", edited.packageDuration, 0, std::numeric_limits<int>::max());
+            changed |= DrawPerkConditions(edited.conditions);
+            changed |= DrawFormReferencePicker("Combat style", "CombatStyle", edited.packageCombatStyle);
+            changed |= DrawFormReferencePicker("Owner quest", "Quest", edited.packageOwnerQuest);
+            constexpr std::array locationNames{"None",
+                                               "Near Reference",
+                                               "In Cell",
+                                               "Near Package Start",
+                                               "Near Editor Location",
+                                               "Object ID",
+                                               "Object Type",
+                                               "Keyword",
+                                               "Unused",
+                                               "Alias",
+                                               "Reference",
+                                               "Unknown 10",
+                                               "Unknown 11",
+                                               "Near Self"};
+            constexpr std::array<std::uint32_t, locationNames.size()> locationIds{
+                0xFFFFFFFFu, 0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u, 9u, 10u, 11u, 12u};
+            int locationIndex = 0;
+            for (std::size_t i = 0; i < locationIds.size(); ++i)
+                if (locationIds[i] == edited.packageLocationType) locationIndex = static_cast<int>(i);
+            if (ImGui::Combo("Location type", &locationIndex, locationNames.data(),
+                             static_cast<int>(locationNames.size()))) {
+                edited.packageLocationType = locationIds[locationIndex];
+                changed = true;
+            }
+            changed |= inputInt("Location radius", edited.packageLocationRadius, 0, std::numeric_limits<int>::max());
+            if (edited.packageLocationType == 0 || edited.packageLocationType == 1 ||
+                edited.packageLocationType == 4 || edited.packageLocationType == 6)
+                changed |= DrawAnyFormReferencePicker("Location object", edited.packageLocationObject);
+            else if (edited.packageLocationType == 5) {
+                constexpr std::array locationObjectTypes{"None", "Activator", "Armor", "Book", "Container", "Door",
+                                                         "Ingredient", "Light", "Misc", "Flora", "Furniture", "Weapon",
+                                                         "Ammo", "Key", "Potion", "Food"};
+                int objectType = std::min<int>(edited.packageLocationValue, 15);
+                if (ImGui::Combo("Location object type", &objectType, locationObjectTypes.data(),
+                                 static_cast<int>(locationObjectTypes.size()))) {
+                    edited.packageLocationValue = objectType;
+                    changed = true;
+                }
+            } else if (edited.packageLocationType == 8 || edited.packageLocationType == 9)
+                changed |= inputInt("Location alias", edited.packageLocationValue, 0, 65535);
+            constexpr std::array targetTypes{"None", "Specific Reference", "Object ID", "Object Type",
+                                             "Linked Reference", "Reference Alias", "Unknown 5", "Self"};
+            int targetTypeIndex = std::clamp(edited.packageTargetType + 1, 0, 7);
+            if (ImGui::Combo("Target type", &targetTypeIndex, targetTypes.data(), static_cast<int>(targetTypes.size()))) {
+                edited.packageTargetType = targetTypeIndex - 1;
+                changed = true;
+            }
+            if (edited.packageTargetType == 0 || edited.packageTargetType == 1 || edited.packageTargetType == 3)
+                changed |= DrawAnyFormReferencePicker("Target form", edited.packageTargetForm);
+            else if (edited.packageTargetType == 2) {
+                constexpr std::array objectTypes{"None", "Activator", "Armor", "Book", "Container", "Door",
+                                                 "Ingredient", "Light", "Misc", "Flora", "Furniture", "Weapon",
+                                                 "Ammo", "Key", "Potion", "Food"};
+                int objectType = std::min<int>(edited.packageTargetAlias, 15);
+                if (ImGui::Combo("Object type", &objectType, objectTypes.data(), static_cast<int>(objectTypes.size()))) {
+                    edited.packageTargetAlias = objectType;
+                    changed = true;
+                }
+            } else if (edited.packageTargetType == 4 || edited.packageTargetType == 5)
+                changed |= inputInt("Target alias", edited.packageTargetAlias, 0, 65535);
+            changed |= inputInt("Target value", edited.packageTargetValue, std::numeric_limits<int>::min(),
+                                std::numeric_limits<int>::max());
+            const auto drawPackageEvent = [&](const char* label, DynamicForms::PackageEvent& event) {
+                ImGui::Separator();
+                ImGui::Text("%s", label);
+                changed |= DrawFormReferencePicker("Idle", "Idle", event.idle);
+                constexpr std::array eventTypes{"Begin", "End", "Change", "Patrol"};
+                int eventType = std::min<int>(event.type, 3);
+                if (ImGui::Combo("Action", &eventType, eventTypes.data(), static_cast<int>(eventTypes.size()))) {
+                    event.type = eventType;
+                    changed = true;
+                }
+                constexpr std::array topicTypes{"Topic Reference", "Topic Subtype"};
+                int topicType = std::min<int>(event.topicType, 1);
+                if (ImGui::Combo("Topic mode", &topicType, topicTypes.data(), static_cast<int>(topicTypes.size()))) {
+                    event.topicType = topicType;
+                    changed = true;
+                }
+                changed |= DrawFormReferencePicker("Topic", "DialogueTopic", event.topic);
+            };
+            ImGui::PushID("begin");
+            drawPackageEvent("On begin", edited.packageOnBegin);
+            ImGui::PopID();
+            ImGui::PushID("end");
+            drawPackageEvent("On end", edited.packageOnEnd);
+            ImGui::PopID();
+            ImGui::PushID("change");
+            drawPackageEvent("On change", edited.packageOnChange);
+            ImGui::PopID();
+        } else if (form.kind == FK::Race) {
+            changed |= InputString("Name", edited.fullName);
+            changed |= DrawFormRefListEditor("Keyword", "Keyword", edited.keywords);
+            changed |= DrawFormRefListEditor("Spell", "Spell", edited.spells);
+            changed |= DrawFormReferencePicker("Skin", "Armor", edited.skin);
+            constexpr std::array raceFlagNames{"Playable",
+                                               "FaceGen Head",
+                                               "Child",
+                                               "Tilt Front Back",
+                                               "Tilt Left Right",
+                                               "No Shadow",
+                                               "Swims",
+                                               "Flies",
+                                               "Walks",
+                                               "Immobile",
+                                               "Not Pushable",
+                                               "No Combat In Water",
+                                               "No Rotate To Head Track",
+                                               "No Blood Spray",
+                                               "No Blood Decal",
+                                               "Use Head Track Anims",
+                                               "Spells Align Magic Node",
+                                               "World Raycasts Foot IK",
+                                               "Allow Ragdoll Collision",
+                                               "Regenerate Health In Combat",
+                                               "Cannot Open Doors",
+                                               "Allow Player Dialogue",
+                                               "No Knockdowns",
+                                               "Allow Pickpocket",
+                                               "Always Proxy Controller",
+                                               "No Weapon Blood",
+                                               "Overlay Head Parts",
+                                               "Override Head Parts",
+                                               "Can Pick Up Items",
+                                               "Multiple Membrane Shaders",
+                                               "Can Dual Wield",
+                                               "Avoids Roads"};
+            for (std::size_t i = 0; i < raceFlagNames.size(); ++i)
+                changed |= FlagCheckbox(raceFlagNames[i], edited.raceFlags, 1u << i);
+            changed |= FlagCheckbox("Use Advanced Avoidance", edited.raceFlags2, 1u << 0);
+            changed |= FlagCheckbox("Non Hostile", edited.raceFlags2, 1u << 1);
+            changed |= FlagCheckbox("Allow Mounted Combat", edited.raceFlags2, 1u << 4);
+            constexpr std::array sizes{"Small", "Medium", "Large", "Extra Large"};
+            int size = std::min<int>(edited.raceSize, 3);
+            if (ImGui::Combo("Race size", &size, sizes.data(), static_cast<int>(sizes.size()))) {
+                edited.raceSize = size;
+                changed = true;
+            }
+            for (std::size_t i = 0; i < 7; ++i) {
+                ImGui::PushID(static_cast<int>(i));
+                changed |= DrawActorValueCombo("Skill boost", edited.raceSkillBoostSkills[i]);
+                changed |= inputInt("Bonus", edited.raceSkillBoostBonuses[i], 0, 255);
+                ImGui::PopID();
+            }
+            constexpr std::array heightLabels{"Male height", "Female height"};
+            changed |= inputFloatArray("race-height", edited.raceHeight, heightLabels);
+            constexpr std::array weightLabels{"Male weight", "Female weight"};
+            changed |= inputFloatArray("race-weight", edited.raceWeight, weightLabels);
+            constexpr std::array statLabels{"Starting health",
+                                            "Starting magicka",
+                                            "Starting stamina",
+                                            "Carry weight",
+                                            "Mass",
+                                            "Acceleration",
+                                            "Deceleration",
+                                            "Injured health percent",
+                                            "Health regeneration",
+                                            "Magicka regeneration",
+                                            "Stamina regeneration",
+                                            "Unarmed damage",
+                                            "Unarmed reach",
+                                            "Aim angle tolerance",
+                                            "Flight radius"};
+            changed |= inputFloatArray("race-stats", edited.raceStats, statLabels);
+            changed |= InputString("Male skeleton", edited.raceSkeletonModels[0], 520);
+            changed |= InputString("Female skeleton", edited.raceSkeletonModels[1], 520);
+            changed |= InputString("Male behavior graph", edited.raceBehaviorGraphs[0], 520);
+            changed |= InputString("Female behavior graph", edited.raceBehaviorGraphs[1], 520);
+            changed |= DrawFormReferencePicker("Male voice", "VoiceType", edited.raceVoiceTypes[0]);
+            changed |= DrawFormReferencePicker("Female voice", "VoiceType", edited.raceVoiceTypes[1]);
+            changed |= DrawFormReferencePicker("Body part data", "BodyPartData", edited.raceBodyPartData);
+            changed |= DrawFormReferencePicker("Male decapitate armor", "Armor", edited.raceDecapitateArmors[0]);
+            changed |= DrawFormReferencePicker("Female decapitate armor", "Armor", edited.raceDecapitateArmors[1]);
+            changed |= DrawFormReferencePicker("Blood material", "MaterialType", edited.raceBloodMaterial);
+            changed |= DrawFormReferencePicker("Impact data set", "ImpactDataSet", edited.raceImpactDataSet);
+            changed |= DrawFormReferencePicker("Dismember blood", "ArtObject", edited.raceDismemberBlood);
+            changed |= DrawFormReferencePicker("Corpse open sound", "SoundDescriptor", edited.raceCorpseOpenSound);
+            changed |= DrawFormReferencePicker("Corpse close sound", "SoundDescriptor", edited.raceCorpseCloseSound);
+            changed |= DrawFormRefListEditor("Equip slot", "EquipSlot", edited.raceEquipSlots);
+            constexpr std::array equipFlags{"Hand To Hand",  "One Hand Sword", "One Hand Dagger", "One Hand Axe",
+                                            "One Hand Mace", "Two Hand Sword", "Two Hand Axe",    "Bow",
+                                            "Staff",         "Spell",          "Shield",          "Torch",
+                                            "Crossbow"};
+            for (std::size_t i = 0; i < equipFlags.size(); ++i)
+                changed |= FlagCheckbox(equipFlags[i], edited.raceValidEquipTypes, 1u << i);
+            changed |= DrawFormReferencePicker("Unarmed equip slot", "EquipSlot", edited.raceUnarmedEquipSlot);
+            changed |= DrawFormReferencePicker("Morph race", "Race", edited.raceMorphRace);
+            changed |= DrawFormReferencePicker("Armor parent race", "Race", edited.raceArmorParentRace);
+            constexpr std::array moveLabels{"Walk movement", "Run movement",   "Swim movement",
+                                            "Fly movement",  "Sneak movement", "Sprint movement"};
+            for (std::size_t i = 0; i < 6; ++i)
+                changed |= DrawFormReferencePicker(moveLabels[i], "MovementType", edited.raceMovementTypes[i]);
+            ImGui::Separator();
+            ImGui::TextUnformatted("Race geometry");
+            changed |= InputString("Male body texture model", edited.raceBodyTextureModels[0], 520);
+            changed |= InputString("Female body texture model", edited.raceBodyTextureModels[1], 520);
+            changed |= inputFloat("FaceGen main clamp", edited.raceFaceClamp);
+            changed |= inputFloat("FaceGen face clamp", edited.raceFaceClamp2);
+            constexpr std::array mountLabels{"Mount offset X", "Mount offset Y", "Mount offset Z",
+                                             "Dismount offset X", "Dismount offset Y", "Dismount offset Z",
+                                             "Mount camera offset X", "Mount camera offset Y", "Mount camera offset Z"};
+            changed |= inputFloatArray("race-mount", edited.raceMountData, mountLabels);
+            constexpr std::array angularLabels{"Angular acceleration", "Angular tolerance"};
+            changed |= inputFloatArray("race-angular", edited.raceAngularData, angularLabels);
+            constexpr std::array sexNames{"Male", "Female"};
+            constexpr std::array morphNames{"Nose", "Brows", "Eyes", "Lips"};
+            for (std::size_t sex = 0; sex < 2; ++sex) {
+                ImGui::PushID(static_cast<int>(sex) + 40000);
+                ImGui::Separator();
+                ImGui::Text("%s face data", sexNames[sex]);
+                changed |= DrawFormRefListEditor("Head part", "HeadPart", edited.raceHeadParts[sex]);
+                changed |= DrawFormRefListEditor("Preset NPC", "NPC", edited.racePresetNPCs[sex]);
+                changed |= DrawFormRefListEditor("Hair color", "Color", edited.raceHairColors[sex]);
+                changed |= DrawFormRefListEditor("Face detail texture", "TextureSet", edited.raceFaceDetailTextures[sex]);
+                changed |= DrawFormReferencePicker("Default face detail", "TextureSet", edited.raceDefaultFaceDetails[sex]);
+                changed |= DrawFormReferencePicker("Default hair color", "Color", edited.raceDefaultHairColors[sex]);
+                for (std::size_t morph = 0; morph < 4; ++morph) {
+                    const auto treeLabel = std::format("{} morph options", morphNames[morph]);
+                    if (ImGui::TreeNode(treeLabel.c_str())) {
+                        auto& flags = edited.raceMorphFlags[sex * 4 + morph];
+                        for (std::size_t bit = 0; bit < 32; ++bit) {
+                            const auto flagLabel = std::format("Option {}", bit);
+                            changed |= FlagCheckbox(flagLabel.c_str(), flags, 1u << bit);
+                        }
+                        ImGui::TreePop();
+                    }
+                }
+                ImGui::PopID();
+            }
+            ImGui::Separator();
+            ImGui::TextUnformatted("Biped object names");
+            for (std::size_t i = 0; i < edited.raceBipedObjectNames.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i) + 41000);
+                const auto label = std::format("Object {}", i);
+                changed |= InputString(label.c_str(), edited.raceBipedObjectNames[i], 420);
+                ImGui::PopID();
+            }
+            ImGui::TextUnformatted("Phoneme targets");
+            for (std::size_t i = 0; i < edited.racePhonemeTargets.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i) + 42000);
+                changed |= InputString("Name", edited.racePhonemeTargets[i], 420);
+                if (ImGui::SmallButton("Remove phoneme")) {
+                    edited.racePhonemeTargets.erase(edited.racePhonemeTargets.begin() + static_cast<std::ptrdiff_t>(i));
+                    changed = true;
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::PopID();
+            }
+            if (ImGui::Button("Add phoneme")) { edited.racePhonemeTargets.emplace_back(); changed = true; }
+            ImGui::Separator();
+            ImGui::TextUnformatted("Attacks");
+            changed |= DrawFormReferencePicker("Default attack race", "Race", edited.raceAttackRace);
+            for (std::size_t i = 0; i < edited.raceAttacks.size(); ++i) {
+                auto& attack = edited.raceAttacks[i];
+                ImGui::PushID(static_cast<int>(i) + 43000);
+                ImGui::Separator();
+                ImGui::Text("Attack %zu", i + 1);
+                changed |= InputString("Event", attack.event, 420);
+                changed |= inputFloat("Damage multiplier", attack.damageMult);
+                changed |= inputFloat("Attack chance", attack.attackChance);
+                changed |= DrawFormReferencePicker("Attack spell", "Spell", attack.attackSpell);
+                changed |= FlagCheckbox("Ignore Weapon", attack.flags, 1u << 0);
+                changed |= FlagCheckbox("Bash Attack", attack.flags, 1u << 1);
+                changed |= FlagCheckbox("Power Attack", attack.flags, 1u << 2);
+                changed |= FlagCheckbox("Charge Attack", attack.flags, 1u << 3);
+                changed |= FlagCheckbox("Rotating Attack", attack.flags, 1u << 4);
+                changed |= FlagCheckbox("Continuous Attack", attack.flags, 1u << 5);
+                changed |= FlagCheckbox("Override Data", attack.flags, 1u << 31);
+                changed |= inputFloat("Attack angle", attack.attackAngle);
+                changed |= inputFloat("Strike angle", attack.strikeAngle);
+                changed |= inputFloat("Stagger offset", attack.staggerOffset);
+                changed |= DrawFormReferencePicker("Attack type", "Keyword", attack.attackType);
+                changed |= inputFloat("Knockdown", attack.knockDown);
+                changed |= inputFloat("Recovery time", attack.recoveryTime);
+                changed |= inputFloat("Stamina multiplier", attack.staminaMult);
+                if (ImGui::SmallButton("Remove attack")) {
+                    edited.raceAttacks.erase(edited.raceAttacks.begin() + static_cast<std::ptrdiff_t>(i));
+                    changed = true;
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::PopID();
+            }
+            if (ImGui::Button("Add attack")) { edited.raceAttacks.emplace_back(); changed = true; }
         }
         return CommitEditedForm(index, form, edited, changed);
     }
@@ -4923,8 +5865,14 @@ namespace {
             }
 
             if (ImGui::BeginTabItem(Configuration::GetLoc("menu.visual", "Visual"))) {
-                SetStableComboWidth(HEAD_PART_FILTER_ITEMS, 220.0F);
-                ImGui::Combo(Configuration::GetLoc("menu.headpart_filter", "HeadPart filter"), &selectedNpcHeadPartFilter, HEAD_PART_FILTER_ITEMS.data(), static_cast<int>(HEAD_PART_FILTER_ITEMS.size()));
+                DrawSearchableCombo(
+                    Configuration::GetLoc("menu.headpart_filter", "HeadPart filter"),
+                    "npc_headpart_type_filter",
+                    selectedNpcHeadPartFilter,
+                    HEAD_PART_FILTER_ITEMS.data(),
+                    static_cast<int>(HEAD_PART_FILTER_ITEMS.size()),
+                    220.0F,
+                    300.0F);
                 changed |= DrawFormRefListEditor("HeadPart", SelectedNpcHeadPartListType(), edited.headParts);
                 ImGui::Separator();
                 changed |= DrawTintLayerEditor(edited.tintLayers);
@@ -4996,7 +5944,7 @@ namespace {
             const auto& form = forms[static_cast<std::size_t>(pendingDeleteIndex)];
             ImGui::Text("%s", Configuration::GetLoc("menu.delete_confirm", "Are you sure you want to delete this form?"));
             ImGui::Text("%s", form.editorId.c_str());
-            ImGui::Text("%s: %u", Configuration::GetLoc("menu.local_id", "Local ID"), form.localId);
+            ImGui::Text("%s: %u:%06X", Configuration::GetLoc("menu.dpf_slot", "DPF slot"), form.pluginNumber, form.localId);
 
             if (ImGui::Button(Configuration::GetLoc("menu.delete", "Delete"))) {
                 const auto editorId = form.editorId;
@@ -5206,8 +6154,14 @@ namespace Configuration {
         }
 
         ImGui::Separator();
-        SetStableComboWidth(FILTER_KIND_ITEMS, 220.0F);
-        ImGui::Combo(Configuration::GetLoc("menu.filter_by_type", "Filter by type"), &selectedExportFilterKind, FILTER_KIND_ITEMS.data(), static_cast<int>(FILTER_KIND_ITEMS.size()));
+        DrawSearchableCombo(
+            Configuration::GetLoc("menu.filter_by_type", "Filter by type"),
+            "export_type_filter",
+            selectedExportFilterKind,
+            FILTER_KIND_ITEMS.data(),
+            static_cast<int>(FILTER_KIND_ITEMS.size()),
+            220.0F,
+            300.0F);
         ImGui::SetNextItemWidth(280.0F);
         ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "Filter EditorID"), exportFilterEditorIdBuffer.data(), exportFilterEditorIdBuffer.size());
 
@@ -5284,11 +6238,7 @@ namespace Configuration {
             ImGui::PopStyleColor(3);
         }
 
-        if (!saveMessage.empty()) {
-            ImGui::SameLine();
-            ImGui::TextColored(lastSaveSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", saveMessage.c_str());
-        }
-
+        ImGui::SameLine();
         if (ImGui::Button(deleteSelectionMode ? Configuration::GetLoc("menu.cancel_delete_selection", "Cancel delete selection") : Configuration::GetLoc("menu.select_to_delete", "Select to delete"))) {
             deleteSelectionMode = !deleteSelectionMode;
             selectedDeleteForms.clear();
@@ -5311,6 +6261,38 @@ namespace Configuration {
                 selectedDeleteForms.clear();
             }
         }
+
+        if (!saveMessage.empty()) {
+            ImGui::TextColored(lastSaveSucceeded ? SUCCESS_COLOR : ERROR_COLOR, "%s", saveMessage.c_str());
+        }
+
+        auto filterItems = PackageComboItems(true);
+        DrawSearchableCombo(
+            Configuration::GetLoc("menu.package_filter", "Package"),
+            "saved_forms_package_filter",
+            selectedPackageFilter,
+            filterItems.data(),
+            static_cast<int>(filterItems.size()),
+            260.0F);
+        ImGui::SameLine();
+        DrawSearchableCombo(
+            Configuration::GetLoc("menu.filter_type", "Type"),
+            "saved_forms_type_filter",
+            selectedFilterKind,
+            FILTER_KIND_ITEMS.data(),
+            static_cast<int>(FILTER_KIND_ITEMS.size()),
+            220.0F,
+            320.0F);
+
+        ImGui::SetNextItemWidth(260.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.filter_package_name", "Package name"), filterPackageNameBuffer.data(), filterPackageNameBuffer.size());
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(300.0F);
+        ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "EditorID"), filterEditorIdBuffer.data(), filterEditorIdBuffer.size());
+
+        ImGui::Checkbox(Configuration::GetLoc("menu.show_sources", "Show sources"), &showSourceDetails);
+        ImGui::SameLine();
+        ImGui::Checkbox(Configuration::GetLoc("menu.only_override_drafts", "Only override drafts"), &showOnlyOverrideDrafts);
 
         auto& forms = Manager::GetForms();
         std::set<std::string> existingEditorIds;

@@ -6,6 +6,7 @@ var
   PackageDir: string;
   ExportedCount: Integer;
   SkippedCount: Integer;
+  ExportedRecords: TStringList;
 
   // NPC flag diagnostics.
   // Leave DebugNpcEditorID empty to log every selected NPC.
@@ -802,6 +803,38 @@ begin
   else if sig = 'LSCR' then Result := 'LoadScreen'
   else if sig = 'SPGD' then Result := 'ShaderParticleGeometry'
   else if sig = 'ADDN' then Result := 'AddonNode'
+  else if sig = 'FACT' then Result := 'Faction'
+  else if sig = 'IDLE' then Result := 'IdleAnimation'
+  else if sig = 'MATO' then Result := 'MaterialObject'
+  else if sig = 'MESG' then Result := 'Message'
+  else if sig = 'LTEX' then Result := 'LandTexture'
+  else if sig = 'SOPM' then Result := 'SoundOutputModel'
+  else if sig = 'LENS' then Result := 'LensFlare'
+  else if sig = 'DEBR' then Result := 'Debris'
+  else if sig = 'IMAD' then Result := 'ImageSpaceModifier'
+  else if sig = 'CAMS' then Result := 'CameraShot'
+  else if sig = 'CPTH' then Result := 'CameraPath'
+  else if sig = 'TACT' then Result := 'TalkingActivator'
+  else if sig = 'FURN' then Result := 'Furniture'
+  else if sig = 'WTHR' then Result := 'Weather'
+  else if sig = 'CLMT' then Result := 'Climate'
+  else if sig = 'LCTN' then Result := 'Location'
+  else if sig = 'MUSC' then Result := 'MusicType'
+  else if sig = 'MUST' then Result := 'MusicTrack'
+  else if sig = 'BPTD' then Result := 'BodyPartData'
+  else if sig = 'VOLI' then Result := 'VolumetricLighting'
+  else if sig = 'SOUN' then Result := 'Sound'
+  else if sig = 'AVIF' then Result := 'ActorValueInfo'
+  else if sig = 'DLBR' then Result := 'DialogueBranch'
+  else if sig = 'DIAL' then Result := 'DialogueTopic'
+  else if sig = 'INFO' then Result := 'DialogueInfo'
+  else if sig = 'QUST' then Result := 'Quest'
+  else if sig = 'SCEN' then Result := 'Scene'
+  else if sig = 'SMBN' then Result := 'StoryManagerBranchNode'
+  else if sig = 'SMQN' then Result := 'StoryManagerQuestNode'
+  else if sig = 'SMEN' then Result := 'StoryManagerEventNode'
+  else if sig = 'PACK' then Result := 'Package'
+  else if sig = 'RACE' then Result := 'Race'
   else if sig = 'MGEF' then Result := 'MagicEffect'
   else if sig = 'CLFM' then Result := 'Color'
   else if sig = 'ARTO' then Result := 'ArtObject'
@@ -3054,6 +3087,728 @@ begin
   AddKV(sl, '  ', 'addonFlags', ElementIntegerText(StructFieldElement(e, 'DNAM', 'Flags'), '0'));
 end;
 
+procedure AddFactionFields(sl: TStringList; e: IInterface);
+var
+  node, row, linked: IInterface;
+  i: Integer;
+begin
+  AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name'));
+  AddKV(sl, '  ', 'factionFlags', ElementIntegerText(FirstElementByPath(e, 'DATA - Flags', 'DATA - Data\Flags', 'DATA\Flags', 'DATA'), '0'));
+
+  sl.Add('  "factionReactions": [');
+  node := FirstElementByPath(e, 'Relations', 'Relations (sorted)', 'XNAM - Relations', 'XNAM');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i); linked := FirstLinkedInElement(row);
+    if Assigned(linked) then begin
+      sl.Add('    {');
+      AddKV(sl, '      ', 'faction', FormRefJson(linked));
+      AddKV(sl, '      ', 'reaction', SafeInt(FirstText(row, 'Reaction', 'Modifier', ''), '0'));
+      AddKV(sl, '      ', 'fightReaction', SafeInt(FirstText(row, 'Fight Reaction', 'Combat Reaction', ''), '0'));
+      RemoveTrailingComma(sl); sl.Add('    },');
+    end;
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+
+  sl.Add('  "factionRanks": [');
+  node := FirstElementByPath(e, 'Ranks', 'Ranks (sorted)', 'Rank Data', 'RNAM');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddStringKV(sl, '      ', 'maleTitle', FirstText(row, 'MNAM - Male Rank Title', 'Male Rank Title', 'MNAM'));
+    AddStringKV(sl, '      ', 'femaleTitle', FirstText(row, 'FNAM - Female Rank Title', 'Female Rank Title', 'FNAM'));
+    AddStringKV(sl, '      ', 'insigniaPath', FirstText(row, 'INAM - Insignia', 'Insignia', 'INAM'));
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+
+  AddFormRefKV(sl, 'factionJailMarker', LinkedByPath(e, 'JAIL - Jail Marker'));
+  AddFormRefKV(sl, 'factionWaitMarker', LinkedByPath(e, 'WAIT - Faction Wait Marker'));
+  AddFormRefKV(sl, 'factionStolenContainer', LinkedByPath(e, 'STOL - Stolen Goods Container'));
+  AddFormRefKV(sl, 'factionPlayerInventoryContainer', LinkedByPath(e, 'PLCN - Player Inventory Container'));
+  AddFormRefKV(sl, 'factionCrimeGroup', LinkedByPath(e, 'CRGR - Crime Group'));
+  AddFormRefKV(sl, 'factionJailOutfit', LinkedByPath(e, 'JOUT - Jail Outfit'));
+  AddKV(sl, '  ', 'factionArrest', DebugBoolText(SafeInt(StructFieldText(e, 'CRVA', 'Arrest', '0'), '0') <> '0'));
+  AddKV(sl, '  ', 'factionAttackOnSight', DebugBoolText(SafeInt(StructFieldText(e, 'CRVA', 'Attack On Sight', '0'), '0') <> '0'));
+  AddKV(sl, '  ', 'factionMurderCrimeGold', SafeInt(StructFieldText(e, 'CRVA', 'Murder', '0'), '0'));
+  AddKV(sl, '  ', 'factionAssaultCrimeGold', SafeInt(StructFieldText(e, 'CRVA', 'Assault', '0'), '0'));
+  AddKV(sl, '  ', 'factionTrespassCrimeGold', SafeInt(StructFieldText(e, 'CRVA', 'Trespass', '0'), '0'));
+  AddKV(sl, '  ', 'factionPickpocketCrimeGold', SafeInt(StructFieldText(e, 'CRVA', 'Pickpocket', '0'), '0'));
+  AddKV(sl, '  ', 'factionStealCrimeGoldMult', SafeFloat(StructFieldText(e, 'CRVA', 'Steal Multiplier', '1'), '1.0'));
+  AddKV(sl, '  ', 'factionEscapeCrimeGold', SafeInt(StructFieldText(e, 'CRVA', 'Escape', '0'), '0'));
+  AddKV(sl, '  ', 'factionWerewolfCrimeGold', SafeInt(StructFieldText(e, 'CRVA', 'Werewolf', '0'), '0'));
+  AddKV(sl, '  ', 'factionVendorStartHour', SafeInt(StructFieldText(e, 'VENV', 'Start Hour', '0'), '0'));
+  AddKV(sl, '  ', 'factionVendorEndHour', SafeInt(StructFieldText(e, 'VENV', 'End Hour', '24'), '24'));
+  AddKV(sl, '  ', 'factionVendorRadius', SafeInt(StructFieldText(e, 'VENV', 'Radius', '0'), '0'));
+  AddKV(sl, '  ', 'factionVendorBuysStolen', DebugBoolText(SafeInt(StructFieldText(e, 'VENV', 'Buys Stolen Items', '0'), '0') <> '0'));
+  AddKV(sl, '  ', 'factionVendorNotBuySell', DebugBoolText(SafeInt(StructFieldText(e, 'VENV', 'Not Sell/Buy', '0'), '0') <> '0'));
+  AddKV(sl, '  ', 'factionVendorBuysNonStolen', DebugBoolText(SafeInt(StructFieldText(e, 'VENV', 'Buys Non-Stolen Items', '0'), '0') <> '0'));
+  AddFormRefKV(sl, 'factionVendorSellBuyList', LinkedByPath(e, 'VEND - Vendor Buy/Sell List'));
+  AddFormRefKV(sl, 'factionMerchantContainer', LinkedByPath(e, 'VENC - Merchant Container'));
+  AddPerkConditionsArray(sl, 'factionVendorConditions', FirstElementByPath(e, 'Vendor Data\Conditions', 'Vendor Conditions', 'Conditions', ''), '  ');
+end;
+
+procedure AddIdleAnimationFields(sl: TStringList; e: IInterface);
+begin
+  AddKV(sl, '  ', 'idleLoopMin', SafeInt(StructFieldText(e, 'DATA', 'Loop Min', '0'), '0'));
+  AddKV(sl, '  ', 'idleLoopMax', SafeInt(StructFieldText(e, 'DATA', 'Loop Max', '0'), '0'));
+  AddKV(sl, '  ', 'idleAnimationFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0'));
+  AddKV(sl, '  ', 'idleAnimationGroupSelection', SafeInt(StructFieldText(e, 'DATA', 'Animation Group Selection', '0'), '0'));
+  AddKV(sl, '  ', 'idleReplayDelay', SafeInt(StructFieldText(e, 'DATA', 'Replay Delay', '0'), '0'));
+  AddFormRefKV(sl, 'idleParent', LinkedByPath(e, 'ANAM - Parent Idle'));
+  AddFormRefKV(sl, 'idlePrevious', LinkedByPath(e, 'ANAM - Previous Idle'));
+  AddStringKV(sl, '  ', 'idleAnimationFile', FirstText(e, 'DNAM - Animation File', 'DNAM', ''));
+  AddStringKV(sl, '  ', 'idleAnimationEvent', FirstText(e, 'ENAM - Animation Event', 'ENAM', ''));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
+end;
+
+procedure AddMaterialObjectFields(sl: TStringList; e: IInterface);
+begin
+  AddStringKV(sl, '  ', 'modelPath', GetText(e, 'Model\MODL - Model FileName'));
+  sl.Add('  "materialDirectionalData": [' + SafeFloat(StructFieldText(e, 'DATA', 'Falloff Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Falloff Bias', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Noise UV Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Material UV Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Projection Direction X', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Projection Direction Y', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Projection Direction Z', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Normal Dampener', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Single Pass Color R', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Single Pass Color G', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Single Pass Color B', '0'), '0.0') + '],');
+  AddKV(sl, '  ', 'materialSinglePass', SafeInt(StructFieldText(e, 'DATA', 'Single Pass', '0'), '0'));
+  AddKV(sl, '  ', 'materialObjectFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0'));
+end;
+
+procedure AddMessageFields(sl: TStringList; e: IInterface);
+var node, row: IInterface; i: Integer;
+begin
+  AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name')); AddStringKV(sl, '  ', 'description', FirstText(e, 'DESC - Description', 'DESC', ''));
+  AddFormRefKV(sl, 'messageMenuIcon', LinkedByPath(e, 'INAM - Icon')); AddFormRefKV(sl, 'messageOwnerQuest', LinkedByPath(e, 'QNAM - Owner Quest'));
+  AddKV(sl, '  ', 'messageFlags', ElementIntegerText(StructFieldElement(e, 'DNAM', 'Flags'), '0')); AddKV(sl, '  ', 'messageDisplayTime', SafeInt(FirstText(e, 'TNAM - Display Time', 'TNAM', ''), '0'));
+  sl.Add('  "messageButtons": ['); node := FirstElementByPath(e, 'Menu Buttons', 'Buttons', 'ITXT - Button Text', '');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin row := ElementByIndex(node, i); sl.Add('    {'); AddStringKV(sl, '      ', 'text', FirstText(row, 'ITXT - Button Text', 'Button Text', 'ITXT')); AddPerkConditionsArray(sl, 'conditions', row, '      '); RemoveTrailingComma(sl); sl.Add('    },'); end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
+procedure AddLandTextureFields(sl: TStringList; e: IInterface);
+begin
+  AddFormRefKV(sl, 'landTextureSet', LinkedByPath(e, 'TNAM - Texture Set')); AddKV(sl, '  ', 'landFriction', SafeInt(StructFieldText(e, 'HNAM', 'Friction', '0'), '0')); AddKV(sl, '  ', 'landRestitution', SafeInt(StructFieldText(e, 'HNAM', 'Restitution', '0'), '0')); AddFormRefKV(sl, 'landMaterialType', LinkedByPath(e, 'MNAM - Material Type')); AddKV(sl, '  ', 'landSpecularExponent', SafeInt(FirstText(e, 'SNAM - Specular Exponent', 'SNAM', ''), '0')); AddKV(sl, '  ', 'landShaderTextureIndex', SafeInt(FirstText(e, 'INAM - Texture Index', 'INAM', ''), '0')); AddFormRefArrayFromPaths(sl, 'landGrasses', e, 'GNAM - Grasses', 'Grasses', 'GNAM', '');
+end;
+
+procedure AddSoundOutputModelFields(sl: TStringList; e: IInterface);
+begin
+  AddKV(sl, '  ', 'soundOutputType', SafeInt(FirstText(e, 'MNAM - Type', 'MNAM', ''), '0')); AddKV(sl, '  ', 'soundOutputFlags', ElementIntegerText(StructFieldElement(e, 'NAM1', 'Flags'), '0')); AddKV(sl, '  ', 'soundOutputReverbSend', SafeInt(StructFieldText(e, 'NAM1', 'Reverb Send', '0'), '0')); AddKV(sl, '  ', 'soundOutputMinDistance', SafeFloat(StructFieldText(e, 'ANAM', 'Min Distance', '0'), '0.0')); AddKV(sl, '  ', 'soundOutputMaxDistance', SafeFloat(StructFieldText(e, 'ANAM', 'Max Distance', '0'), '0.0'));
+  sl.Add('  "soundOutputCurve": [' + SafeInt(StructFieldText(e, 'ANAM', 'Curve 1', '0'), '0') + ', ' + SafeInt(StructFieldText(e, 'ANAM', 'Curve 2', '0'), '0') + ', ' + SafeInt(StructFieldText(e, 'ANAM', 'Curve 3', '0'), '0') + ', ' + SafeInt(StructFieldText(e, 'ANAM', 'Curve 4', '0'), '0') + ', ' + SafeInt(StructFieldText(e, 'ANAM', 'Curve 5', '0'), '0') + '],'); sl.Add('  "soundOutputSpeakers": [],');
+end;
+
+procedure AddLensFlareFields(sl: TStringList; e: IInterface);
+begin AddKV(sl, '  ', 'lensFlareFadeDistanceRadiusScale', SafeFloat(StructFieldText(e, 'DNAM', 'Fade Distance Radius Scale', '0'), '0.0')); AddKV(sl, '  ', 'lensFlareColorInfluence', SafeFloat(StructFieldText(e, 'DNAM', 'Color Influence', '0'), '0.0')); end;
+
+procedure AddDebrisFields(sl: TStringList; e: IInterface);
+var node, row: IInterface; i: Integer;
+begin sl.Add('  "debrisEntries": ['); node := FirstElementByPath(e, 'Models', 'Debris Models', 'Model', ''); if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin row := ElementByIndex(node, i); sl.Add('    {'); AddKV(sl, '      ', 'percentage', SafeInt(FirstText(row, 'DATA - Percentage', 'Percentage', 'DATA'), '100')); AddKV(sl, '      ', 'flags', ElementIntegerText(StructFieldElement(row, 'DATA', 'Flags'), '0')); AddStringKV(sl, '      ', 'modelPath', FirstText(row, 'MODL - Model FileName', 'Model FileName', 'MODL')); RemoveTrailingComma(sl); sl.Add('    },'); end; RemoveTrailingComma(sl); sl.Add('  ],'); end;
+
+procedure AddImageSpaceModifierFields(sl: TStringList; e: IInterface);
+begin
+  AddKV(sl, '  ', 'imageModifierAnimatable', DebugBoolText(SafeInt(StructFieldText(e, 'DNAM', 'Animatable', '0'), '0') <> '0')); AddKV(sl, '  ', 'imageModifierDuration', SafeFloat(StructFieldText(e, 'DNAM', 'Duration', '0'), '0.0')); sl.Add('  "imageModifierHDR": [],'); sl.Add('  "imageModifierCinematic": [],'); AddKV(sl, '  ', 'imageModifierTintColor', ElementIntegerText(StructFieldElement(e, 'DNAM', 'Tint Color'), '0')); AddKV(sl, '  ', 'imageModifierBlurRadius', ElementIntegerText(StructFieldElement(e, 'DNAM', 'Blur Radius'), '0')); AddKV(sl, '  ', 'imageModifierDoubleVisionStrength', ElementIntegerText(StructFieldElement(e, 'DNAM', 'Double Vision Strength'), '0')); AddKV(sl, '  ', 'imageModifierRadialBlurStrength', ElementIntegerText(StructFieldElement(e, 'DNAM', 'Radial Blur Strength'), '0')); AddKV(sl, '  ', 'imageModifierDofStrength', ElementIntegerText(StructFieldElement(e, 'DNAM', 'Depth Of Field Strength'), '0'));
+end;
+
+procedure AddCameraShotFields(sl: TStringList; e: IInterface);
+begin
+  AddStringKV(sl, '  ', 'modelPath', GetText(e, 'Model\MODL - Model FileName')); AddFormRefKV(sl, 'cameraImageSpaceModifier', LinkedByPath(e, 'MNAM - Image Space Modifier')); AddKV(sl, '  ', 'cameraAction', SafeInt(StructFieldText(e, 'DATA', 'Camera Action', '0'), '0')); AddKV(sl, '  ', 'cameraLocation', SafeInt(StructFieldText(e, 'DATA', 'Location', '0'), '0')); AddKV(sl, '  ', 'cameraTarget', SafeInt(StructFieldText(e, 'DATA', 'Target', '0'), '0')); AddKV(sl, '  ', 'cameraFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0')); sl.Add('  "cameraTiming": [' + SafeFloat(StructFieldText(e, 'DATA', 'Player Time Mult', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Target Time Mult', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Global Time Mult', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Max Time', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Min Time', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Target Percent Between Actors', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA', 'Near Target Distance', '0'), '0.0') + '],');
+end;
+
+procedure AddCameraPathFields(sl: TStringList; e: IInterface);
+begin
+  AddFormRefArrayFromPaths(sl, 'cameraPathShots', e, 'SNAM - Camera Shots', 'Camera Shots', 'SNAM', ''); AddKV(sl, '  ', 'cameraPathFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0')); AddFormRefKV(sl, 'cameraPathParent', LinkedByPath(e, 'ANAM - Parent Path')); AddFormRefKV(sl, 'cameraPathPrevious', LinkedByPath(e, 'ANAM - Previous Path')); AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
+end;
+
+procedure AddTalkingActivatorFields(sl: TStringList; e: IInterface);
+begin
+  AddActivatorFields(sl, e);
+  AddFormRefKV(sl, 'talkingVoiceType', LinkedByPath(e, 'VNAM - Voice Type'));
+end;
+
+procedure AddFurnitureFields(sl: TStringList; e: IInterface);
+begin
+  AddActivatorFields(sl, e);
+  AddKV(sl, '  ', 'furnitureFlags', ElementIntegerText(FirstElementByPath(e, 'MNAM - Active Markers', 'FNAM - Flags', 'Active Markers', ''), '0'));
+  AddKV(sl, '  ', 'furnitureWorkbenchType', SafeInt(StructFieldText(e, 'WBDT', 'Bench Type', '0'), '0'));
+  AddKV(sl, '  ', 'furnitureWorkbenchSkill', SafeInt(StructFieldText(e, 'WBDT', 'Uses Skill', '-1'), '-1'));
+  AddFormRefKV(sl, 'furnitureAssociatedSpell', LinkedByPath(e, 'NAM1 - Associated Spell'));
+end;
+
+procedure AddWeatherFields(sl: TStringList; e: IInterface);
+begin
+  AddKV(sl, '  ', 'weatherFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0'));
+  AddKV(sl, '  ', 'weatherWindSpeed', SafeInt(StructFieldText(e, 'DATA', 'Wind Speed', '0'), '0'));
+  AddKV(sl, '  ', 'weatherTransitionDelta', SafeInt(StructFieldText(e, 'DATA', 'Trans Delta', '0'), '0'));
+  AddKV(sl, '  ', 'weatherSunGlare', SafeInt(StructFieldText(e, 'DATA', 'Sun Glare', '0'), '0'));
+  AddKV(sl, '  ', 'weatherSunDamage', SafeInt(StructFieldText(e, 'DATA', 'Sun Damage', '0'), '0'));
+  sl.Add('  "weatherFogData": [' + SafeFloat(StructFieldText(e, 'FNAM', 'Day Near', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'FNAM', 'Day Far', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'FNAM', 'Night Near', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'FNAM', 'Night Far', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'FNAM', 'Day Power', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'FNAM', 'Night Power', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'FNAM', 'Day Max', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'FNAM', 'Night Max', '0'), '0.0') + '],');
+  AddFormRefKV(sl, 'weatherPrecipitation', LinkedByPath(e, 'MNAM - Precipitation'));
+  AddFormRefKV(sl, 'weatherReferenceEffect', LinkedByPath(e, 'NNAM - Visual Effect'));
+  AddFormRefKV(sl, 'weatherLensFlare', LinkedByPath(e, 'JNAM - Sun Glare Lens Flare'));
+  AddFormRefKV(sl, 'weatherImageSpaceSunrise', LinkedByPath(e, 'IMSP - Image Spaces\Sunrise'));
+  AddFormRefKV(sl, 'weatherImageSpaceDay', LinkedByPath(e, 'IMSP - Image Spaces\Day'));
+  AddFormRefKV(sl, 'weatherImageSpaceSunset', LinkedByPath(e, 'IMSP - Image Spaces\Sunset'));
+  AddFormRefKV(sl, 'weatherImageSpaceNight', LinkedByPath(e, 'IMSP - Image Spaces\Night'));
+  AddFormRefKV(sl, 'weatherVolumetricSunrise', LinkedByPath(e, 'HNAM - Volumetric Lighting\Sunrise'));
+  AddFormRefKV(sl, 'weatherVolumetricDay', LinkedByPath(e, 'HNAM - Volumetric Lighting\Day'));
+  AddFormRefKV(sl, 'weatherVolumetricSunset', LinkedByPath(e, 'HNAM - Volumetric Lighting\Sunset'));
+  AddFormRefKV(sl, 'weatherVolumetricNight', LinkedByPath(e, 'HNAM - Volumetric Lighting\Night'));
+end;
+
+procedure AddClimateFields(sl: TStringList; e: IInterface);
+var
+  node, row, weather, global: IInterface;
+  i: Integer;
+begin
+  AddStringKV(sl, '  ', 'climateNightSkyModel', GetText(e, 'Model\MODL - Model FileName'));
+  AddStringKV(sl, '  ', 'climateSunTexture', FirstText(e, 'FNAM - Sun Texture', 'FNAM', ''));
+  AddStringKV(sl, '  ', 'climateSunGlareTexture', FirstText(e, 'GNAM - Sun Glare Texture', 'GNAM', ''));
+  sl.Add('  "climateTimes": [' + SafeInt(StructFieldText(e, 'TNAM', 'Sunrise Begin', '0'), '0') + ', ' + SafeInt(StructFieldText(e, 'TNAM', 'Sunrise End', '0'), '0') + ', ' + SafeInt(StructFieldText(e, 'TNAM', 'Sunset Begin', '0'), '0') + ', ' + SafeInt(StructFieldText(e, 'TNAM', 'Sunset End', '0'), '0') + '],');
+  AddKV(sl, '  ', 'climateVolatility', SafeInt(StructFieldText(e, 'TNAM', 'Volatility', '0'), '0'));
+  AddKV(sl, '  ', 'climateMoonPhaseLength', SafeInt(StructFieldText(e, 'TNAM', 'Phase Length', '0'), '0'));
+  sl.Add('  "climateWeatherEntries": [');
+  node := FirstElementByPath(e, 'WLST - Weather Types', 'Weather Types', 'Weather List', 'WLST');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    weather := LinkedByPath(row, 'Weather'); if not Assigned(weather) then weather := LinkedByPath(row, 'WNAM - Weather');
+    global := LinkedByPath(row, 'Global'); if not Assigned(global) then global := LinkedByPath(row, 'GNAM - Global');
+    sl.Add('    {');
+    if Assigned(weather) then sl.Add('      "weather": ' + FormRefJson(weather) + ',');
+    AddKV(sl, '      ', 'chance', SafeInt(FirstText(row, 'Chance', 'CNAM - Chance', 'Percent Chance'), '100'));
+    if Assigned(global) then sl.Add('      "global": ' + FormRefJson(global) + ',');
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
+procedure AddLocationFields(sl: TStringList; e: IInterface);
+begin
+  AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name')); AddFormRefArrayFromPaths(sl, 'keywords', e, 'KWDA - Keywords', 'Keywords', 'KWDA', '');
+  AddFormRefKV(sl, 'locationParent', LinkedByPath(e, 'PNAM - Parent Location')); AddFormRefKV(sl, 'locationCrimeFaction', LinkedByPath(e, 'FNAM - Unreported Crime Faction')); AddFormRefKV(sl, 'locationMusicType', LinkedByPath(e, 'NAM1 - Music')); AddKV(sl, '  ', 'locationWorldRadius', SafeFloat(FirstText(e, 'RNAM - World Location Radius', 'RNAM', ''), '0.0'));
+end;
+
+procedure AddMusicTypeFields(sl: TStringList; e: IInterface);
+begin
+  AddKV(sl, '  ', 'musicTypeFlags', ElementIntegerText(StructFieldElement(e, 'FNAM', 'Flags'), '0')); AddKV(sl, '  ', 'musicTypePriority', SafeInt(StructFieldText(e, 'FNAM', 'Priority', '0'), '0')); AddKV(sl, '  ', 'musicTypeDucking', SafeInt(StructFieldText(e, 'FNAM', 'Ducking', '0'), '0')); AddKV(sl, '  ', 'musicTypeFadeTime', SafeFloat(FirstText(e, 'WNAM - Fade Duration', 'WNAM', ''), '1.0')); AddFormRefArrayFromPaths(sl, 'musicTypeTracks', e, 'TNAM - Music Tracks', 'Music Tracks', 'TNAM', '');
+end;
+
+procedure AddMusicTrackFields(sl: TStringList; e: IInterface);
+begin
+  AddStringKV(sl, '  ', 'musicTrackPath', FirstText(e, 'ANAM - Track File', 'ANAM', '')); AddStringKV(sl, '  ', 'musicTrackFinalePath', FirstText(e, 'BNAM - Finale File', 'BNAM', '')); sl.Add('  "musicTrackCuePoints": [],'); AddKV(sl, '  ', 'musicTrackLoopBegin', SafeFloat(StructFieldText(e, 'LNAM', 'Loop Begin', '0'), '0.0')); AddKV(sl, '  ', 'musicTrackLoopEnd', SafeFloat(StructFieldText(e, 'LNAM', 'Loop End', '0'), '0.0')); AddKV(sl, '  ', 'musicTrackLoopCount', SafeInt(StructFieldText(e, 'LNAM', 'Loop Count', '0'), '0')); AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
+end;
+
+procedure AddBodyPartDataFields(sl: TStringList; e: IInterface);
+begin AddStringKV(sl, '  ', 'modelPath', GetText(e, 'Model\MODL - Model FileName')); AddFormRefKV(sl, 'bodyPartRagdoll', LinkedByPath(e, 'RAGA - Ragdoll')); end;
+
+procedure AddVolumetricLightingFields(sl: TStringList; e: IInterface);
+begin sl.Add('  "volumetricLightingData": [' + SafeFloat(FirstText(e, 'CNAM - Intensity', 'CNAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'DNAM - Custom Color Contribution', 'DNAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'ENAM - Red', 'ENAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'FNAM - Green', 'FNAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'GNAM - Blue', 'GNAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'HNAM - Density Contribution', 'HNAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'INAM - Density Size', 'INAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'JNAM - Wind Speed', 'JNAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'KNAM - Falling Speed', 'KNAM', ''), '0.0') + ', ' + SafeFloat(FirstText(e, 'LNAM - Phase Contribution', 'LNAM', ''), '0.0') + '],'); end;
+
+procedure AddLegacySoundFields(sl: TStringList; e: IInterface);
+begin AddFormRefKV(sl, 'legacySoundDescriptor', LinkedByPath(e, 'SDSC - Sound Descriptor')); end;
+
+procedure AddActorValueInfoFields(sl: TStringList; e: IInterface);
+begin
+  AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name')); AddStringKV(sl, '  ', 'description', FirstText(e, 'DESC - Description', 'DESC', '')); AddStringKV(sl, '  ', 'inventoryIcon', FirstText(e, 'ICON - Icon', 'ICON', '')); AddStringKV(sl, '  ', 'actorValueAbbreviation', FirstText(e, 'ANAM - Abbreviation', 'ANAM', '')); AddStringKV(sl, '  ', 'actorValueEnumName', FirstText(e, 'ENUM - Enumeration Name', 'ENUM', '')); AddKV(sl, '  ', 'actorValueFlags', ElementIntegerText(StructFieldElement(e, 'AVIF - Actor Value Data', 'Flags'), '0')); AddKV(sl, '  ', 'actorValueType', SafeInt(StructFieldText(e, 'AVIF - Actor Value Data', 'Type', '6'), '6')); sl.Add('  "actorValueEnumValues": [],'); AddKV(sl, '  ', 'actorValueHasSkillData', DebugBoolText(Assigned(ElementByPath(e, 'AVSK - Skill Data')))); sl.Add('  "actorValueSkillData": [' + SafeFloat(StructFieldText(e, 'AVSK - Skill Data', 'Use Mult', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'AVSK - Skill Data', 'Offset Mult', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'AVSK - Skill Data', 'Improve Mult', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'AVSK - Skill Data', 'Improve Offset', '0'), '0.0') + '],');
+end;
+
+procedure AddDialogueBranchFields(sl: TStringList; e: IInterface);
+begin
+  AddKV(sl, '  ', 'dialogueBranchFlags', ElementIntegerText(FirstElementByPath(e, 'DNAM - Flags', 'DNAM', 'Flags', ''), '0'));
+  AddKV(sl, '  ', 'dialogueBranchType', ElementIntegerText(FirstElementByPath(e, 'TNAM - Type', 'TNAM', 'Type', ''), '0'));
+  AddFormRefKV(sl, 'dialogueBranchQuest', LinkedByPath(e, 'QNAM - Quest'));
+  AddFormRefKV(sl, 'dialogueBranchStartingTopic', LinkedByPath(e, 'SNAM - Starting Topic'));
+end;
+
+procedure AddDialogueTopicFields(sl: TStringList; e: IInterface);
+var
+  groupNode, child: IInterface;
+  i: Integer;
+begin
+  AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name'));
+  AddKV(sl, '  ', 'dialogueTopicFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0'));
+  AddKV(sl, '  ', 'dialogueTopicType', ElementIntegerText(StructFieldElement(e, 'DATA', 'Category'), '0'));
+  AddKV(sl, '  ', 'dialogueTopicSubtype', ElementIntegerText(StructFieldElement(e, 'DATA', 'Subtype'), '0'));
+  AddKV(sl, '  ', 'dialogueTopicPriority', SafeInt(FirstText(e, 'PNAM - Priority', 'PNAM', ''), '50'));
+  AddKV(sl, '  ', 'dialogueTopicJournalIndex', SafeInt(FirstText(e, 'INAM - Journal Index', 'INAM', ''), '0'));
+  AddFormRefKV(sl, 'dialogueTopicBranch', LinkedByPath(e, 'BNAM - Branch'));
+  AddFormRefKV(sl, 'dialogueTopicQuest', LinkedByPath(e, 'QNAM - Quest'));
+  sl.Add('  "dialogueTopicInfos": [');
+  groupNode := ChildGroup(e);
+  if Assigned(groupNode) then for i := 0 to ElementCount(groupNode) - 1 do begin
+    child := ElementByIndex(groupNode, i);
+    if Signature(child) = 'INFO' then sl.Add('    ' + FormRefJson(child) + ',');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
+procedure AddDialogueInfoFields(sl: TStringList; e: IInterface);
+var
+  node, row, parentGroup, parentTopic: IInterface;
+  i: Integer;
+begin
+  parentGroup := GetContainer(e);
+  if Assigned(parentGroup) then
+    parentTopic := ChildrenOf(parentGroup);
+  if Assigned(parentTopic) and (Signature(parentTopic) = 'DIAL') then
+    AddFormRefKV(sl, 'dialogueInfoTopic', parentTopic);
+  AddFormRefKV(sl, 'dialogueInfoSharedInfo', LinkedByPath(e, 'DNAM - Shared Info'));
+  AddKV(sl, '  ', 'dialogueInfoIndex', SafeInt(FirstText(e, 'INAM - Info Index', 'INAM', ''), '0'));
+  AddKV(sl, '  ', 'dialogueInfoFavorLevel', ElementIntegerText(FirstElementByPath(e, 'CNAM - Favor Level', 'CNAM', 'Favor Level', ''), '0'));
+  AddKV(sl, '  ', 'dialogueInfoFlags', ElementIntegerText(StructFieldElement(e, 'ENAM', 'Flags'), '0'));
+  AddKV(sl, '  ', 'dialogueInfoResetHours', SafeInt(StructFieldText(e, 'ENAM', 'Reset Hours', '0'), '0'));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
+  sl.Add('  "dialogueResponses": [');
+  node := FirstElementByPath(e, 'Responses', 'Responses (sorted)', 'Response Data', 'TRDT - Response Data');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddKV(sl, '      ', 'emotionType', ElementIntegerText(StructFieldElement(row, 'TRDT - Response Data', 'Emotion Type'), '0'));
+    AddKV(sl, '      ', 'emotionValue', SafeInt(StructFieldText(row, 'TRDT - Response Data', 'Emotion Value', '50'), '50'));
+    AddKV(sl, '      ', 'responseNumber', SafeInt(StructFieldText(row, 'TRDT - Response Data', 'Response Number', '1'), '1'));
+    AddKV(sl, '      ', 'flags', ElementIntegerText(StructFieldElement(row, 'TRDT - Response Data', 'Flags'), '0'));
+    AddStringKV(sl, '      ', 'text', FirstText(row, 'NAM1 - Response Text', 'Response Text', 'NAM1'));
+    if Assigned(LinkedByPath(row, 'TRDT - Response Data\Sound')) then sl.Add('      "sound": ' + FormRefJson(LinkedByPath(row, 'TRDT - Response Data\Sound')) + ',');
+    if Assigned(LinkedByPath(row, 'SNAM - Speaker Idle Animation')) then sl.Add('      "speakerIdle": ' + FormRefJson(LinkedByPath(row, 'SNAM - Speaker Idle Animation')) + ',');
+    if Assigned(LinkedByPath(row, 'LNAM - Listener Idle Animation')) then sl.Add('      "listenerIdle": ' + FormRefJson(LinkedByPath(row, 'LNAM - Listener Idle Animation')) + ',');
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
+function QuestAliasFillType(row: IInterface): string;
+begin
+  if Assigned(ElementByPath(row, 'ALFR - Forced Reference')) then Result := '1'
+  else if Assigned(ElementByPath(row, 'Location Alias Reference')) then Result := '2'
+  else if Assigned(ElementByPath(row, 'Find Matching Reference From Event')) then Result := '3'
+  else if Assigned(ElementByPath(row, 'Create Reference to Object')) then Result := '4'
+  else if Assigned(ElementByPath(row, 'External Alias Reference')) then Result := '5'
+  else if Assigned(ElementByPath(row, 'ALUA - Unique Actor')) then Result := '6'
+  else if Assigned(ElementByPath(row, 'Find Matching Reference Near Alias')) then Result := '7'
+  else Result := '0';
+end;
+
+function QuestAliasFlags(row: IInterface): string;
+var
+  flagsNode: IInterface;
+  lowFlags, highFlags: Int64;
+begin
+  flagsNode := FirstElementByPath(row, 'FNAM - Alias Flags', 'Alias Flags', 'FNAM', '');
+  lowFlags := StrToInt64Def(ElementIntegerText(FindDescendantByExactName(flagsNode, 'Flags'), '0'), 0);
+  highFlags := StrToInt64Def(ElementIntegerText(FindDescendantByExactName(flagsNode, 'Additional Flags'), '0'), 0);
+  Result := IntToStr(lowFlags or (highFlags shl 16));
+end;
+
+procedure AddQuestFields(sl: TStringList; e: IInterface);
+var
+  node, row, targets, target: IInterface;
+  i, j: Integer;
+begin
+  AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name'));
+  AddKV(sl, '  ', 'questFlags', ElementIntegerText(StructFieldElement(e, 'DNAM - General', 'Flags'), '0'));
+  AddKV(sl, '  ', 'questPriority', SafeInt(StructFieldText(e, 'DNAM - General', 'Priority', '0'), '0'));
+  AddKV(sl, '  ', 'questType', ElementIntegerText(StructFieldElement(e, 'DNAM - General', 'Quest Type'), '0'));
+  AddKV(sl, '  ', 'questDelayTime', SafeFloat(StructFieldText(e, 'DNAM - General', 'Quest Delay', '0'), '0.0'));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Quest Dialogue Conditions', 'Quest Conditions', 'CTDA - Conditions', ''), '  ');
+  AddPerkConditionsArray(sl, 'questStoryConditions', FirstElementByPath(e, 'Conditions', 'Story Manager Conditions', 'Story Conditions', ''), '  ');
+  AddFormRefArrayFromPaths(sl, 'questTextGlobals', e, 'QTGL - Text Display Globals', 'Text Display Globals', 'QTGL', '');
+
+  sl.Add('  "questStages": [');
+  node := ElementByPath(e, 'Stages');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddKV(sl, '      ', 'index', SafeInt(StructFieldText(row, 'INDX - Stage Index', 'Stage Index', '0'), '0'));
+    AddKV(sl, '      ', 'flags', ElementIntegerText(StructFieldElement(row, 'INDX - Stage Index', 'Flags'), '0'));
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+
+  sl.Add('  "questObjectives": [');
+  node := FirstElementByPath(e, 'Objectives', 'Quest Objectives', 'Objectives (sorted)', '');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddKV(sl, '      ', 'index', SafeInt(FirstText(row, 'QOBJ - Objective Index', 'QOBJ', 'Objective Index'), '0'));
+    AddKV(sl, '      ', 'flags', ElementIntegerText(FirstElementByPath(row, 'FNAM - Flags', 'Flags', 'FNAM', ''), '0'));
+    AddStringKV(sl, '      ', 'text', FirstText(row, 'NNAM - Display Text', 'NNAM', 'Display Text'));
+    sl.Add('      "targets": [');
+    targets := FirstElementByPath(row, 'Targets', 'Objective Targets', 'QSTA - Targets', '');
+    if Assigned(targets) then for j := 0 to ElementCount(targets) - 1 do begin
+      target := ElementByIndex(targets, j);
+      sl.Add('        {');
+      AddKV(sl, '          ', 'aliasId', SafeInt(StructFieldText(target, 'QSTA - Target', 'Alias', '0'), '0'));
+      AddKV(sl, '          ', 'flags', ElementIntegerText(StructFieldElement(target, 'QSTA - Target', 'Flags'), '0'));
+      AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(target, 'Conditions', 'Target Conditions', 'CTDA - Conditions', ''), '          ');
+      RemoveTrailingComma(sl); sl.Add('        },');
+    end;
+    RemoveTrailingComma(sl); sl.Add('      ],');
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+
+  sl.Add('  "questAliases": [');
+  node := FirstElementByPath(e, 'Aliases', 'Quest Aliases', 'Aliases (sorted)', '');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddKV(sl, '      ', 'id', SafeInt(FirstText(row, 'ALST - Reference Alias ID', 'ALLS - Location Alias ID', 'Alias ID'), '0'));
+    AddStringKV(sl, '      ', 'name', FirstText(row, 'ALID - Alias Name', 'ALID', 'Alias Name'));
+    AddKV(sl, '      ', 'flags', QuestAliasFlags(row));
+    AddKV(sl, '      ', 'fillType', QuestAliasFillType(row));
+    AddFormRefKV(sl, 'forcedReference', LinkedByPath(row, 'ALFR - Forced Reference'));
+    AddFormRefKV(sl, 'uniqueActor', LinkedByPath(row, 'ALUA - Unique Actor'));
+    AddFormRefKV(sl, 'externalQuest', LinkedByPath(row, 'ALEQ - External Quest'));
+    AddKV(sl, '      ', 'externalAliasId', SafeInt(FirstText(row, 'ALEA - External Alias', 'External Alias', ''), '0'));
+    AddKV(sl, '      ', 'sourceAliasId', SafeInt(FirstText(row, 'Location Alias Reference\ALFA - Alias', 'Find Matching Reference Near Alias\ALNA - Alias', ''), '0'));
+    AddFormRefKV(sl, 'sourceRefType', LinkedByPath(row, 'ALRT - Reference Type'));
+    AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(row, 'Conditions', 'Alias Conditions', 'CTDA - Conditions', ''), '      ');
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
+procedure AddSceneFields(sl: TStringList; e: IInterface);
+var
+  node, row, packages, linked: IInterface;
+  i, j: Integer;
+begin
+  AddKV(sl, '  ', 'sceneFlags', ElementIntegerText(FirstElementByPath(e, 'FNAM - Flags', 'FNAM', 'Flags', ''), '0'));
+  AddFormRefKV(sl, 'sceneParentQuest', LinkedByPath(e, 'PNAM - Quest'));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Scene Conditions', 'CTDA - Conditions', ''), '  ');
+  node := ElementByPath(e, 'Actors');
+  sl.Add('  "sceneActors": [');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do
+    sl.Add('    ' + SafeInt(FirstText(ElementByIndex(node, i), 'ALID - Actor ID', 'Actor ID', 'ALID'), '0') + ',');
+  RemoveTrailingComma(sl); sl.Add('  ],');
+  sl.Add('  "sceneActorFlags": [');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do
+    sl.Add('    ' + ElementIntegerText(FirstElementByPath(ElementByIndex(node, i), 'LNAM - Flags', 'Flags', 'LNAM', ''), '0') + ',');
+  RemoveTrailingComma(sl); sl.Add('  ],');
+  sl.Add('  "sceneActorBehaviorFlags": [');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do
+    sl.Add('    ' + ElementIntegerText(FirstElementByPath(ElementByIndex(node, i), 'DNAM - Behaviour Flags', 'Behaviour Flags', 'DNAM', ''), '0') + ',');
+  RemoveTrailingComma(sl); sl.Add('  ],');
+
+  sl.Add('  "scenePhases": [');
+  node := ElementByPath(e, 'Phases');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddPerkConditionsArray(sl, 'startConditions', FirstElementByPath(row, 'Start Conditions', 'Start Conditions\Conditions', 'Conditions', ''), '      ');
+    AddPerkConditionsArray(sl, 'completionConditions', FirstElementByPath(row, 'Completion Conditions', 'Completion Conditions\Conditions', 'Conditions', ''), '      ');
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+
+  sl.Add('  "sceneActions": [');
+  node := ElementByPath(e, 'Actions');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddKV(sl, '      ', 'type', ElementIntegerText(FirstElementByPath(row, 'ANAM - Type', 'Type', 'ANAM', ''), '0'));
+    AddKV(sl, '      ', 'actorId', SafeInt(FirstText(row, 'ALID - Actor ID', 'Actor ID', 'ALID'), '0'));
+    AddKV(sl, '      ', 'startPhase', SafeInt(FirstText(row, 'SNAM - Start Phase', 'Start Phase', 'SNAM'), '0'));
+    AddKV(sl, '      ', 'endPhase', SafeInt(FirstText(row, 'ENAM - End Phase', 'End Phase', 'ENAM'), '0'));
+    AddKV(sl, '      ', 'flags', ElementIntegerText(FirstElementByPath(row, 'FNAM - Flags', 'Flags', 'FNAM', ''), '0'));
+    AddKV(sl, '      ', 'index', SafeInt(FirstText(row, 'INAM - Index', 'Index', 'INAM'), '0'));
+    AddKV(sl, '      ', 'headtrackActorId', SafeInt(FirstText(row, 'HTID - Headtrack Actor ID', 'Headtrack Actor ID', 'HTID'), '-1'));
+    AddKV(sl, '      ', 'loopingMin', SafeFloat(FirstText(row, 'DMIN - Looping - Min', 'Looping - Min', 'DMIN'), '0.0'));
+    AddKV(sl, '      ', 'loopingMax', SafeFloat(FirstText(row, 'DMAX - Looping - Max', 'Looping - Max', 'DMAX'), '0.0'));
+    AddKV(sl, '      ', 'emotionType', ElementIntegerText(FirstElementByPath(row, 'DEMO - Emotion Type', 'Emotion Type', 'DEMO', ''), '0'));
+    AddKV(sl, '      ', 'emotionValue', SafeInt(FirstText(row, 'DEVA - Emotion Value', 'Emotion Value', 'DEVA'), '0'));
+    AddKV(sl, '      ', 'timerSeconds', SafeFloat(FirstText(row, 'SNAM - Timer Seconds', 'Timer Seconds', ''), '0.0'));
+    AddFormRefKV(sl, 'topic', LinkedByPath(row, 'DATA - Topic'));
+    sl.Add('      "packages": [');
+    packages := ElementByPath(row, 'Packages');
+    if Assigned(packages) then for j := 0 to ElementCount(packages) - 1 do begin
+      linked := FirstLinkedInElement(ElementByIndex(packages, j));
+      if Assigned(linked) then sl.Add('        ' + FormRefJson(linked) + ',');
+    end;
+    RemoveTrailingComma(sl); sl.Add('      ],');
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
+procedure AddStoryManagerFields(sl: TStringList; e: IInterface; sig: string);
+var
+  node, row, child: IInterface;
+  i: Integer;
+begin
+  AddFormRefKV(sl, 'storyParent', LinkedByPath(e, 'PNAM - Parent '));
+  AddFormRefKV(sl, 'storyPreviousSibling', LinkedByPath(e, 'SNAM - Previous Sibling '));
+  AddKV(sl, '  ', 'storyMaxQuests', SafeInt(FirstText(e, 'XNAM - Max concurrent quests', 'XNAM', ''), '0'));
+  if sig = 'SMQN' then
+    AddKV(sl, '  ', 'storyNodeFlags', ElementIntegerText(StructFieldElement(e, 'DNAM - Flags', 'Node Flags'), '0'))
+  else
+    AddKV(sl, '  ', 'storyNodeFlags', ElementIntegerText(FirstElementByPath(e, 'DNAM - Flags', 'DNAM', 'Flags', ''), '0'));
+  AddKV(sl, '  ', 'storyQuestFlags', ElementIntegerText(StructFieldElement(e, 'DNAM - Flags', 'Quest Flags'), '0'));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Node Conditions', 'CTDA - Conditions', ''), '  ');
+  sl.Add('  "storyChildren": [');
+  node := ChildGroup(e);
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    child := ElementByIndex(node, i);
+    if (Signature(child) = 'SMBN') or (Signature(child) = 'SMQN') or (Signature(child) = 'SMEN') then
+      sl.Add('    ' + FormRefJson(child) + ',');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+  AddKV(sl, '  ', 'storyNumQuestsToStart', SafeInt(FirstText(e, 'MNAM - Num quests to run', 'MNAM', ''), '1'));
+  AddStringKV(sl, '  ', 'storyEventId', FirstText(e, 'ENAM - Type', 'Type', 'ENAM'));
+  sl.Add('  "storyQuests": [');
+  node := ElementByPath(e, 'Quests');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    child := LinkedByPath(row, 'NNAM - Quest');
+    if Assigned(child) then begin
+      sl.Add('    {');
+      sl.Add('      "quest": ' + FormRefJson(child) + ',');
+      AddKV(sl, '      ', 'flags', ElementIntegerText(FirstElementByPath(row, 'FNAM - Flags', 'Flags', 'FNAM', ''), '0'));
+      AddKV(sl, '      ', 'hoursUntilReset', SafeFloat(FirstText(row, 'RNAM - Hours until reset', 'Hours until reset', 'RNAM'), '0.0'));
+      RemoveTrailingComma(sl); sl.Add('    },');
+    end;
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
+function PackageProcedureTypeFromText(const value: string): string;
+var
+  t: string;
+begin
+  t := LowerCase(Trim(value));
+  if t = 'explore travel' then Result := '0'
+  else if t = 'explore wander' then Result := '1'
+  else if t = 'explore activate' then Result := '2'
+  else if t = 'explore acquire' then Result := '3'
+  else if t = 'sleep' then Result := '4'
+  else if t = 'eat' then Result := '5'
+  else if t = 'follow with escort' then Result := '6'
+  else if t = 'ambush follow' then Result := '7'
+  else if t = 'escort actor' then Result := '8'
+  else if t = 'escort object' then Result := '9'
+  else if t = 'dialogue' then Result := '10'
+  else if t = 'alarm' then Result := '11'
+  else if t = 'activate' then Result := '12'
+  else if t = 'greet' then Result := '13'
+  else if t = 'observe combat' then Result := '14'
+  else if t = 'observe dialogue' then Result := '15'
+  else if t = 'talk to dead' then Result := '16'
+  else if t = 'flee' then Result := '17'
+  else if t = 'trespass' then Result := '18'
+  else if t = 'get up' then Result := '19'
+  else if t = 'explore npc' then Result := '20'
+  else if t = 'mount actor' then Result := '21'
+  else if t = 'dismount actor' then Result := '22'
+  else if t = 'do nothing' then Result := '23'
+  else if t = 'explore acquire generic' then Result := '24'
+  else if t = 'accompany' then Result := '25'
+  else if t = 'use item at' then Result := '26'
+  else if t = 'vampire feed' then Result := '27'
+  else if t = 'ambush' then Result := '28'
+  else if t = 'surface' then Result := '29'
+  else if t = 'flee not combat' then Result := '30'
+  else if t = 'search for attacker' then Result := '31'
+  else if t = 'clear mount' then Result := '32'
+  else if t = 'wait for dialogue' then Result := '33'
+  else if t = 'avoid player' then Result := '34'
+  else if t = 'sandbox' then Result := '35'
+  else if t = 'patrol' then Result := '36'
+  else if t = 'react to destroyed object' then Result := '37'
+  else if t = 'react to grenade' then Result := '38'
+  else if t = 'guard' then Result := '39'
+  else if t = 'steal warning' then Result := '40'
+  else if t = 'pickpocket warning' then Result := '41'
+  else if t = 'use weapon' then Result := '42'
+  else if t = 'follow without escort' then Result := '43'
+  else if t = 'movement blocked' then Result := '44'
+  else if t = 'cannibal' then Result := '45'
+  else if t = 'package' then Result := '46'
+  else if t = 'landing' then Result := '47'
+  else if t = 'keep an eye on' then Result := '48'
+  else Result := '23';
+end;
+
+procedure AddPackageEventFields(sl: TStringList; const key: string; node: IInterface; eventType: Integer);
+var
+  linked, topicData: IInterface;
+begin
+  sl.Add('  ' + JStr(key) + ': {');
+  AddKV(sl, '    ', 'type', IntToStr(eventType));
+  linked := LinkedByPath(node, 'INAM - Idle');
+  if Assigned(linked) then sl.Add('    "idle": ' + FormRefJson(linked) + ',');
+  topicData := FindDescendantByExactName(node, 'Topic Data');
+  AddKV(sl, '    ', 'topicType', ElementIntegerText(FindDescendantByExactName(topicData, 'Type'), '0'));
+  linked := FirstLinkedInElement(FindDescendantByExactName(topicData, 'Data'));
+  if Assigned(linked) then sl.Add('    "topic": ' + FormRefJson(linked) + ',');
+  RemoveTrailingComma(sl); sl.Add('  },');
+end;
+
+procedure AddPackageFields(sl: TStringList; e: IInterface);
+var
+  locationNode, targetNode: IInterface;
+begin
+  AddKV(sl, '  ', 'packageFlags', ElementIntegerText(StructFieldElement(e, 'PKDT - Pack Data', 'General Flags'), '0'));
+  AddKV(sl, '  ', 'packageType', ElementIntegerText(StructFieldElement(e, 'PKDT - Pack Data', 'Type'), '27'));
+  AddKV(sl, '  ', 'packageInterruptType', ElementIntegerText(StructFieldElement(e, 'PKDT - Pack Data', 'Interrupt Override'), '4294967295'));
+  AddKV(sl, '  ', 'packagePreferredSpeed', ElementIntegerText(StructFieldElement(e, 'PKDT - Pack Data', 'Preferred Speed'), '1'));
+  AddKV(sl, '  ', 'packageInterruptFlags', ElementIntegerText(StructFieldElement(e, 'PKDT - Pack Data', 'Interrupt Flags'), '0'));
+  AddKV(sl, '  ', 'packageSpecificFlags', '0');
+  AddKV(sl, '  ', 'packageProcedureType', PackageProcedureTypeFromText(FirstText(e, 'Procedure Tree\Branches\Branch\PNAM - Procedure Type', 'Procedure Tree\Procedure Type', 'PNAM - Procedure Type')));
+  AddKV(sl, '  ', 'packageIdleFlags', ElementIntegerText(FirstElementByPath(e, 'Idle Animations\IDLF - Flags', 'Idle Animations\Flags', 'IDLF - Flags', ''), '0'));
+  AddKV(sl, '  ', 'packageIdleTimer', SafeFloat(FirstText(e, 'Idle Animations\IDLT - Idle Timer Setting', 'IDLT - Idle Timer Setting', ''), '0.0'));
+  AddFormRefArrayFromPaths(sl, 'packageIdles', e, 'Idle Animations\IDLA - Animations', 'Idle Animations\Animations', 'IDLA - Animations', '');
+  AddFormRefKV(sl, 'packageTemplate', StructFieldLinked(e, 'PKCU - Counter', 'Package Template'));
+  AddKV(sl, '  ', 'packageMonth', SafeInt(StructFieldText(e, 'PSDT - Schedule', 'Month', '-1'), '-1'));
+  AddKV(sl, '  ', 'packageDayOfWeek', SafeInt(StructFieldText(e, 'PSDT - Schedule', 'Day of week', '-1'), '-1'));
+  AddKV(sl, '  ', 'packageDate', SafeInt(StructFieldText(e, 'PSDT - Schedule', 'Date', '-1'), '-1'));
+  AddKV(sl, '  ', 'packageHour', SafeInt(StructFieldText(e, 'PSDT - Schedule', 'Hour', '-1'), '-1'));
+  AddKV(sl, '  ', 'packageMinute', SafeInt(StructFieldText(e, 'PSDT - Schedule', 'Minute', '-1'), '-1'));
+  AddKV(sl, '  ', 'packageDuration', SafeInt(StructFieldText(e, 'PSDT - Schedule', 'Duration (minutes)', '0'), '0'));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Package Conditions', 'CTDA - Conditions', ''), '  ');
+  AddFormRefKV(sl, 'packageCombatStyle', LinkedByPath(e, 'CNAM - Combat Style'));
+  AddFormRefKV(sl, 'packageOwnerQuest', LinkedByPath(e, 'QNAM - Owner Quest'));
+  locationNode := FindDescendantByExactName(e, 'Location');
+  AddKV(sl, '  ', 'packageLocationType', SafeInt(FirstText(locationNode, 'Type', 'PLDT - Location\Type', ''), '4294967295'));
+  AddKV(sl, '  ', 'packageLocationRadius', SafeInt(FirstText(locationNode, 'Radius', 'PLDT - Location\Radius', ''), '0'));
+  AddFormRefKV(sl, 'packageLocationObject', FirstLinkedInElement(FindDescendantByExactName(locationNode, 'Location Value')));
+  AddKV(sl, '  ', 'packageLocationValue', ElementIntegerText(FindDescendantByExactName(locationNode, 'Location Value'), '0'));
+  targetNode := FindDescendantByExactName(e, 'Target Data');
+  AddKV(sl, '  ', 'packageTargetType', SafeInt(FirstText(targetNode, 'Type', 'Target Data\Type', ''), '-1'));
+  AddKV(sl, '  ', 'packageTargetAlias', ElementIntegerText(FindDescendantByExactName(targetNode, 'Target'), '0'));
+  AddKV(sl, '  ', 'packageTargetValue', SafeInt(FirstText(targetNode, 'Count / Distance', 'Target Data\Count / Distance', ''), '0'));
+  AddFormRefKV(sl, 'packageTargetForm', FirstLinkedInElement(FindDescendantByExactName(targetNode, 'Target')));
+  AddPackageEventFields(sl, 'packageOnBegin', ElementByPath(e, 'OnBegin'), 0);
+  AddPackageEventFields(sl, 'packageOnEnd', ElementByPath(e, 'OnEnd'), 1);
+  AddPackageEventFields(sl, 'packageOnChange', ElementByPath(e, 'OnChange'), 2);
+end;
+
+procedure AddRaceFields(sl: TStringList; e: IInterface);
+var
+  dataNode, skillsNode, row, node, linked: IInterface;
+  i: Integer;
+begin
+  AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name'));
+  AddFormRefArrayFromPaths(sl, 'keywords', e, 'KWDA - Keywords', 'Keywords', 'KWDA', '');
+  AddFormRefArrayFromPaths(sl, 'spells', e, 'SPLO - Actor Effects', 'Actor Effects', 'Spells', '');
+  AddFormRefKV(sl, 'skin', LinkedByPath(e, 'WNAM - Skin'));
+  AddKV(sl, '  ', 'raceFlags', ElementIntegerText(StructFieldElement(e, 'DATA - Data', 'Flags'), '0'));
+  AddKV(sl, '  ', 'raceFlags2', ElementIntegerText(StructFieldElement(e, 'DATA - Data', 'Flags 2'), '0'));
+  AddKV(sl, '  ', 'raceSize', ElementIntegerText(StructFieldElement(e, 'DATA - Data', 'Size'), '1'));
+  dataNode := FirstElementByPath(e, 'DATA - Data', 'DATA - ', 'DATA', '');
+  skillsNode := ElementByPath(dataNode, 'Skill Boosts');
+  sl.Add('  "raceSkillBoostSkills": [');
+  for i := 0 to 6 do begin
+    row := nil;
+    if Assigned(skillsNode) and (i < ElementCount(skillsNode)) then row := ElementByIndex(skillsNode, i);
+    sl.Add('    ' + ElementIntegerText(FindDescendantByExactName(row, 'Skill'), '0') + ',');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+  sl.Add('  "raceSkillBoostBonuses": [');
+  for i := 0 to 6 do begin
+    row := nil;
+    if Assigned(skillsNode) and (i < ElementCount(skillsNode)) then row := ElementByIndex(skillsNode, i);
+    sl.Add('    ' + SafeInt(GetEditValue(FindDescendantByExactName(row, 'Boost')), '0') + ',');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+  sl.Add('  "raceHeight": [' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Male Height', '1'), '1.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Female Height', '1'), '1.0') + '],');
+  sl.Add('  "raceWeight": [' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Male Weight', '1'), '1.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Female Weight', '1'), '1.0') + '],');
+  sl.Add('  "raceStats": [' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Starting Health', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Starting Magicka', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Starting Stamina', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Base Carry Weight', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Base Mass', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Acceleration rate', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Deceleration rate', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Injured Health Pct', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Health Regen', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Magicka Regen', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Stamina Regen', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Unarmed Damage', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Unarmed Reach', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Aim Angle Tolerance', '0'), '0.0') + ', ' +
+    SafeFloat(StructFieldText(e, 'DATA - Data', 'Flight Radius', '0'), '0.0') + '],');
+  AddStringKV(sl, '  ', 'raceSkeletonMale', FirstText(e, 'ANAM - Male Skeletal Model', 'Male Skeletal Model', 'ANAM'));
+  AddStringKV(sl, '  ', 'raceSkeletonFemale', FirstText(e, 'ANAM - Female Skeletal Model', 'Female Skeletal Model', ''));
+  AddStringKV(sl, '  ', 'raceBehaviorMale', FirstText(e, 'Male Behavior Graph\Model\MODL - Model FileName', 'Male Behavior Graph\MODL - Model FileName', ''));
+  AddStringKV(sl, '  ', 'raceBehaviorFemale', FirstText(e, 'Female Behavior Graph\Model\MODL - Model FileName', 'Female Behavior Graph\MODL - Model FileName', ''));
+  node := ElementByPath(e, 'VTCK - Voices');
+  if not Assigned(node) then node := ElementByPath(e, 'Voices');
+  if Assigned(node) and (ElementCount(node) > 0) then AddFormRefKV(sl, 'raceVoiceMale', FirstLinkedInElement(ElementByIndex(node, 0)));
+  if Assigned(node) and (ElementCount(node) > 1) then AddFormRefKV(sl, 'raceVoiceFemale', FirstLinkedInElement(ElementByIndex(node, 1)));
+  node := ElementByPath(e, 'DNAM - Decapitate Armors');
+  if not Assigned(node) then node := ElementByPath(e, 'Decapitate Armors');
+  if Assigned(node) and (ElementCount(node) > 0) then AddFormRefKV(sl, 'raceDecapitateMale', FirstLinkedInElement(ElementByIndex(node, 0)));
+  if Assigned(node) and (ElementCount(node) > 1) then AddFormRefKV(sl, 'raceDecapitateFemale', FirstLinkedInElement(ElementByIndex(node, 1)));
+  AddFormRefKV(sl, 'raceBodyPartData', LinkedByPath(e, 'GNAM - Body Part Data'));
+  AddFormRefKV(sl, 'raceBloodMaterial', LinkedByPath(e, 'NAM4 - Material Type'));
+  AddFormRefKV(sl, 'raceImpactDataSet', LinkedByPath(e, 'NAM5 - Impact Data Set'));
+  AddFormRefKV(sl, 'raceDismemberBlood', LinkedByPath(e, 'NAM7 - Decapitation FX'));
+  AddFormRefKV(sl, 'raceCorpseOpenSound', LinkedByPath(e, 'ONAM - Open Loot Sound'));
+  AddFormRefKV(sl, 'raceCorpseCloseSound', LinkedByPath(e, 'LNAM - Close Loot Sound'));
+  AddFormRefArrayFromPaths(sl, 'raceEquipSlots', e, 'Equip Slots', 'Equip Type', 'Equip Types', '');
+  AddKV(sl, '  ', 'raceValidEquipTypes', ElementIntegerText(FirstElementByPath(e, 'VNAM - Equipment Flags', 'VNAM', 'Equipment Flags', ''), '0'));
+  AddFormRefKV(sl, 'raceUnarmedEquipSlot', LinkedByPath(e, 'UNES - Unarmed Equip Slot'));
+  AddFormRefKV(sl, 'raceMorphRace', LinkedByPath(e, 'NAM8 - Morph race'));
+  AddFormRefKV(sl, 'raceArmorParentRace', LinkedByPath(e, 'RNAM - Armor race'));
+  AddFormRefKV(sl, 'raceMoveWalk', LinkedByPath(e, 'WKMV - Base Movement Default - Walk'));
+  AddFormRefKV(sl, 'raceMoveRun', LinkedByPath(e, 'RNMV - Base Movement Default - Run'));
+  AddFormRefKV(sl, 'raceMoveSwim', LinkedByPath(e, 'SWMV - Base Movement Default - Swim'));
+  AddFormRefKV(sl, 'raceMoveFly', LinkedByPath(e, 'FLMV - Base Movement Default - Fly'));
+  AddFormRefKV(sl, 'raceMoveSneak', LinkedByPath(e, 'SNMV - Base Movement Default - Sneak'));
+  AddFormRefKV(sl, 'raceMoveSprint', LinkedByPath(e, 'SPMV - Base Movement Default - Sprint'));
+  AddStringKV(sl, '  ', 'raceBodyTextureMale', FirstText(e, 'Body Data\Male Body Data\Parts\Part\MODL - Model FileName', 'Body Data\Male Body Data\Parts\[0]\MODL - Model FileName', ''));
+  AddStringKV(sl, '  ', 'raceBodyTextureFemale', FirstText(e, 'Body Data\Female Body Data\Parts\Part\MODL - Model FileName', 'Body Data\Female Body Data\Parts\[0]\MODL - Model FileName', ''));
+  AddFormRefArrayFromElement(sl, 'raceHeadPartsMale', FirstElementByPath(e, 'Head Data\Male Head Data\Head Parts', 'Male Head Data\Head Parts', '', ''));
+  AddFormRefArrayFromElement(sl, 'raceHeadPartsFemale', FirstElementByPath(e, 'Head Data\Female Head Data\Head Parts', 'Female Head Data\Head Parts', '', ''));
+  AddFormRefArrayFromElement(sl, 'racePresetsMale', FirstElementByPath(e, 'Head Data\Male Head Data\Race Presets Male', 'Race Presets Male', '', ''));
+  AddFormRefArrayFromElement(sl, 'racePresetsFemale', FirstElementByPath(e, 'Head Data\Female Head Data\Race Presets Female', 'Race Presets Female', '', ''));
+  AddFormRefArrayFromElement(sl, 'raceHairColorsMale', FirstElementByPath(e, 'Head Data\Male Head Data\Available Hair Colors Male', 'Available Hair Colors Male', '', ''));
+  AddFormRefArrayFromElement(sl, 'raceHairColorsFemale', FirstElementByPath(e, 'Head Data\Female Head Data\Available Hair Colors Female', 'Available Hair Colors Female', '', ''));
+  AddFormRefArrayFromElement(sl, 'raceFaceDetailsMale', FirstElementByPath(e, 'Head Data\Male Head Data\Face Details Texture Set List Male', 'Face Details Texture Set List Male', '', ''));
+  AddFormRefArrayFromElement(sl, 'raceFaceDetailsFemale', FirstElementByPath(e, 'Head Data\Female Head Data\Face Details Texture Set List Female', 'Face Details Texture Set List Female', '', ''));
+  AddFormRefKV(sl, 'raceDefaultFaceMale', LinkedByPath(e, 'Head Data\Male Head Data\DFTM - Default Face Texture Male'));
+  AddFormRefKV(sl, 'raceDefaultFaceFemale', LinkedByPath(e, 'Head Data\Female Head Data\DFTF - Default Face Texture Female'));
+  node := FirstElementByPath(e, 'HCLF - Default Hair Colors', 'Default Hair Colors', 'HCLF', '');
+  if Assigned(node) and (ElementCount(node) > 0) then AddFormRefKV(sl, 'raceDefaultHairMale', FirstLinkedInElement(ElementByIndex(node, 0)));
+  if Assigned(node) and (ElementCount(node) > 1) then AddFormRefKV(sl, 'raceDefaultHairFemale', FirstLinkedInElement(ElementByIndex(node, 1)));
+  sl.Add('  "raceMorphFlags": [' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Male Head Data\Available Morphs\Nose Variants\Nose Morph Flags', 'Male Head Data\Available Morphs\Nose Variants\Nose Morph Flags', '', ''), '0') + ', ' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Male Head Data\Available Morphs\Brow Variants\Brow Morph Flags', 'Male Head Data\Available Morphs\Brow Variants\Brow Morph Flags', '', ''), '0') + ', ' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Male Head Data\Available Morphs\Eye Variants\Eye Morph Flags 1', 'Male Head Data\Available Morphs\Eye Variants\Eye Morph Flags 1', '', ''), '0') + ', ' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Male Head Data\Available Morphs\Lip Variants\Lip Morph Flags', 'Male Head Data\Available Morphs\Lip Variants\Lip Morph Flags', '', ''), '0') + ', ' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Female Head Data\Available Morphs\Nose Variants\Nose Morph Flags', 'Female Head Data\Available Morphs\Nose Variants\Nose Morph Flags', '', ''), '0') + ', ' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Female Head Data\Available Morphs\Brow Variants\Brow Morph Flags', 'Female Head Data\Available Morphs\Brow Variants\Brow Morph Flags', '', ''), '0') + ', ' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Female Head Data\Available Morphs\Eye Variants\Eye Morph Flags 1', 'Female Head Data\Available Morphs\Eye Variants\Eye Morph Flags 1', '', ''), '0') + ', ' +
+    ElementIntegerText(FirstElementByPath(e, 'Head Data\Female Head Data\Available Morphs\Lip Variants\Lip Morph Flags', 'Female Head Data\Available Morphs\Lip Variants\Lip Morph Flags', '', ''), '0') + '],');
+  sl.Add('  "raceBipedObjectNames": [');
+  node := ElementByPath(e, 'Biped Object Names');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do sl.Add('    ' + JStr(GetEditValue(ElementByIndex(node, i))) + ',');
+  RemoveTrailingComma(sl); sl.Add('  ],');
+  sl.Add('  "racePhonemeTargets": [');
+  node := ElementByPath(e, 'Phoneme Target Names');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do sl.Add('    ' + JStr(GetEditValue(ElementByIndex(node, i))) + ',');
+  RemoveTrailingComma(sl); sl.Add('  ],');
+  AddFormRefKV(sl, 'raceAttackRace', LinkedByPath(e, 'ATKR - Attack Race'));
+  AddKV(sl, '  ', 'raceFaceClamp', SafeFloat(FirstText(e, 'PNAM - FaceGen - Main clamp', 'PNAM', ''), '5.0'));
+  AddKV(sl, '  ', 'raceFaceClamp2', SafeFloat(FirstText(e, 'UNAM - FaceGen - Face clamp', 'UNAM', ''), '5.0'));
+  sl.Add('  "raceMountData": [' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Mount Offset X', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Mount Offset Y', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Mount Offset Z', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Dismount Offset X', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Dismount Offset Y', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Dismount Offset Z', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Mount Camera Offset X', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Mount Camera Offset Y', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Mount Camera Offset Z', '0'), '0.0') + '],');
+  sl.Add('  "raceAngularData": [' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Angular Acceleration Rate', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DATA - Data', 'Angular Tolerance', '0'), '0.0') + '],');
+  sl.Add('  "raceAttacks": [');
+  node := ElementByPath(e, 'Attacks');
+  if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin
+    row := ElementByIndex(node, i);
+    sl.Add('    {');
+    AddStringKV(sl, '      ', 'event', FirstText(row, 'ATKE - Attack Event', 'Attack Event', 'ATKE'));
+    AddKV(sl, '      ', 'damageMult', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Damage Mult', '1'), '1.0'));
+    AddKV(sl, '      ', 'attackChance', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Attack Chance', '1'), '1.0'));
+    linked := StructFieldLinked(row, 'ATKD - Attack Data', 'Attack Spell'); if Assigned(linked) then sl.Add('      "attackSpell": ' + FormRefJson(linked) + ',');
+    AddKV(sl, '      ', 'flags', ElementIntegerText(StructFieldElement(row, 'ATKD - Attack Data', 'Attack Flags'), '0'));
+    AddKV(sl, '      ', 'attackAngle', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Attack Angle', '0'), '0.0'));
+    AddKV(sl, '      ', 'strikeAngle', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Strike Angle', '0'), '0.0'));
+    AddKV(sl, '      ', 'staggerOffset', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Stagger', '0'), '0.0'));
+    linked := StructFieldLinked(row, 'ATKD - Attack Data', 'Attack Type'); if Assigned(linked) then sl.Add('      "attackType": ' + FormRefJson(linked) + ',');
+    AddKV(sl, '      ', 'knockDown', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Knockdown', '0'), '0.0'));
+    AddKV(sl, '      ', 'recoveryTime', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Recovery Time', '0'), '0.0'));
+    AddKV(sl, '      ', 'staminaMult', SafeFloat(StructFieldText(row, 'ATKD - Attack Data', 'Stamina Mult', '1'), '1.0'));
+    RemoveTrailingComma(sl); sl.Add('    },');
+  end;
+  RemoveTrailingComma(sl); sl.Add('  ],');
+end;
+
 procedure AddSoundDescriptorFields(sl: TStringList; e: IInterface);
 begin
   sl.Add('  "soundFiles": [],');
@@ -3070,7 +3825,7 @@ end;
 function ExportRecord(e: IInterface): Boolean;
 var
   sl: TStringList;
-  sig, kind, edid, fn: string;
+  sig, kind, edid, fn, recordKey: string;
 begin
   Result := False;
   sig := Signature(e);
@@ -3080,6 +3835,14 @@ begin
     Inc(SkippedCount);
     Exit;
   end;
+
+  recordKey := sig + ':' + IntToHex(GetLoadOrderFormID(e), 8);
+  if Assigned(ExportedRecords) and (ExportedRecords.IndexOf(recordKey) >= 0) then begin
+    Result := True;
+    Exit;
+  end;
+  if Assigned(ExportedRecords) then
+    ExportedRecords.Add(recordKey);
 
   edid := SafeFileName(EditorIDOf(e));
   fn := OutputDir + edid + '.json';
@@ -3161,6 +3924,36 @@ begin
     else if sig = 'LSCR' then AddLoadScreenFields(sl, e)
     else if sig = 'SPGD' then AddShaderParticleGeometryFields(sl, e)
     else if sig = 'ADDN' then AddAddonNodeFields(sl, e)
+    else if sig = 'FACT' then AddFactionFields(sl, e)
+    else if sig = 'IDLE' then AddIdleAnimationFields(sl, e)
+    else if sig = 'MATO' then AddMaterialObjectFields(sl, e)
+    else if sig = 'MESG' then AddMessageFields(sl, e)
+    else if sig = 'LTEX' then AddLandTextureFields(sl, e)
+    else if sig = 'SOPM' then AddSoundOutputModelFields(sl, e)
+    else if sig = 'LENS' then AddLensFlareFields(sl, e)
+    else if sig = 'DEBR' then AddDebrisFields(sl, e)
+    else if sig = 'IMAD' then AddImageSpaceModifierFields(sl, e)
+    else if sig = 'CAMS' then AddCameraShotFields(sl, e)
+    else if sig = 'CPTH' then AddCameraPathFields(sl, e)
+    else if sig = 'TACT' then AddTalkingActivatorFields(sl, e)
+    else if sig = 'FURN' then AddFurnitureFields(sl, e)
+    else if sig = 'WTHR' then AddWeatherFields(sl, e)
+    else if sig = 'CLMT' then AddClimateFields(sl, e)
+    else if sig = 'LCTN' then AddLocationFields(sl, e)
+    else if sig = 'MUSC' then AddMusicTypeFields(sl, e)
+    else if sig = 'MUST' then AddMusicTrackFields(sl, e)
+    else if sig = 'BPTD' then AddBodyPartDataFields(sl, e)
+    else if sig = 'VOLI' then AddVolumetricLightingFields(sl, e)
+    else if sig = 'SOUN' then AddLegacySoundFields(sl, e)
+    else if sig = 'AVIF' then AddActorValueInfoFields(sl, e)
+    else if sig = 'DLBR' then AddDialogueBranchFields(sl, e)
+    else if sig = 'DIAL' then AddDialogueTopicFields(sl, e)
+    else if sig = 'INFO' then AddDialogueInfoFields(sl, e)
+    else if sig = 'QUST' then AddQuestFields(sl, e)
+    else if sig = 'SCEN' then AddSceneFields(sl, e)
+    else if (sig = 'SMBN') or (sig = 'SMQN') or (sig = 'SMEN') then AddStoryManagerFields(sl, e, sig)
+    else if sig = 'PACK' then AddPackageFields(sl, e)
+    else if sig = 'RACE' then AddRaceFields(sl, e)
     else if sig = 'MGEF' then AddMagicEffectFields(sl, e)
     else if sig = 'CLFM' then AddColorFields(sl, e)
     else if sig = 'ARTO' then AddArtObjectFields(sl, e)
@@ -3206,6 +3999,10 @@ begin
   if PackageName = '' then
     PackageName := 'DFG_Import';
 
+  ExportedRecords := TStringList.Create;
+  ExportedRecords.Sorted := True;
+  ExportedRecords.Duplicates := dupIgnore;
+
   packageFolder := SafePackageFolder(PackageName);
   PackageDir := wbDataPath + 'Viny Mods\Dynamic Forms Generator\Packages\' + packageFolder + '\';
   OutputDir := PackageDir + 'imports\';
@@ -3222,19 +4019,32 @@ begin
 end;
 
 function Process(e: IInterface): Integer;
+var
+  groupNode, child: IInterface;
+  i: Integer;
 begin
   if not Assigned(e) then begin
     Result := 0;
     Exit;
   end;
 
-  ExportRecord(e);
+  if ExportRecord(e) and (Signature(e) = 'DIAL') then begin
+    groupNode := ChildGroup(e);
+    if Assigned(groupNode) then
+      for i := 0 to ElementCount(groupNode) - 1 do begin
+        child := ElementByIndex(groupNode, i);
+        if Signature(child) = 'INFO' then
+          ExportRecord(child);
+      end;
+  end;
   Result := 0;
 end;
 
 function Finalize: Integer;
 begin
   AddMessage('[DFG] Done. Exported: ' + IntToStr(ExportedCount) + ', skipped: ' + IntToStr(SkippedCount));
+  if Assigned(ExportedRecords) then
+    ExportedRecords.Free;
   Result := 0;
 end;
 

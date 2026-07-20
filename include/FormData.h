@@ -85,7 +85,39 @@ namespace DynamicForms {
         AnimatedObject,
         LoadScreen,
         ShaderParticleGeometry,
-        AddonNode
+        AddonNode,
+        Faction,
+        IdleAnimation,
+        MaterialObject,
+        Message,
+        LandTexture,
+        SoundOutputModel,
+        LensFlare,
+        Debris,
+        ImageSpaceModifier,
+        CameraShot,
+        CameraPath,
+        TalkingActivator,
+        Furniture,
+        Weather,
+        Climate,
+        Location,
+        MusicType,
+        MusicTrack,
+        BodyPartData,
+        VolumetricLighting,
+        Sound,
+        ActorValueInfo,
+        DialogueBranch,
+        DialogueTopic,
+        DialogueInfo,
+        Quest,
+        Scene,
+        StoryManagerBranchNode,
+        StoryManagerQuestNode,
+        StoryManagerEventNode,
+        Package,
+        Race
     };
 
     enum class GlobalType
@@ -182,6 +214,117 @@ namespace DynamicForms {
         }
     };
 
+    struct ClimateWeatherEntry
+    {
+        FormRef weather;
+        std::uint32_t chance{ 100 };
+        FormRef global;
+    };
+
+    struct DialogueResponse
+    {
+        std::uint32_t emotionType{ 0 };
+        std::uint32_t emotionValue{ 50 };
+        std::uint8_t responseNumber{ 1 };
+        std::uint32_t flags{ 0 };
+        std::string text;
+        FormRef sound;
+        FormRef speakerIdle;
+        FormRef listenerIdle;
+    };
+
+    struct QuestTarget
+    {
+        std::uint32_t aliasId{ 0 };
+        std::uint32_t flags{ 0 };
+        std::vector<PerkCondition> conditions;
+    };
+
+    struct QuestStage
+    {
+        std::uint16_t index{ 0 };
+        std::uint32_t flags{ 0 };
+    };
+
+    struct QuestObjective
+    {
+        std::uint16_t index{ 0 };
+        std::uint32_t flags{ 0 };
+        std::string text;
+        std::vector<QuestTarget> targets;
+    };
+
+    struct QuestAlias
+    {
+        std::uint32_t id{ 0 };
+        std::string name;
+        std::uint32_t flags{ 0 };
+        std::uint32_t fillType{ 0 };
+        FormRef forcedReference;
+        FormRef uniqueActor;
+        FormRef externalQuest;
+        std::uint32_t externalAliasId{ 0 };
+        std::uint32_t sourceAliasId{ 0 };
+        FormRef sourceRefType;
+        std::vector<PerkCondition> conditions;
+    };
+
+    struct ScenePhase
+    {
+        std::vector<PerkCondition> startConditions;
+        std::vector<PerkCondition> completionConditions;
+        FormRef questNode;
+    };
+
+    struct SceneAction
+    {
+        std::uint32_t type{ 0 };
+        std::uint32_t actorId{ 0 };
+        std::uint16_t startPhase{ 0 };
+        std::uint16_t endPhase{ 0 };
+        std::uint32_t flags{ 0 };
+        std::uint32_t index{ 0 };
+        FormRef topic;
+        std::int32_t headtrackActorId{ -1 };
+        float loopingMin{ 0.0F };
+        float loopingMax{ 0.0F };
+        std::uint32_t emotionType{ 0 };
+        std::uint32_t emotionValue{ 50 };
+        std::vector<FormRef> packages;
+        float timerSeconds{ 1.0F };
+    };
+
+    struct StoryQuestEntry
+    {
+        FormRef quest;
+        std::uint32_t flags{ 0 };
+        float hoursUntilReset{ 0.0F };
+    };
+
+    struct PackageEvent
+    {
+        FormRef idle;
+        std::uint32_t type{ 0 };
+        std::uint32_t topicType{ 0 };
+        FormRef topic;
+    };
+
+    struct RaceAttack
+    {
+        std::string event;
+        float damageMult{ 1.0F };
+        float attackChance{ 1.0F };
+        FormRef attackSpell;
+        std::uint32_t flags{ 0 };
+        float attackAngle{ 0.0F };
+        float strikeAngle{ 0.0F };
+        float staggerOffset{ 0.0F };
+        FormRef attackType;
+        float knockDown{ 0.0F };
+        float recoveryTime{ 0.0F };
+        float staminaMult{ 1.0F };
+    };
+
     struct RankedFormRef
     {
         FormRef form;
@@ -234,6 +377,33 @@ namespace DynamicForms {
         FormRef conditionGlobal;
         std::int32_t requiredRank{ 0 };
         float healthMult{ 100.0F };
+    };
+
+    struct FactionReaction
+    {
+        FormRef faction;
+        std::int32_t reaction{ 0 };
+        std::uint32_t fightReaction{ 0 };
+    };
+
+    struct FactionRank
+    {
+        std::string maleTitle;
+        std::string femaleTitle;
+        std::string insigniaPath;
+    };
+
+    struct MessageButton
+    {
+        std::string text;
+        std::vector<PerkCondition> conditions;
+    };
+
+    struct DebrisEntry
+    {
+        std::int8_t percentage{ 100 };
+        std::uint32_t flags{ 0 };
+        std::string modelPath;
     };
 
     struct DynamicForm
@@ -561,6 +731,260 @@ namespace DynamicForms {
         FormRef addonSound;
         std::uint16_t addonMasterParticleCap{ 0 };
         std::uint32_t addonFlags{ 0 };
+        std::uint32_t factionFlags{ 0 };
+        std::vector<FactionReaction> factionReactions;
+        std::vector<FactionRank> factionRanks;
+        FormRef factionJailMarker;
+        FormRef factionWaitMarker;
+        FormRef factionStolenContainer;
+        FormRef factionPlayerInventoryContainer;
+        FormRef factionCrimeGroup;
+        FormRef factionJailOutfit;
+        bool factionArrest{ false };
+        bool factionAttackOnSight{ false };
+        std::uint16_t factionMurderCrimeGold{ 0 };
+        std::uint16_t factionAssaultCrimeGold{ 0 };
+        std::uint16_t factionTrespassCrimeGold{ 0 };
+        std::uint16_t factionPickpocketCrimeGold{ 0 };
+        float factionStealCrimeGoldMult{ 1.0F };
+        std::uint16_t factionEscapeCrimeGold{ 0 };
+        std::uint16_t factionWerewolfCrimeGold{ 0 };
+        std::uint16_t factionVendorStartHour{ 0 };
+        std::uint16_t factionVendorEndHour{ 24 };
+        std::uint32_t factionVendorRadius{ 0 };
+        bool factionVendorBuysStolen{ false };
+        bool factionVendorNotBuySell{ false };
+        bool factionVendorBuysNonStolen{ false };
+        FormRef factionVendorSellBuyList;
+        FormRef factionMerchantContainer;
+        std::vector<PerkCondition> factionVendorConditions;
+        std::int8_t idleLoopMin{ 0 };
+        std::int8_t idleLoopMax{ 0 };
+        std::uint32_t idleAnimationFlags{ 0 };
+        std::uint8_t idleAnimationGroupSelection{ 0 };
+        std::uint16_t idleReplayDelay{ 0 };
+        FormRef idleParent;
+        FormRef idlePrevious;
+        std::string idleAnimationFile;
+        std::string idleAnimationEvent;
+        std::array<float, 11> materialDirectionalData{};
+        std::int32_t materialSinglePass{ 0 };
+        std::uint32_t materialObjectFlags{ 0 };
+        FormRef messageMenuIcon;
+        FormRef messageOwnerQuest;
+        std::vector<MessageButton> messageButtons;
+        std::uint32_t messageFlags{ 0 };
+        std::uint32_t messageDisplayTime{ 0 };
+        FormRef landTextureSet;
+        std::int32_t landFriction{ 0 };
+        std::int32_t landRestitution{ 0 };
+        FormRef landMaterialType;
+        std::int8_t landSpecularExponent{ 0 };
+        std::int32_t landShaderTextureIndex{ 0 };
+        std::vector<FormRef> landGrasses;
+        std::uint32_t soundOutputType{ 0 };
+        std::uint32_t soundOutputFlags{ 0 };
+        std::uint8_t soundOutputReverbSend{ 0 };
+        float soundOutputMinDistance{ 0.0F };
+        float soundOutputMaxDistance{ 0.0F };
+        std::array<std::uint8_t, 5> soundOutputCurve{};
+        std::array<std::uint8_t, 24> soundOutputSpeakers{};
+        float lensFlareFadeDistanceRadiusScale{ 0.0F };
+        float lensFlareColorInfluence{ 0.0F };
+        std::vector<DebrisEntry> debrisEntries;
+        bool imageModifierAnimatable{ false };
+        float imageModifierDuration{ 0.0F };
+        std::array<float, 16> imageModifierHDR{};
+        std::array<float, 6> imageModifierCinematic{};
+        std::uint32_t imageModifierTintColor{ 0 };
+        std::uint32_t imageModifierBlurRadius{ 0 };
+        std::uint32_t imageModifierDoubleVisionStrength{ 0 };
+        std::uint32_t imageModifierRadialBlurStrength{ 0 };
+        std::uint32_t imageModifierRadialBlurRampUp{ 0 };
+        std::uint32_t imageModifierRadialBlurStart{ 0 };
+        bool imageModifierUseTargetForRadialBlur{ false };
+        std::array<float, 2> imageModifierRadialBlurCenter{};
+        std::uint32_t imageModifierDofStrength{ 0 };
+        std::uint32_t imageModifierDofDistance{ 0 };
+        std::uint32_t imageModifierDofRange{ 0 };
+        bool imageModifierDofUseTarget{ false };
+        std::uint32_t imageModifierDofFlags{ 0 };
+        std::uint32_t imageModifierRadialBlurRampDown{ 0 };
+        std::uint32_t imageModifierRadialBlurDownStart{ 0 };
+        std::uint32_t imageModifierFadeColor{ 0 };
+        std::uint32_t imageModifierMotionBlurStrength{ 0 };
+        FormRef cameraImageSpaceModifier;
+        std::uint32_t cameraAction{ 0 };
+        std::uint32_t cameraLocation{ 0 };
+        std::uint32_t cameraTarget{ 0 };
+        std::uint32_t cameraFlags{ 0 };
+        std::array<float, 7> cameraTiming{};
+        std::vector<FormRef> cameraPathShots;
+        std::uint32_t cameraPathFlags{ 0 };
+        FormRef cameraPathParent;
+        FormRef cameraPathPrevious;
+        FormRef talkingVoiceType;
+        std::uint32_t furnitureFlags{ 0 };
+        std::uint32_t furnitureWorkbenchType{ 0 };
+        std::int32_t furnitureWorkbenchSkill{ -1 };
+        FormRef furnitureAssociatedSpell;
+        std::uint32_t weatherFlags{ 0 };
+        std::uint8_t weatherWindSpeed{ 0 };
+        std::uint8_t weatherTransitionDelta{ 0 };
+        std::uint8_t weatherSunGlare{ 0 };
+        std::uint8_t weatherSunDamage{ 0 };
+        std::array<float, 8> weatherFogData{};
+        FormRef weatherPrecipitation;
+        FormRef weatherReferenceEffect;
+        FormRef weatherLensFlare;
+        std::array<FormRef, 4> weatherImageSpaces;
+        std::array<FormRef, 4> weatherVolumetricLighting;
+        std::string climateNightSkyModel;
+        std::string climateSunTexture;
+        std::string climateSunGlareTexture;
+        std::vector<ClimateWeatherEntry> climateWeatherEntries;
+        std::array<std::uint8_t, 4> climateTimes{};
+        std::uint8_t climateVolatility{ 0 };
+        std::uint8_t climateMoonPhaseLength{ 0 };
+        FormRef locationParent;
+        FormRef locationCrimeFaction;
+        FormRef locationMusicType;
+        float locationWorldRadius{ 0.0F };
+        std::uint32_t musicTypeFlags{ 0 };
+        std::uint8_t musicTypePriority{ 0 };
+        std::uint16_t musicTypeDucking{ 0 };
+        float musicTypeFadeTime{ 1.0F };
+        std::vector<FormRef> musicTypeTracks;
+        std::string musicTrackPath;
+        std::string musicTrackFinalePath;
+        std::vector<float> musicTrackCuePoints;
+        float musicTrackLoopBegin{ 0.0F };
+        float musicTrackLoopEnd{ 0.0F };
+        std::uint32_t musicTrackLoopCount{ 0 };
+        FormRef bodyPartRagdoll;
+        std::array<float, 10> volumetricLightingData{};
+        FormRef legacySoundDescriptor;
+        std::string actorValueAbbreviation;
+        std::string actorValueEnumName;
+        std::uint32_t actorValueFlags{ 0 };
+        std::uint32_t actorValueType{ 6 };
+        std::vector<std::string> actorValueEnumValues;
+        bool actorValueHasSkillData{ false };
+        std::array<float, 4> actorValueSkillData{};
+        std::uint32_t dialogueBranchFlags{ 0 };
+        std::uint32_t dialogueBranchType{ 0 };
+        FormRef dialogueBranchQuest;
+        FormRef dialogueBranchStartingTopic;
+        std::uint32_t dialogueTopicFlags{ 0 };
+        std::uint32_t dialogueTopicType{ 0 };
+        std::uint32_t dialogueTopicSubtype{ 0 };
+        std::uint8_t dialogueTopicPriority{ 50 };
+        std::uint32_t dialogueTopicJournalIndex{ 0 };
+        FormRef dialogueTopicBranch;
+        FormRef dialogueTopicQuest;
+        std::vector<FormRef> dialogueTopicInfos;
+        FormRef dialogueInfoTopic;
+        FormRef dialogueInfoSharedInfo;
+        std::uint16_t dialogueInfoIndex{ 0 };
+        std::uint32_t dialogueInfoFavorLevel{ 0 };
+        std::uint32_t dialogueInfoFlags{ 0 };
+        std::uint16_t dialogueInfoResetHours{ 0 };
+        std::vector<DialogueResponse> dialogueResponses;
+        std::uint32_t questFlags{ 0 };
+        std::uint32_t questType{ 0 };
+        std::int8_t questPriority{ 0 };
+        float questDelayTime{ 0.0F };
+        std::vector<PerkCondition> questStoryConditions;
+        std::vector<FormRef> questTextGlobals;
+        std::vector<QuestStage> questStages;
+        std::vector<QuestObjective> questObjectives;
+        std::vector<QuestAlias> questAliases;
+        std::uint32_t sceneFlags{ 0 };
+        FormRef sceneParentQuest;
+        std::vector<std::uint32_t> sceneActors;
+        std::vector<std::uint32_t> sceneActorFlags;
+        std::vector<std::uint32_t> sceneActorBehaviorFlags;
+        std::vector<ScenePhase> scenePhases;
+        std::vector<SceneAction> sceneActions;
+        FormRef storyParent;
+        FormRef storyPreviousSibling;
+        std::uint32_t storyMaxQuests{ 0 };
+        std::uint32_t storyNodeFlags{ 0 };
+        std::uint32_t storyQuestFlags{ 0 };
+        std::vector<FormRef> storyChildren;
+        std::vector<StoryQuestEntry> storyQuests;
+        std::uint32_t storyNumQuestsToStart{ 1 };
+        std::string storyEventId;
+        std::uint32_t packageFlags{ 0 };
+        std::uint32_t packageType{ 27 };
+        std::uint32_t packageProcedureType{ 23 };
+        std::uint32_t packageInterruptType{ 0xFFFFFFFFu };
+        std::uint32_t packagePreferredSpeed{ 1 };
+        std::uint32_t packageInterruptFlags{ 0 };
+        std::uint32_t packageSpecificFlags{ 0 };
+        std::uint32_t packageIdleFlags{ 0 };
+        float packageIdleTimer{ 0.0F };
+        std::vector<FormRef> packageIdles;
+        FormRef packageTemplate;
+        std::int8_t packageMonth{ -1 };
+        std::int8_t packageDayOfWeek{ -1 };
+        std::int8_t packageDate{ -1 };
+        std::int8_t packageHour{ -1 };
+        std::int8_t packageMinute{ -1 };
+        std::int32_t packageDuration{ 0 };
+        FormRef packageCombatStyle;
+        FormRef packageOwnerQuest;
+        PackageEvent packageOnBegin;
+        PackageEvent packageOnEnd;
+        PackageEvent packageOnChange;
+        std::uint32_t packageLocationType{ 0xFFFFFFFFu };
+        std::uint32_t packageLocationRadius{ 0 };
+        FormRef packageLocationObject;
+        std::uint32_t packageLocationValue{ 0 };
+        std::int32_t packageTargetType{ -1 };
+        FormRef packageTargetForm;
+        std::uint32_t packageTargetAlias{ 0 };
+        std::int32_t packageTargetValue{ 0 };
+        std::uint32_t raceFlags{ 0 };
+        std::uint32_t raceFlags2{ 0 };
+        std::uint32_t raceSize{ 1 };
+        std::array<std::uint32_t, 7> raceSkillBoostSkills{};
+        std::array<std::uint8_t, 7> raceSkillBoostBonuses{};
+        std::array<float, 2> raceHeight{ 1.0F, 1.0F };
+        std::array<float, 2> raceWeight{ 1.0F, 1.0F };
+        std::array<float, 15> raceStats{};
+        std::array<std::string, 2> raceSkeletonModels;
+        std::array<std::string, 2> raceBehaviorGraphs;
+        std::array<FormRef, 2> raceVoiceTypes;
+        FormRef raceBodyPartData;
+        std::array<FormRef, 2> raceDecapitateArmors;
+        FormRef raceBloodMaterial;
+        FormRef raceImpactDataSet;
+        FormRef raceDismemberBlood;
+        FormRef raceCorpseOpenSound;
+        FormRef raceCorpseCloseSound;
+        std::vector<FormRef> raceEquipSlots;
+        std::uint32_t raceValidEquipTypes{ 0 };
+        FormRef raceUnarmedEquipSlot;
+        FormRef raceMorphRace;
+        FormRef raceArmorParentRace;
+        std::array<FormRef, 6> raceMovementTypes;
+        std::array<std::string, 2> raceBodyTextureModels;
+        std::array<std::vector<FormRef>, 2> raceHeadParts;
+        std::array<std::vector<FormRef>, 2> racePresetNPCs;
+        std::array<std::vector<FormRef>, 2> raceHairColors;
+        std::array<std::vector<FormRef>, 2> raceFaceDetailTextures;
+        std::array<FormRef, 2> raceDefaultFaceDetails;
+        std::array<FormRef, 2> raceDefaultHairColors;
+        std::array<std::uint32_t, 8> raceMorphFlags{};
+        std::array<std::string, 32> raceBipedObjectNames;
+        std::vector<std::string> racePhonemeTargets;
+        FormRef raceAttackRace;
+        std::vector<RaceAttack> raceAttacks;
+        float raceFaceClamp{ 5.0F };
+        float raceFaceClamp2{ 5.0F };
+        std::array<float, 9> raceMountData{};
+        std::array<float, 2> raceAngularData{};
         std::uint32_t magicEffectFlags{ 0 };
         float magicEffectBaseCost{ 0.0F };
         FormRef magicEffectAssociatedForm;
@@ -828,6 +1252,7 @@ namespace DynamicForms {
         std::vector<RankedFormRef> npcPerks;
         std::vector<FormRef> spells;
         std::vector<FormRef> packages;
+        std::uint32_t pluginNumber{ 0 };
         std::uint32_t localId{ 0 };
         bool dirty{ false };
     };

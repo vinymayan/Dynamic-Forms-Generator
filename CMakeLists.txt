@@ -69,6 +69,8 @@ set(BUILD_TESTS OFF)
 include(${COMMONLIB_SRC_DIR}/cmake/CommonLibSSE.cmake)
 find_package(miniz CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_path(DETOURS_INCLUDE_DIRS "detours/detours.h")
+find_library(DETOURS_LIBRARY detours REQUIRED)
 
 add_commonlibsse_plugin(
   ${PROJECT_NAME}
@@ -83,6 +85,7 @@ target_include_directories(
 	${CLIB_UTIL_INCLUDE_DIRS}
 	${CLIB_UTILS_QTR_INCLUDE_DIRS}
     ${SKSE_MCP_INCLUDE_DIRS}
+	${DETOURS_INCLUDE_DIRS}
 	${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
@@ -91,6 +94,7 @@ target_link_libraries(
     PRIVATE
     miniz::miniz
     unofficial::sqlite3::sqlite3
+    ${DETOURS_LIBRARY}
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE IS_HOST_PLUGIN)

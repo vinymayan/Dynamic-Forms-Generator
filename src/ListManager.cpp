@@ -58,6 +58,15 @@ namespace FormUtil {
 }
 
 namespace {
+    bool IsDPFPluginName(const std::string_view name) {
+        if (name == "DPF.esp") return true;
+        if (!name.starts_with("DPF ") || !name.ends_with(".esp")) return false;
+        const auto number = name.substr(4, name.size() - 8);
+        return !number.empty() && std::ranges::all_of(number, [](const char value) {
+            return value >= '0' && value <= '9';
+        });
+    }
+
     bool IsValidUTF8(const std::string& string) {
         int c, i, ix, n, j;
         for (i = 0, ix = static_cast<int>(string.length()); i < ix; i++) {
@@ -414,6 +423,14 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     PopulateList<RE::TESLoadScreen>("LoadScreen", [](RE::TESLoadScreen* value) -> bool { return value != nullptr; });
     PopulateList<RE::BGSShaderParticleGeometryData>("ShaderParticleGeometry", [](RE::BGSShaderParticleGeometryData* value) -> bool { return value != nullptr; });
     PopulateList<RE::BGSAddonNode>("AddonNode", [](RE::BGSAddonNode* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSApparatus>("Apparatus", [](RE::BGSApparatus* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSStaticCollection>("StaticCollection", [](RE::BGSStaticCollection* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESGrass>("Grass", [](RE::TESGrass* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSIdleMarker>("IdleMarker", [](RE::BGSIdleMarker* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSEncounterZone>("EncounterZone", [](RE::BGSEncounterZone* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSRelationship>("Relationship", [](RE::BGSRelationship* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSMovementType>("MovementType", [](RE::BGSMovementType* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSLightingTemplate>("LightingTemplate", [](RE::BGSLightingTemplate* value) -> bool { return value != nullptr; });
 
     PopulateList<RE::BGSMaterialType>("MaterialType", [](RE::BGSMaterialType* materialType) -> bool {
         return materialType != nullptr;
@@ -449,6 +466,34 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     PopulateList<RE::TESFaction>("Faction", [](RE::TESFaction* faction) -> bool {
         return faction != nullptr;
     });
+    PopulateList<RE::TESQuest>("Quest", [](RE::TESQuest* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSMaterialObject>("MaterialObject", [](RE::BGSMaterialObject* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSMessage>("Message", [](RE::BGSMessage* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESLandTexture>("LandTexture", [](RE::TESLandTexture* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSSoundOutput>("SoundOutputModel", [](RE::BGSSoundOutput* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSLensFlare>("LensFlare", [](RE::BGSLensFlare* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSDebris>("Debris", [](RE::BGSDebris* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESImageSpaceModifier>("ImageSpaceModifier", [](RE::TESImageSpaceModifier* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSCameraShot>("CameraShot", [](RE::BGSCameraShot* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSCameraPath>("CameraPath", [](RE::BGSCameraPath* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSTalkingActivator>("TalkingActivator", [](RE::BGSTalkingActivator* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESFurniture>("Furniture", [](RE::TESFurniture* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESWeather>("Weather", [](RE::TESWeather* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESClimate>("Climate", [](RE::TESClimate* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSMusicType>("MusicType", [](RE::BGSMusicType* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSMusicTrackFormWrapper>("MusicTrack", [](RE::BGSMusicTrackFormWrapper* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSBodyPartData>("BodyPartData", [](RE::BGSBodyPartData* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSVolumetricLighting>("VolumetricLighting", [](RE::BGSVolumetricLighting* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESSound>("Sound", [](RE::TESSound* value) -> bool { return value != nullptr; });
+    PopulateList<RE::ActorValueInfo>("ActorValueInfo", [](RE::ActorValueInfo* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSVoiceType>("VoiceType", [](RE::BGSVoiceType* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSDialogueBranch>("DialogueBranch", [](RE::BGSDialogueBranch* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESTopic>("DialogueTopic", [](RE::TESTopic* value) -> bool { return value != nullptr; });
+    PopulateList<RE::TESTopicInfo>("DialogueInfo", [](RE::TESTopicInfo* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSScene>("Scene", [](RE::BGSScene* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSStoryManagerBranchNode>("StoryManagerBranchNode", [](RE::BGSStoryManagerBranchNode* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSStoryManagerQuestNode>("StoryManagerQuestNode", [](RE::BGSStoryManagerQuestNode* value) -> bool { return value != nullptr; });
+    PopulateList<RE::BGSStoryManagerEventNode>("StoryManagerEventNode", [](RE::BGSStoryManagerEventNode* value) -> bool { return value != nullptr; });
 
     _isPopulated = true;
     for (auto cb : _readyCallbacks) {
@@ -602,7 +647,7 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
 
             list.push_back(info);
 
-            if (info.pluginName == "Dynamic Persistent Forms.esp") {
+            if (IsDPFPluginName(info.pluginName)) {
                 logger::info("[ListManager] DPF form found. Type: {} EditorID: '{}' FormID: {:08X}",
                     a_typeName,
                     info.editorID,

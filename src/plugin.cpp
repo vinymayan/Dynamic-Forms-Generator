@@ -17,6 +17,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SetupLog();
     logger::info("Plugin loaded");
     SKSE::Init(skse);
+    Manager::InstallHooks();
     SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
     return true;
 }
