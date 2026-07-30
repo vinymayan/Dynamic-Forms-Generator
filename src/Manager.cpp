@@ -1,17 +1,20 @@
 #include "Manager.h"
 
 #include "ConditionCatalog.h"
+#include "DFGAPI.h"
 #include "DPFAPI.h"
 #include "ListManager.h"
 #include "logger.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <detours/detours.h>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -21,6 +24,7 @@
 #include <memory>
 #include <optional>
 #include <rapidjson/document.h>
+#include <rapidjson/error/en.h>
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/prettywriter.h>
@@ -32,6 +36,7 @@
 
 namespace {
     std::vector<DynamicForms::DynamicForm> forms;
+    std::atomic_bool apiReady{ false };
     std::unordered_map<RE::TESTopicInfo*, RE::TESTopicInfo::TESResponse*> dynamicDialogueResponses;
     using GetResponseListFn = RE::TESTopicInfo::TESResponseList* (*)(RE::TESTopicInfo*, RE::TESTopicInfo::TESResponseList*);
     GetResponseListFn originalGetResponseList{ nullptr };
@@ -5060,9 +5065,32 @@ namespace {
         return true;
     }
 
-    RE::TESForm* ResolveDPFFormObject(DynamicForms::DynamicForm& form, const bool configure = true) {
+    enum class ResolveDPFFailure
+    {
+        None,
+        Unavailable,
+        Create,
+        Configure
+    };
+
+    RE::TESForm* ResolveDPFFormObject(
+        DynamicForms::DynamicForm& form,
+        const bool configure = true,
+        bool* recoveredExistingSlot = nullptr,
+        ResolveDPFFailure* failure = nullptr)
+    {
+        if (recoveredExistingSlot) {
+            *recoveredExistingSlot = false;
+        }
+        if (failure) {
+            *failure = ResolveDPFFailure::None;
+        }
+
         auto* api = DPF::GetAPI();
         if (!api) {
+            if (failure) {
+                *failure = ResolveDPFFailure::Unavailable;
+            }
             logger::warn("Dynamic Persistent Forms API is not available yet.");
             return nullptr;
         }
@@ -5098,6 +5126,9 @@ namespace {
             }
         }
         if (!tesForm) {
+            if (failure) {
+                *failure = ResolveDPFFailure::Create;
+            }
             logger::warn("DPF returned null for dynamic form '{}'", form.editorId);
             return nullptr;
         }
@@ -5107,7 +5138,13 @@ namespace {
         }
         form.pluginNumber = pluginNumber;
         form.localId = localId;
+        if (recoveredExistingSlot) {
+            *recoveredExistingSlot = existed;
+        }
         if (configure && !ConfigureForm(tesForm, form)) {
+            if (failure) {
+                *failure = ResolveDPFFailure::Configure;
+            }
             return nullptr;
         }
 
@@ -6793,6 +6830,25 @@ namespace {
         return packages;
     }
 
+    bool IsEditorIdReservedForStoredForm(const DynamicForms::DynamicForm& form) {
+        auto* existing = RE::TESForm::LookupByEditorID(form.editorId);
+        if (!existing) {
+            return false;
+        }
+
+        if (form.pluginNumber != 0 && form.localId != 0) {
+            if (auto* dataHandler = RE::TESDataHandler::GetSingleton()) {
+                const auto pluginName = DPF::PluginNameForNumber(form.pluginNumber);
+                if (!pluginName.empty() &&
+                    dataHandler->LookupForm(form.localId, pluginName) == existing)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     void AddOrReplaceResolvedForm(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
         if (form.packageName.empty()) {
             form.packageName = sourcePackage;
@@ -6801,6 +6857,13 @@ namespace {
             return current.editorId == form.editorId;
         });
         if (existing == forms.end()) {
+            if (IsEditorIdReservedForStoredForm(form)) {
+                logger::warn(
+                    "Dynamic form '{}' from package '{}' was skipped because that EditorID belongs to an existing game form.",
+                    form.editorId,
+                    sourcePackage);
+                return;
+            }
             forms.push_back(std::move(form));
             return;
         }
@@ -6909,6 +6972,7 @@ namespace Manager {
     }
 
     void LoadForms() {
+        apiReady.store(false, std::memory_order_release);
         forms.clear();
         dynamicDialogueResponses.clear();
 
@@ -6933,7 +6997,10 @@ namespace Manager {
             }
 
             DynamicForms::DynamicForm form;
-            if (ReadFormFile(entry.path(), form) && !HasEditorId(form.editorId)) {
+            if (ReadFormFile(entry.path(), form) &&
+                !HasEditorId(form.editorId) &&
+                !IsEditorIdReservedForStoredForm(form))
+            {
                 form.packageName = Manager::DEFAULT_PACKAGE_NAME;
                 forms.push_back(std::move(form));
             }
@@ -6944,20 +7011,14 @@ namespace Manager {
         }
     }
 
-    bool SaveForm(const DynamicForms::DynamicForm& form) {
-        std::error_code ec;
-        std::filesystem::create_directories(FORMS_DIR, ec);
-        if (ec) {
-            logger::warn("Could not create forms directory '{}': {}", FORMS_DIR, ec.message());
-            return false;
-        }
-
-        rapidjson::Document doc;
+    bool BuildFormDocument(const DynamicForms::DynamicForm& form, rapidjson::Document& doc) {
         doc.SetObject();
         auto& allocator = doc.GetAllocator();
         doc.AddMember("schemaVersion", 1, allocator);
         const auto formKind = ToString(form.kind);
         doc.AddMember("formKind", rapidjson::Value(formKind.c_str(), allocator), allocator);
+        const auto sourceSignature = ToSignature(form.kind);
+        doc.AddMember("sourceSignature", rapidjson::Value(sourceSignature.c_str(), allocator), allocator);
         doc.AddMember("editorId", rapidjson::Value(form.editorId.c_str(), allocator), allocator);
         AddString(doc, allocator, "packageName", EffectivePackageName(form));
         AddString(doc, allocator, "basePackageName", form.basePackageName);
@@ -7826,7 +7887,27 @@ namespace Manager {
             doc.AddMember("localId", form.localId, allocator);
         }
 
-        return PersistFormDocument(form, doc);
+        return true;
+    }
+
+    bool SaveForm(const DynamicForms::DynamicForm& form) {
+        std::error_code ec;
+        std::filesystem::create_directories(FORMS_DIR, ec);
+        if (ec) {
+            logger::warn("Could not create forms directory '{}': {}", FORMS_DIR, ec.message());
+            return false;
+        }
+
+        rapidjson::Document doc;
+        return BuildFormDocument(form, doc) && PersistFormDocument(form, doc);
+    }
+
+    std::string SerializeFormJson(const DynamicForms::DynamicForm& form) {
+        rapidjson::Document doc;
+        if (!BuildFormDocument(form, doc)) {
+            return {};
+        }
+        return JsonString(doc);
     }
 
     bool SaveForm(const std::size_t index, const bool dispatchUpdate) {
@@ -7964,7 +8045,11 @@ namespace Manager {
     }
 
     bool AddForm(const DynamicForms::DynamicForm& form) {
-        if (form.editorId.empty() || HasEditorId(form.editorId)) {
+        const bool reservedEditorId = IsEditorIdReserved(form.editorId);
+        if (form.editorId.empty() || HasEditorId(form.editorId) || reservedEditorId) {
+            if (reservedEditorId) {
+                logger::warn("Could not create '{}': the EditorID belongs to an existing game form.", form.editorId);
+            }
             return false;
         }
 
@@ -8214,6 +8299,10 @@ namespace Manager {
         });
     }
 
+    bool IsEditorIdReserved(const std::string_view editorId) {
+        return !editorId.empty() && RE::TESForm::LookupByEditorID(editorId) != nullptr;
+    }
+
     bool IsDirty(const std::size_t index) {
         return index < forms.size() && forms[index].dirty;
     }
@@ -8224,7 +8313,12 @@ namespace Manager {
         });
     }
 
+    bool IsReady() noexcept {
+        return apiReady.load(std::memory_order_acquire);
+    }
+
     void ApplyAllForms() {
+        apiReady.store(false, std::memory_order_release);
         bool changed = false;
         bool allApplied = true;
 
@@ -8264,7 +8358,1191 @@ namespace Manager {
         } else {
             ListManager::GetSingleton()->PopulateAllLists(true);
         }
+        apiReady.store(true, std::memory_order_release);
         DispatchEvent(LOADED_EVENT, "All", static_cast<float>(forms.size()));
     }
 
+}
+
+namespace
+{
+    template <std::size_t N>
+    void CopyResultText(char (&target)[N], const std::string_view value)
+    {
+        const auto count = (std::min)(value.size(), N - 1);
+        std::memcpy(target, value.data(), count);
+        target[count] = '\0';
+    }
+
+    DFG::FormOperationResult MakeResult(const DFG::Operation operation)
+    {
+        DFG::FormOperationResult result;
+        result.operation = operation;
+        return result;
+    }
+
+    DFG::FormOperationResult& Fail(
+        DFG::FormOperationResult& result,
+        const DFG::Status status,
+        const std::string_view message)
+    {
+        result.status = status;
+        CopyResultText(result.error, message);
+        return result;
+    }
+
+    void FillFormResult(
+        DFG::FormOperationResult& result,
+        const DynamicForms::DynamicForm& form,
+        RE::TESForm* runtimeForm,
+        const bool recoveredExistingSlot)
+    {
+        result.form = runtimeForm;
+        result.formID = runtimeForm ? runtimeForm->GetFormID() : 0;
+        result.pluginNumber = form.pluginNumber;
+        result.localId = form.localId;
+        result.recoveredExistingSlot = recoveredExistingSlot ? 1 : 0;
+        CopyResultText(result.editorId, form.editorId);
+        CopyResultText(result.packageName, EffectivePackageName(form));
+        CopyResultText(result.pluginName, DPF::PluginNameForNumber(form.pluginNumber));
+    }
+
+    bool IsValidExternalEditorId(const std::string_view editorId)
+    {
+        if (editorId.empty() || editorId.size() >= sizeof(DFG::FormOperationResult{}.editorId)) {
+            return false;
+        }
+        return std::ranges::all_of(editorId, [](const unsigned char ch) {
+            return std::isalnum(ch) != 0 || ch == '_';
+        });
+    }
+
+    bool IsValidExternalPackageName(const std::string_view packageName)
+    {
+        if (packageName.empty() || packageName.size() >= sizeof(DFG::FormOperationResult{}.packageName) ||
+            packageName == "." || packageName == "..")
+        {
+            return false;
+        }
+        return std::ranges::all_of(packageName, [](const unsigned char ch) {
+            return std::isalnum(ch) != 0 || ch == ' ' || ch == '_' || ch == '-' || ch == '.';
+        });
+    }
+
+    const char* FindProtectedMember(const rapidjson::Document& doc, const bool update)
+    {
+        constexpr std::array alwaysProtected{
+            "pluginNumber",
+            "localId",
+            "basePackageName",
+            "patchPackageNames"
+        };
+        for (const auto* key : alwaysProtected) {
+            if (doc.HasMember(key)) {
+                return key;
+            }
+        }
+        if (update && doc.HasMember("packageName")) {
+            return "packageName";
+        }
+        return nullptr;
+    }
+
+    bool ParseJsonObject(
+        const std::string& payload,
+        rapidjson::Document& doc,
+        DFG::FormOperationResult& result)
+    {
+        if (payload.empty()) {
+            Fail(result, DFG::Status::InvalidJson, "JSON payload is empty.");
+            return false;
+        }
+
+        doc.Parse(payload.c_str());
+        if (doc.HasParseError()) {
+            Fail(result,
+                DFG::Status::InvalidJson,
+                std::format(
+                    "JSON parse error at offset {}: {}.",
+                    doc.GetErrorOffset(),
+                    rapidjson::GetParseError_En(doc.GetParseError())));
+            return false;
+        }
+        if (!doc.IsObject()) {
+            Fail(result, DFG::Status::InvalidJson, "JSON payload must be an object.");
+            return false;
+        }
+        return true;
+    }
+
+    std::optional<DynamicForms::FormKind> ReadRequestedKind(
+        const rapidjson::Document& doc,
+        const bool required,
+        DFG::FormOperationResult& result)
+    {
+        const auto kindMember = doc.FindMember("formKind");
+        if (kindMember == doc.MemberEnd()) {
+            if (required) {
+                Fail(result, DFG::Status::MissingFormKind, "formKind is required.");
+            }
+            return std::nullopt;
+        }
+        if (!kindMember->value.IsString()) {
+            Fail(result, DFG::Status::UnsupportedFormKind, "formKind must be a supported name or signature.");
+            return std::nullopt;
+        }
+
+        const auto kind = TryFormKindFromString(kindMember->value.GetString());
+        if (!kind) {
+            Fail(result,
+                DFG::Status::UnsupportedFormKind,
+                std::format("Unsupported formKind '{}'.", kindMember->value.GetString()));
+            return std::nullopt;
+        }
+
+        const auto signatureMember = doc.FindMember("sourceSignature");
+        if (signatureMember != doc.MemberEnd()) {
+            if (!signatureMember->value.IsString()) {
+                Fail(result, DFG::Status::UnsupportedFormKind, "sourceSignature must be a supported signature.");
+                return std::nullopt;
+            }
+            const auto signatureKind = TryFormKindFromString(signatureMember->value.GetString());
+            if (!signatureKind) {
+                Fail(result,
+                    DFG::Status::UnsupportedFormKind,
+                    std::format("Unsupported sourceSignature '{}'.", signatureMember->value.GetString()));
+                return std::nullopt;
+            }
+            if (*signatureKind != *kind) {
+                Fail(result, DFG::Status::FormKindMismatch, "formKind and sourceSignature identify different form types.");
+                return std::nullopt;
+            }
+        }
+        return kind;
+    }
+
+    DFG::Status StatusForResolveFailure(const ResolveDPFFailure failure)
+    {
+        switch (failure) {
+        case ResolveDPFFailure::Unavailable:
+            return DFG::Status::DPFUnavailable;
+        case ResolveDPFFailure::Configure:
+            return DFG::Status::ConfigureFailed;
+        case ResolveDPFFailure::Create:
+        case ResolveDPFFailure::None:
+        default:
+            return DFG::Status::DPFCreateFailed;
+        }
+    }
+
+    std::string MessageForResolveFailure(const ResolveDPFFailure failure)
+    {
+        switch (failure) {
+        case ResolveDPFFailure::Unavailable:
+            return "Dynamic Persistent Forms API is unavailable.";
+        case ResolveDPFFailure::Configure:
+            return "The runtime form was allocated, but its DFG fields could not be configured.";
+        case ResolveDPFFailure::Create:
+        case ResolveDPFFailure::None:
+        default:
+            return "Dynamic Persistent Forms could not allocate or recover the requested form.";
+        }
+    }
+
+    void ReleaseNewSlot(const DynamicForms::DynamicForm& form)
+    {
+        if (auto* api = DPF::GetAPI()) {
+            if (!api->ReleaseByOwnerKey(Manager::DPF_OWNER, form.editorId.c_str())) {
+                logger::warn("Could not roll back DPF owner/key for '{}'.", form.editorId);
+            }
+        }
+    }
+
+    void RestoreAfterFailedUpdate(
+        const std::size_t index,
+        const DynamicForms::DynamicForm& oldForm,
+        const DynamicForms::DynamicForm& attemptedForm,
+        RE::TESForm* attemptedRuntime,
+        const bool recoveredExistingSlot)
+    {
+        if (recoveredExistingSlot) {
+            if (attemptedRuntime && !ConfigureForm(attemptedRuntime, oldForm)) {
+                logger::warn("Could not restore runtime values for '{}' after a failed API update.", oldForm.editorId);
+            }
+            return;
+        }
+
+        ReleaseNewSlot(attemptedForm);
+        auto restored = oldForm;
+        restored.pluginNumber = 0;
+        restored.localId = 0;
+        if (ResolveDPFFormObject(restored, true)) {
+            forms[index] = restored;
+            if (!Manager::SaveForm(forms[index])) {
+                logger::warn("Could not persist restored DPF slot for '{}' after a failed API update.", oldForm.editorId);
+            }
+        } else {
+            logger::warn("Could not restore a runtime DPF slot for '{}' after a failed API update.", oldForm.editorId);
+        }
+    }
+
+    DFG::FormOperationResult ExecuteCreate(
+        const std::string& requester,
+        const std::string& packageName,
+        const std::string& payload,
+        const bool notify)
+    {
+        auto result = MakeResult(DFG::Operation::Create);
+        if (!Manager::IsReady()) {
+            return Fail(result, DFG::Status::NotReady, "Dynamic Forms Generator has not finished loading.");
+        }
+        if (packageName.empty()) {
+            return Fail(result, DFG::Status::MissingPackageName, "packageName is required.");
+        }
+        if (!IsValidExternalPackageName(packageName)) {
+            return Fail(result, DFG::Status::InvalidPackageName, "packageName contains unsupported characters or is too long.");
+        }
+        if (!DPF::GetAPI()) {
+            return Fail(result, DFG::Status::DPFUnavailable, "Dynamic Persistent Forms API is unavailable.");
+        }
+
+        rapidjson::Document doc;
+        if (!ParseJsonObject(payload, doc, result)) {
+            return result;
+        }
+        if (const auto* protectedMember = FindProtectedMember(doc, false)) {
+            return Fail(result,
+                DFG::Status::ProtectedField,
+                std::format("'{}' is managed by DFG and cannot be supplied during creation.", protectedMember));
+        }
+
+        const auto kind = ReadRequestedKind(doc, true, result);
+        if (!kind) {
+            return result;
+        }
+
+        const auto editorMember = doc.FindMember("editorId");
+        if (editorMember == doc.MemberEnd() || !editorMember->value.IsString() ||
+            editorMember->value.GetStringLength() == 0)
+        {
+            return Fail(result, DFG::Status::MissingEditorId, "editorId is required.");
+        }
+        const std::string editorId = editorMember->value.GetString();
+        CopyResultText(result.editorId, editorId);
+        CopyResultText(result.packageName, packageName);
+        if (!IsValidExternalEditorId(editorId)) {
+            return Fail(result, DFG::Status::InvalidEditorId, "editorId must contain only letters, numbers, and underscores.");
+        }
+        if (Manager::HasEditorId(editorId)) {
+            return Fail(result,
+                DFG::Status::EditorIdAlreadyExists,
+                std::format("A DFG form with editorId '{}' already exists.", editorId));
+        }
+        if (Manager::IsEditorIdReserved(editorId)) {
+            return Fail(result,
+                DFG::Status::EditorIdReserved,
+                std::format("EditorId '{}' belongs to an existing game form and is reserved.", editorId));
+        }
+
+        SetStringMember(doc, doc.GetAllocator(), "packageName", packageName);
+        DynamicForms::DynamicForm form;
+        if (!ReadFormDocument(doc, std::format("API create from {}", requester), editorId, form)) {
+            return Fail(result, DFG::Status::InvalidJson, "The JSON fields could not be converted to a DFG form.");
+        }
+        form.editorId = editorId;
+        form.kind = *kind;
+        form.packageName = packageName;
+        form.basePackageName.clear();
+        form.patchPackageNames.clear();
+        form.pluginNumber = 0;
+        form.localId = 0;
+        form.dirty = false;
+
+        bool recoveredExistingSlot = false;
+        ResolveDPFFailure resolveFailure = ResolveDPFFailure::None;
+        auto* runtimeForm = ResolveDPFFormObject(form, false, &recoveredExistingSlot, &resolveFailure);
+        if (!runtimeForm) {
+            return Fail(result, StatusForResolveFailure(resolveFailure), MessageForResolveFailure(resolveFailure));
+        }
+        if (!ConfigureForm(runtimeForm, form)) {
+            if (!recoveredExistingSlot) {
+                ReleaseNewSlot(form);
+            }
+            return Fail(result, DFG::Status::ConfigureFailed, "The runtime form was allocated, but its DFG fields could not be configured.");
+        }
+
+        if (!Manager::SaveForm(form)) {
+            if (!recoveredExistingSlot) {
+                ReleaseNewSlot(form);
+            }
+            return Fail(result, DFG::Status::PersistenceFailed, "The form was configured but could not be saved to package.db.");
+        }
+
+        forms.push_back(form);
+        if (notify) {
+            ListManager::GetSingleton()->PopulateAllLists(true);
+            DispatchEvent(UPDATED_EVENT, ToSignature(form.kind), static_cast<float>(form.localId));
+        }
+
+        result.status = DFG::Status::Success;
+        FillFormResult(result, forms.back(), runtimeForm, recoveredExistingSlot);
+        logger::info("API requester '{}' created '{}' in package '{}'.", requester, editorId, packageName);
+        return result;
+    }
+
+    DFG::FormOperationResult ExecuteUpdate(
+        const std::string& requester,
+        const std::string& editorId,
+        const std::string& payload,
+        const bool notify)
+    {
+        auto result = MakeResult(DFG::Operation::Update);
+        CopyResultText(result.editorId, editorId);
+        if (!Manager::IsReady()) {
+            return Fail(result, DFG::Status::NotReady, "Dynamic Forms Generator has not finished loading.");
+        }
+        if (editorId.empty()) {
+            return Fail(result, DFG::Status::MissingEditorId, "editorId is required.");
+        }
+        if (!IsValidExternalEditorId(editorId)) {
+            return Fail(result, DFG::Status::InvalidEditorId, "editorId must contain only letters, numbers, and underscores.");
+        }
+        if (!DPF::GetAPI()) {
+            return Fail(result, DFG::Status::DPFUnavailable, "Dynamic Persistent Forms API is unavailable.");
+        }
+
+        const auto found = std::ranges::find_if(forms, [&editorId](const DynamicForms::DynamicForm& form) {
+            return form.editorId == editorId;
+        });
+        if (found == forms.end()) {
+            return Fail(result,
+                DFG::Status::EditorIdNotFound,
+                std::format("No DFG form with editorId '{}' exists.", editorId));
+        }
+        const auto index = static_cast<std::size_t>(std::distance(forms.begin(), found));
+        const auto oldForm = *found;
+        CopyResultText(result.packageName, EffectivePackageName(oldForm));
+
+        rapidjson::Document doc;
+        if (!ParseJsonObject(payload, doc, result)) {
+            return result;
+        }
+        if (const auto* protectedMember = FindProtectedMember(doc, true)) {
+            return Fail(result,
+                DFG::Status::ProtectedField,
+                std::format("'{}' is managed by DFG and cannot be changed by UpdateForm.", protectedMember));
+        }
+
+        if (const auto editorMember = doc.FindMember("editorId"); editorMember != doc.MemberEnd()) {
+            if (!editorMember->value.IsString() || editorMember->value.GetString() != editorId) {
+                return Fail(result, DFG::Status::EditorIdMismatch, "The JSON editorId does not match the requested editorId.");
+            }
+        }
+
+        if (doc.HasMember("formKind")) {
+            const auto requestedKind = ReadRequestedKind(doc, false, result);
+            if (!requestedKind) {
+                return result;
+            }
+            if (*requestedKind != oldForm.kind) {
+                return Fail(result, DFG::Status::FormKindMismatch, "A form's type cannot be changed during update.");
+            }
+        } else if (const auto signatureMember = doc.FindMember("sourceSignature");
+                   signatureMember != doc.MemberEnd())
+        {
+            if (!signatureMember->value.IsString()) {
+                return Fail(result, DFG::Status::UnsupportedFormKind, "sourceSignature must be a supported signature.");
+            }
+            const auto signatureKind = TryFormKindFromString(signatureMember->value.GetString());
+            if (!signatureKind) {
+                return Fail(result, DFG::Status::UnsupportedFormKind, "sourceSignature is not supported.");
+            }
+            if (*signatureKind != oldForm.kind) {
+                return Fail(result, DFG::Status::FormKindMismatch, "A form's type cannot be changed during update.");
+            }
+        }
+
+        auto& allocator = doc.GetAllocator();
+        SetStringMember(doc, allocator, "editorId", oldForm.editorId);
+        SetStringMember(doc, allocator, "formKind", ToString(oldForm.kind));
+
+        auto updated = oldForm;
+        if (!ReadFormDocument(doc, std::format("API update from {}", requester), editorId, updated)) {
+            return Fail(result, DFG::Status::InvalidJson, "The JSON patch could not be applied to the DFG form.");
+        }
+        updated.editorId = oldForm.editorId;
+        updated.kind = oldForm.kind;
+        updated.packageName = oldForm.packageName;
+        updated.basePackageName = oldForm.basePackageName;
+        updated.patchPackageNames = oldForm.patchPackageNames;
+        updated.pluginNumber = oldForm.pluginNumber;
+        updated.localId = oldForm.localId;
+        updated.dirty = false;
+
+        bool recoveredExistingSlot = false;
+        ResolveDPFFailure resolveFailure = ResolveDPFFailure::None;
+        auto* runtimeForm = ResolveDPFFormObject(updated, false, &recoveredExistingSlot, &resolveFailure);
+        if (!runtimeForm) {
+            return Fail(result, StatusForResolveFailure(resolveFailure), MessageForResolveFailure(resolveFailure));
+        }
+        if (!ConfigureForm(runtimeForm, updated)) {
+            RestoreAfterFailedUpdate(index, oldForm, updated, runtimeForm, recoveredExistingSlot);
+            return Fail(result, DFG::Status::ConfigureFailed, "The JSON was valid, but its values could not configure the runtime form.");
+        }
+
+        if (!Manager::SaveForm(updated)) {
+            RestoreAfterFailedUpdate(index, oldForm, updated, runtimeForm, recoveredExistingSlot);
+            return Fail(result, DFG::Status::PersistenceFailed, "The updated runtime values could not be saved to package.db.");
+        }
+
+        forms[index] = updated;
+        if (notify) {
+            ListManager::GetSingleton()->PopulateAllLists(true);
+            DispatchEvent(UPDATED_EVENT, ToSignature(updated.kind), static_cast<float>(updated.localId));
+        }
+
+        result.status = DFG::Status::Success;
+        FillFormResult(result, forms[index], runtimeForm, recoveredExistingSlot);
+        logger::info("API requester '{}' updated '{}'.", requester, editorId);
+        return result;
+    }
+
+    DFG::FormOperationResult ExecuteDelete(
+        const std::string& requester,
+        const std::string& editorId,
+        const bool notify)
+    {
+        auto result = MakeResult(DFG::Operation::Delete);
+        CopyResultText(result.editorId, editorId);
+        if (!Manager::IsReady()) {
+            return Fail(result, DFG::Status::NotReady, "Dynamic Forms Generator has not finished loading.");
+        }
+        if (editorId.empty()) {
+            return Fail(result, DFG::Status::MissingEditorId, "editorId is required.");
+        }
+        if (!IsValidExternalEditorId(editorId)) {
+            return Fail(result, DFG::Status::InvalidEditorId, "editorId must contain only letters, numbers, and underscores.");
+        }
+
+        const auto found = std::ranges::find_if(forms, [&editorId](const DynamicForms::DynamicForm& form) {
+            return form.editorId == editorId;
+        });
+        if (found == forms.end()) {
+            return Fail(result,
+                DFG::Status::EditorIdNotFound,
+                std::format("No DFG form with editorId '{}' exists.", editorId));
+        }
+        const auto index = static_cast<std::size_t>(std::distance(forms.begin(), found));
+        const auto form = *found;
+        auto runtimeSnapshot = form;
+        bool recoveredExistingSlot = false;
+        auto* deletedRuntimeForm = ResolveDPFFormObject(runtimeSnapshot, false, &recoveredExistingSlot);
+        const auto& releasedForm = deletedRuntimeForm ? runtimeSnapshot : form;
+        FillFormResult(result, releasedForm, deletedRuntimeForm, recoveredExistingSlot);
+        const auto deletedFormID = deletedRuntimeForm ? deletedRuntimeForm->GetFormID() : 0;
+
+        auto* api = DPF::GetAPI();
+        if (!api) {
+            return Fail(result, DFG::Status::DPFUnavailable, "Dynamic Persistent Forms API is unavailable.");
+        }
+
+        bool released = false;
+        if (releasedForm.pluginNumber != 0 && releasedForm.localId != 0) {
+            released = api->ReleaseByPluginLocalId(releasedForm.pluginNumber, releasedForm.localId, Manager::DPF_OWNER);
+        }
+        if (!released) {
+            released = api->ReleaseByOwnerKey(Manager::DPF_OWNER, form.editorId.c_str());
+        }
+        if (!released) {
+            return Fail(result,
+                DFG::Status::DPFReleaseFailed,
+                std::format("DPF could not release slot {}:{:06X}.", releasedForm.pluginNumber, releasedForm.localId));
+        }
+
+        if (!DeleteStoredForm(form)) {
+            auto restored = form;
+            restored.pluginNumber = 0;
+            restored.localId = 0;
+            if (auto* restoredRuntime = ResolveDPFFormObject(restored, true)) {
+                forms[index] = restored;
+                Manager::SaveForm(forms[index]);
+                FillFormResult(result, forms[index], restoredRuntime, false);
+            }
+            return Fail(result, DFG::Status::PersistenceFailed, "DPF released the form, but package.db deletion failed; DFG attempted to restore it.");
+        }
+
+        const auto signature = ToSignature(form.kind);
+        forms.erase(forms.begin() + static_cast<std::ptrdiff_t>(index));
+        if (notify) {
+            ListManager::GetSingleton()->PopulateAllLists(true);
+            DispatchEvent(UPDATED_EVENT, signature, static_cast<float>(releasedForm.localId));
+        }
+
+        result.status = DFG::Status::Success;
+        result.form = nullptr;
+        result.formID = deletedFormID;
+        result.pluginNumber = releasedForm.pluginNumber;
+        result.localId = releasedForm.localId;
+        CopyResultText(result.pluginName, DPF::PluginNameForNumber(releasedForm.pluginNumber));
+        logger::info("API requester '{}' deleted '{}'.", requester, editorId);
+        return result;
+    }
+
+    struct OwnedOperation
+    {
+        DFG::Operation operation{ DFG::Operation::Create };
+        std::string requester;
+        std::string packageName;
+        std::string editorId;
+        std::string payload;
+        bool valid{ true };
+        std::string validationError;
+        DFG::FormOperationCallback callback{ nullptr };
+        void* userData{ nullptr };
+    };
+
+    DFG::FormOperationResult ExecuteOwnedOperation(const OwnedOperation& operation, const bool notify) noexcept
+    {
+        auto result = MakeResult(operation.operation);
+        if (!operation.valid) {
+            return Fail(result, DFG::Status::InvalidArgument, operation.validationError);
+        }
+
+        try {
+            switch (operation.operation) {
+            case DFG::Operation::Create:
+                result = ExecuteCreate(operation.requester, operation.packageName, operation.payload, notify);
+                break;
+            case DFG::Operation::Update:
+                result = ExecuteUpdate(operation.requester, operation.editorId, operation.payload, notify);
+                break;
+            case DFG::Operation::Delete:
+                result = ExecuteDelete(operation.requester, operation.editorId, notify);
+                break;
+            }
+        } catch (const std::exception& error) {
+            Fail(result, DFG::Status::InternalError, std::format("Unhandled DFG operation error: {}", error.what()));
+            logger::error("Unhandled external DFG operation error: {}", error.what());
+        } catch (...) {
+            Fail(result, DFG::Status::InternalError, "Unhandled unknown DFG operation error.");
+            logger::error("Unhandled unknown external DFG operation error.");
+        }
+        return result;
+    }
+
+    void RunOperation(OwnedOperation operation) noexcept
+    {
+        auto result = ExecuteOwnedOperation(operation, true);
+        try {
+            operation.callback(&result, operation.userData);
+        } catch (...) {
+            logger::error("A Dynamic Forms Generator API callback threw an exception.");
+        }
+    }
+
+    bool QueueOperation(OwnedOperation operation) noexcept
+    {
+        if (!operation.callback) {
+            return false;
+        }
+        try {
+            auto* taskInterface = SKSE::GetTaskInterface();
+            if (!taskInterface) {
+                return false;
+            }
+            taskInterface->AddTask([operation = std::move(operation)]() mutable {
+                RunOperation(std::move(operation));
+            });
+            return true;
+        } catch (...) {
+            logger::error("Could not queue an external Dynamic Forms Generator API operation.");
+            return false;
+        }
+    }
+
+    struct OwnedBatch
+    {
+        DFG::Operation operation{ DFG::Operation::Create };
+        std::vector<OwnedOperation> operations;
+        DFG::BatchOperationCallback callback{ nullptr };
+        void* userData{ nullptr };
+    };
+
+    void RunBatch(OwnedBatch batch) noexcept
+    {
+        std::vector<DFG::FormOperationResult> results;
+        DFG::BatchOperationResult batchResult;
+        batchResult.operation = batch.operation;
+
+        try {
+            results.reserve(batch.operations.size());
+            std::set<std::string> updatedSignatures;
+            std::uint32_t successCount = 0;
+
+            for (const auto& operation : batch.operations) {
+                std::string deleteSignature;
+                if (operation.operation == DFG::Operation::Delete && operation.valid) {
+                    const auto found = std::ranges::find_if(forms, [&operation](const DynamicForms::DynamicForm& form) {
+                        return form.editorId == operation.editorId;
+                    });
+                    if (found != forms.end()) {
+                        deleteSignature = ToSignature(found->kind);
+                    }
+                }
+
+                auto itemResult = ExecuteOwnedOperation(operation, false);
+                if (itemResult.status == DFG::Status::Success) {
+                    ++successCount;
+                    if (!deleteSignature.empty()) {
+                        updatedSignatures.insert(std::move(deleteSignature));
+                    } else {
+                        const auto found = std::ranges::find_if(forms, [&itemResult](const DynamicForms::DynamicForm& form) {
+                            return form.editorId == itemResult.editorId;
+                        });
+                        if (found != forms.end()) {
+                            updatedSignatures.insert(ToSignature(found->kind));
+                        }
+                    }
+                }
+                results.push_back(std::move(itemResult));
+            }
+
+            if (successCount > 0) {
+                ListManager::GetSingleton()->PopulateAllLists(true);
+                DispatchEvent(
+                    UPDATED_EVENT,
+                    JoinSignatures(updatedSignatures),
+                    static_cast<float>(successCount));
+            }
+
+            batchResult.resultCount = static_cast<std::uint32_t>(results.size());
+            batchResult.successCount = successCount;
+            batchResult.failureCount = batchResult.resultCount - successCount;
+            CopyResultText(batchResult.updatedSignatures, JoinSignatures(updatedSignatures));
+            if (batchResult.failureCount == 0) {
+                batchResult.status = DFG::Status::Success;
+            } else if (batchResult.successCount > 0) {
+                batchResult.status = DFG::Status::BatchPartialSuccess;
+                CopyResultText(batchResult.error, "Some batch operations failed; inspect the individual results.");
+            } else {
+                batchResult.status = DFG::Status::BatchFailed;
+                CopyResultText(batchResult.error, "All batch operations failed; inspect the individual results.");
+            }
+        } catch (const std::exception& error) {
+            batchResult.status = DFG::Status::InternalError;
+            batchResult.resultCount = static_cast<std::uint32_t>(results.size());
+            CopyResultText(batchResult.error, std::format("Unhandled DFG batch error: {}", error.what()));
+            logger::error("Unhandled external DFG batch error: {}", error.what());
+        } catch (...) {
+            batchResult.status = DFG::Status::InternalError;
+            batchResult.resultCount = static_cast<std::uint32_t>(results.size());
+            CopyResultText(batchResult.error, "Unhandled unknown DFG batch error.");
+            logger::error("Unhandled unknown external DFG batch error.");
+        }
+        if (batchResult.status == DFG::Status::InternalError) {
+            batchResult.successCount = static_cast<std::uint32_t>(std::ranges::count_if(
+                results,
+                [](const DFG::FormOperationResult& result) {
+                    return result.status == DFG::Status::Success;
+                }));
+            batchResult.failureCount = batchResult.resultCount - batchResult.successCount;
+        }
+        batchResult.results = results.data();
+
+        try {
+            batch.callback(&batchResult, batch.userData);
+        } catch (...) {
+            logger::error("A Dynamic Forms Generator batch API callback threw an exception.");
+        }
+    }
+
+    bool QueueBatch(OwnedBatch batch) noexcept
+    {
+        if (!batch.callback || batch.operations.empty()) {
+            return false;
+        }
+        try {
+            auto* taskInterface = SKSE::GetTaskInterface();
+            if (!taskInterface) {
+                return false;
+            }
+            taskInterface->AddTask([batch = std::move(batch)]() mutable {
+                RunBatch(std::move(batch));
+            });
+            return true;
+        } catch (...) {
+            logger::error("Could not queue an external Dynamic Forms Generator batch operation.");
+            return false;
+        }
+    }
+
+    OwnedOperation CopyCreateRequest(const DFG::CreateFormRequest& request)
+    {
+        OwnedOperation operation;
+        operation.operation = DFG::Operation::Create;
+        if (request.structSize < sizeof(DFG::CreateFormRequest)) {
+            operation.valid = false;
+            operation.validationError = "CreateFormRequest.structSize is smaller than the supported structure.";
+            return operation;
+        }
+        operation.requester = request.requester ? request.requester : "UnknownPlugin";
+        operation.packageName = request.packageName ? request.packageName : "";
+        operation.payload = request.formJson ? request.formJson : "";
+        return operation;
+    }
+
+    OwnedOperation CopyUpdateRequest(const DFG::UpdateFormRequest& request)
+    {
+        OwnedOperation operation;
+        operation.operation = DFG::Operation::Update;
+        if (request.structSize < sizeof(DFG::UpdateFormRequest)) {
+            operation.valid = false;
+            operation.validationError = "UpdateFormRequest.structSize is smaller than the supported structure.";
+            return operation;
+        }
+        operation.requester = request.requester ? request.requester : "UnknownPlugin";
+        operation.editorId = request.editorId ? request.editorId : "";
+        operation.payload = request.patchJson ? request.patchJson : "";
+        return operation;
+    }
+
+    OwnedOperation CopyDeleteRequest(const DFG::DeleteFormRequest& request)
+    {
+        OwnedOperation operation;
+        operation.operation = DFG::Operation::Delete;
+        if (request.structSize < sizeof(DFG::DeleteFormRequest)) {
+            operation.valid = false;
+            operation.validationError = "DeleteFormRequest.structSize is smaller than the supported structure.";
+            return operation;
+        }
+        operation.requester = request.requester ? request.requester : "UnknownPlugin";
+        operation.editorId = request.editorId ? request.editorId : "";
+        return operation;
+    }
+
+    struct OwnedLookup
+    {
+        std::string requester;
+        std::string editorId;
+        bool valid{ true };
+        std::string validationError;
+        DFG::FormLookupCallback callback{ nullptr };
+        void* userData{ nullptr };
+    };
+
+    OwnedLookup CopyLookupRequest(const DFG::LookupFormRequest& request)
+    {
+        OwnedLookup lookup;
+        if (request.structSize < sizeof(DFG::LookupFormRequest)) {
+            lookup.valid = false;
+            lookup.validationError = "LookupFormRequest.structSize is smaller than the supported structure.";
+            return lookup;
+        }
+        lookup.requester = request.requester ? request.requester : "UnknownPlugin";
+        lookup.editorId = request.editorId ? request.editorId : "";
+        return lookup;
+    }
+
+    struct LookupExecutionResult
+    {
+        DFG::FormLookupResult result;
+        std::string json;
+    };
+
+    void BindLookupJson(DFG::FormLookupResult& result, const std::string& json) noexcept
+    {
+        if (json.empty()) {
+            result.formJson = nullptr;
+            result.formJsonLength = 0;
+            return;
+        }
+        result.formJson = json.c_str();
+        result.formJsonLength = static_cast<std::uint32_t>((std::min)(
+            json.size(),
+            static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())));
+    }
+
+    LookupExecutionResult ExecuteLookup(const OwnedLookup& lookup) noexcept
+    {
+        LookupExecutionResult execution;
+        auto& result = execution.result;
+        CopyResultText(result.editorId, lookup.editorId);
+        if (!lookup.valid) {
+            result.status = DFG::Status::InvalidArgument;
+            CopyResultText(result.error, lookup.validationError);
+            return execution;
+        }
+        if (!Manager::IsReady()) {
+            result.status = DFG::Status::NotReady;
+            CopyResultText(result.error, "Dynamic Forms Generator has not finished loading.");
+            return execution;
+        }
+        if (lookup.editorId.empty()) {
+            result.status = DFG::Status::MissingEditorId;
+            CopyResultText(result.error, "editorId is required.");
+            return execution;
+        }
+        if (!IsValidExternalEditorId(lookup.editorId)) {
+            result.status = DFG::Status::InvalidEditorId;
+            CopyResultText(result.error, "editorId must contain only letters, numbers, and underscores.");
+            return execution;
+        }
+
+        try {
+            const auto found = std::ranges::find_if(forms, [&lookup](const DynamicForms::DynamicForm& form) {
+                return form.editorId == lookup.editorId;
+            });
+            result.status = DFG::Status::Success;
+            if (found == forms.end()) {
+                return execution;
+            }
+
+            result.exists = 1;
+            result.pluginNumber = found->pluginNumber;
+            result.localId = found->localId;
+            CopyResultText(result.packageName, EffectivePackageName(*found));
+            CopyResultText(result.pluginName, DPF::PluginNameForNumber(found->pluginNumber));
+            CopyResultText(result.formKind, ToString(found->kind));
+            CopyResultText(result.sourceSignature, ToSignature(found->kind));
+            execution.json = Manager::SerializeFormJson(*found);
+            if (execution.json.empty()) {
+                result.status = DFG::Status::InternalError;
+                CopyResultText(result.error, "The form exists, but DFG could not serialize it.");
+                return execution;
+            }
+
+            if (found->pluginNumber != 0 && found->localId != 0) {
+                if (auto* dataHandler = RE::TESDataHandler::GetSingleton()) {
+                    result.form = dataHandler->LookupForm(
+                        found->localId,
+                        DPF::PluginNameForNumber(found->pluginNumber));
+                    if (result.form) {
+                        result.formID = result.form->GetFormID();
+                    }
+                }
+            }
+            logger::debug(
+                "API requester '{}' looked up '{}': exists={}, slot={}:{:06X}.",
+                lookup.requester,
+                lookup.editorId,
+                result.exists,
+                result.pluginNumber,
+                result.localId);
+        } catch (const std::exception& error) {
+            result.status = DFG::Status::InternalError;
+            CopyResultText(result.error, std::format("Unhandled DFG lookup error: {}", error.what()));
+            logger::error("Unhandled external DFG lookup error: {}", error.what());
+        } catch (...) {
+            result.status = DFG::Status::InternalError;
+            CopyResultText(result.error, "Unhandled unknown DFG lookup error.");
+            logger::error("Unhandled unknown external DFG lookup error.");
+        }
+        return execution;
+    }
+
+    void RunLookup(OwnedLookup lookup) noexcept
+    {
+        auto execution = ExecuteLookup(lookup);
+        BindLookupJson(execution.result, execution.json);
+        try {
+            lookup.callback(&execution.result, lookup.userData);
+        } catch (...) {
+            logger::error("A Dynamic Forms Generator lookup callback threw an exception.");
+        }
+    }
+
+    bool QueueLookup(OwnedLookup lookup) noexcept
+    {
+        if (!lookup.callback) {
+            return false;
+        }
+        try {
+            auto* taskInterface = SKSE::GetTaskInterface();
+            if (!taskInterface) {
+                return false;
+            }
+            taskInterface->AddTask([lookup = std::move(lookup)]() mutable {
+                RunLookup(std::move(lookup));
+            });
+            return true;
+        } catch (...) {
+            logger::error("Could not queue an external Dynamic Forms Generator lookup.");
+            return false;
+        }
+    }
+
+    struct OwnedLookupBatch
+    {
+        std::vector<OwnedLookup> lookups;
+        DFG::BatchLookupCallback callback{ nullptr };
+        void* userData{ nullptr };
+    };
+
+    void RunLookupBatch(OwnedLookupBatch batch) noexcept
+    {
+        std::vector<DFG::FormLookupResult> results;
+        std::vector<std::string> jsonPayloads;
+        DFG::BatchLookupResult batchResult;
+        try {
+            results.reserve(batch.lookups.size());
+            jsonPayloads.reserve(batch.lookups.size());
+            for (const auto& lookup : batch.lookups) {
+                auto execution = ExecuteLookup(lookup);
+                results.push_back(std::move(execution.result));
+                jsonPayloads.push_back(std::move(execution.json));
+            }
+            for (std::size_t i = 0; i < results.size(); ++i) {
+                BindLookupJson(results[i], jsonPayloads[i]);
+            }
+
+            batchResult.resultCount = static_cast<std::uint32_t>(results.size());
+            for (const auto& result : results) {
+                if (result.status != DFG::Status::Success) {
+                    ++batchResult.failureCount;
+                } else if (result.exists != 0) {
+                    ++batchResult.foundCount;
+                } else {
+                    ++batchResult.missingCount;
+                }
+            }
+
+            if (batchResult.failureCount == 0) {
+                batchResult.status = DFG::Status::Success;
+            } else if (batchResult.failureCount < batchResult.resultCount) {
+                batchResult.status = DFG::Status::BatchPartialSuccess;
+                CopyResultText(batchResult.error, "Some lookups failed; inspect the individual results.");
+            } else {
+                batchResult.status = DFG::Status::BatchFailed;
+                CopyResultText(batchResult.error, "All lookups failed; inspect the individual results.");
+            }
+        } catch (const std::exception& error) {
+            batchResult.status = DFG::Status::InternalError;
+            batchResult.resultCount = static_cast<std::uint32_t>(results.size());
+            CopyResultText(batchResult.error, std::format("Unhandled DFG lookup batch error: {}", error.what()));
+            logger::error("Unhandled external DFG lookup batch error: {}", error.what());
+        } catch (...) {
+            batchResult.status = DFG::Status::InternalError;
+            batchResult.resultCount = static_cast<std::uint32_t>(results.size());
+            CopyResultText(batchResult.error, "Unhandled unknown DFG lookup batch error.");
+            logger::error("Unhandled unknown external DFG lookup batch error.");
+        }
+        batchResult.results = results.data();
+
+        try {
+            batch.callback(&batchResult, batch.userData);
+        } catch (...) {
+            logger::error("A Dynamic Forms Generator lookup batch callback threw an exception.");
+        }
+    }
+
+    bool QueueLookupBatch(OwnedLookupBatch batch) noexcept
+    {
+        if (!batch.callback || batch.lookups.empty()) {
+            return false;
+        }
+        try {
+            auto* taskInterface = SKSE::GetTaskInterface();
+            if (!taskInterface) {
+                return false;
+            }
+            taskInterface->AddTask([batch = std::move(batch)]() mutable {
+                RunLookupBatch(std::move(batch));
+            });
+            return true;
+        } catch (...) {
+            logger::error("Could not queue an external Dynamic Forms Generator lookup batch.");
+            return false;
+        }
+    }
+
+    class DynamicFormsGeneratorAPI final : public DFG::IDynamicFormsGenerator
+    {
+    public:
+        [[nodiscard]] std::uint32_t GetVersion() const noexcept override
+        {
+            return DFG::InterfaceVersion;
+        }
+
+        [[nodiscard]] bool IsReady() const noexcept override
+        {
+            return Manager::IsReady();
+        }
+
+        bool QueueCreateForm(
+            const DFG::CreateFormRequest* request,
+            const DFG::FormOperationCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::CreateFormRequest) || !callback) {
+                return false;
+            }
+            try {
+                auto operation = CopyCreateRequest(*request);
+                operation.callback = callback;
+                operation.userData = userData;
+                return QueueOperation(std::move(operation));
+            } catch (...) {
+                return false;
+            }
+        }
+
+        bool QueueUpdateForm(
+            const DFG::UpdateFormRequest* request,
+            const DFG::FormOperationCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::UpdateFormRequest) || !callback) {
+                return false;
+            }
+            try {
+                auto operation = CopyUpdateRequest(*request);
+                operation.callback = callback;
+                operation.userData = userData;
+                return QueueOperation(std::move(operation));
+            } catch (...) {
+                return false;
+            }
+        }
+
+        bool QueueDeleteForm(
+            const DFG::DeleteFormRequest* request,
+            const DFG::FormOperationCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::DeleteFormRequest) || !callback) {
+                return false;
+            }
+            try {
+                auto operation = CopyDeleteRequest(*request);
+                operation.callback = callback;
+                operation.userData = userData;
+                return QueueOperation(std::move(operation));
+            } catch (...) {
+                return false;
+            }
+        }
+
+        bool QueueCreateForms(
+            const DFG::CreateFormsRequest* request,
+            const DFG::BatchOperationCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::CreateFormsRequest) ||
+                !request->requests || request->requestCount == 0 || request->requestCount > 10000 || !callback)
+            {
+                return false;
+            }
+            try {
+                OwnedBatch batch;
+                batch.operation = DFG::Operation::Create;
+                batch.callback = callback;
+                batch.userData = userData;
+                batch.operations.reserve(request->requestCount);
+                for (std::uint32_t i = 0; i < request->requestCount; ++i) {
+                    batch.operations.push_back(CopyCreateRequest(request->requests[i]));
+                }
+                return QueueBatch(std::move(batch));
+            } catch (...) {
+                return false;
+            }
+        }
+
+        bool QueueUpdateForms(
+            const DFG::UpdateFormsRequest* request,
+            const DFG::BatchOperationCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::UpdateFormsRequest) ||
+                !request->requests || request->requestCount == 0 || request->requestCount > 10000 || !callback)
+            {
+                return false;
+            }
+            try {
+                OwnedBatch batch;
+                batch.operation = DFG::Operation::Update;
+                batch.callback = callback;
+                batch.userData = userData;
+                batch.operations.reserve(request->requestCount);
+                for (std::uint32_t i = 0; i < request->requestCount; ++i) {
+                    batch.operations.push_back(CopyUpdateRequest(request->requests[i]));
+                }
+                return QueueBatch(std::move(batch));
+            } catch (...) {
+                return false;
+            }
+        }
+
+        bool QueueDeleteForms(
+            const DFG::DeleteFormsRequest* request,
+            const DFG::BatchOperationCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::DeleteFormsRequest) ||
+                !request->requests || request->requestCount == 0 || request->requestCount > 10000 || !callback)
+            {
+                return false;
+            }
+            try {
+                OwnedBatch batch;
+                batch.operation = DFG::Operation::Delete;
+                batch.callback = callback;
+                batch.userData = userData;
+                batch.operations.reserve(request->requestCount);
+                for (std::uint32_t i = 0; i < request->requestCount; ++i) {
+                    batch.operations.push_back(CopyDeleteRequest(request->requests[i]));
+                }
+                return QueueBatch(std::move(batch));
+            } catch (...) {
+                return false;
+            }
+        }
+
+        bool QueueLookupForm(
+            const DFG::LookupFormRequest* request,
+            const DFG::FormLookupCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::LookupFormRequest) || !callback) {
+                return false;
+            }
+            try {
+                auto lookup = CopyLookupRequest(*request);
+                lookup.callback = callback;
+                lookup.userData = userData;
+                return QueueLookup(std::move(lookup));
+            } catch (...) {
+                return false;
+            }
+        }
+
+        bool QueueLookupForms(
+            const DFG::LookupFormsRequest* request,
+            const DFG::BatchLookupCallback callback,
+            void* userData) noexcept override
+        {
+            if (!request || request->structSize < sizeof(DFG::LookupFormsRequest) ||
+                !request->requests || request->requestCount == 0 || request->requestCount > 10000 || !callback)
+            {
+                return false;
+            }
+            try {
+                OwnedLookupBatch batch;
+                batch.callback = callback;
+                batch.userData = userData;
+                batch.lookups.reserve(request->requestCount);
+                for (std::uint32_t i = 0; i < request->requestCount; ++i) {
+                    batch.lookups.push_back(CopyLookupRequest(request->requests[i]));
+                }
+                return QueueLookupBatch(std::move(batch));
+            } catch (...) {
+                return false;
+            }
+        }
+    };
+}
+
+extern "C" __declspec(dllexport) void* GetDynamicFormsGeneratorAPI()
+{
+    static DynamicFormsGeneratorAPI api;
+    return std::addressof(api);
 }

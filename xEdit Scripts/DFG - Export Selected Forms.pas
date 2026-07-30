@@ -2894,13 +2894,27 @@ begin
 end;
 
 procedure AddWaterFields(sl: TStringList; e: IInterface);
+var
+  i: Integer;
+  noiseNode, soundRef: IInterface;
+  noiseValues: array[0..3] of string;
 begin
   AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name'));
-  sl.Add('  "waterNoiseTextures": [' + JStr(GetText(e, 'NAM2 - Noise Texture 1')) + ', ' + JStr(GetText(e, 'NAM3 - Noise Texture 2')) + ', ' + JStr(GetText(e, 'NAM4 - Noise Texture 3')) + ', ' + JStr(GetText(e, 'NAM5 - Noise Texture 4')) + '],');
+  noiseNode := FirstElementByPath(e, 'Unused', 'NNAM - Unused', 'NNAM', '');
+  if not Assigned(noiseNode) then
+    noiseNode := FindChildBySignature(e, 'NNAM');
+  if Assigned(noiseNode) then
+    for i := 0 to ElementCount(noiseNode) - 1 do
+      if i <= 3 then
+        noiseValues[i] := GetEditValue(ElementByIndex(noiseNode, i));
+  sl.Add('  "waterNoiseTextures": [' + JStr(noiseValues[0]) + ', ' + JStr(noiseValues[1]) + ', ' + JStr(noiseValues[2]) + ', ' + JStr(noiseValues[3]) + '],');
   AddKV(sl, '  ', 'waterAlpha', SafeInt(FirstText(e, 'ANAM - Opacity', 'ANAM', ''), '255'));
   AddKV(sl, '  ', 'waterFlags', IntToStr(GetElementNativeValues(e, 'FNAM - Flags')));
   AddFormRefKV(sl, 'waterMaterial', LinkedByPath(e, 'TNAM - Material'));
-  AddFormRefKV(sl, 'waterSound', LinkedByPath(e, 'SNAM - Sound'));
+  soundRef := LinkedByPath(e, 'SNAM - Open Sound');
+  if not Assigned(soundRef) then
+    soundRef := LinkedByPath(e, 'SNAM - Sound');
+  AddFormRefKV(sl, 'waterSound', soundRef);
   AddFormRefKV(sl, 'waterContactSpell', LinkedByPath(e, 'XNAM - Contact Spell'));
   AddFormRefKV(sl, 'waterImageSpace', LinkedByPath(e, 'INAM - Image Space'));
   sl.Add('  "waterLinearVelocity": [' + SafeFloat(StructFieldText(e, 'NAM0', 'X', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'NAM0', 'Y', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'NAM0', 'Z', '0'), '0.0') + '],');
@@ -2909,8 +2923,8 @@ end;
 
 procedure AddImageSpaceFields(sl: TStringList; e: IInterface);
 begin
-  sl.Add('  "imageSpaceHDR": [' + SafeFloat(StructFieldText(e, 'HNAM', 'Eye Adapt Speed', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'Bloom Blur Radius', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'Bloom Threshold', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'Bloom Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'Receive Bloom Threshold', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'White', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'Sunlight Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'Sky Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'HNAM', 'Eye Adapt Strength', '0'), '0.0') + '],');
-  sl.Add('  "imageSpaceCinematic": [' + SafeFloat(StructFieldText(e, 'CNAM', 'Saturation', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'CNAM', 'Brightness', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'CNAM', 'Contrast', '0'), '0.0') + '],');
+  sl.Add('  "imageSpaceHDR": [' + SafeFloat(StructFieldText(e, 'ENAM', 'Eye Adapt Speed', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'ENAM', 'Bloom Blur Radius', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'ENAM', 'Bloom Threshold', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'ENAM', 'Bloom Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'ENAM', 'Receive Bloom Threshold', '0'), '0.0') + ', 0.0, ' + SafeFloat(StructFieldText(e, 'ENAM', 'Sunlight Scale', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'ENAM', 'Sky Scale', '0'), '0.0') + ', 0.0],');
+  sl.Add('  "imageSpaceCinematic": [' + SafeFloat(StructFieldText(e, 'ENAM', 'Saturation', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'ENAM', 'Brightness', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'ENAM', 'Contrast', '0'), '0.0') + '],');
   AddKV(sl, '  ', 'imageSpaceTintAmount', SafeFloat(StructFieldText(e, 'TNAM', 'Amount', '0'), '0.0'));
   sl.Add('  "imageSpaceTintColor": [' + SafeFloat(StructFieldText(e, 'TNAM', 'Red', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'TNAM', 'Green', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'TNAM', 'Blue', '0'), '0.0') + '],');
   sl.Add('  "imageSpaceDOF": [' + SafeFloat(StructFieldText(e, 'DNAM', 'Strength', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DNAM', 'Distance', '0'), '0.0') + ', ' + SafeFloat(StructFieldText(e, 'DNAM', 'Range', '0'), '0.0') + '],');
@@ -3149,14 +3163,14 @@ end;
 
 procedure AddIdleAnimationFields(sl: TStringList; e: IInterface);
 begin
-  AddKV(sl, '  ', 'idleLoopMin', SafeInt(StructFieldText(e, 'DATA', 'Loop Min', '0'), '0'));
-  AddKV(sl, '  ', 'idleLoopMax', SafeInt(StructFieldText(e, 'DATA', 'Loop Max', '0'), '0'));
+  AddKV(sl, '  ', 'idleLoopMin', SafeInt(StructFieldText(e, 'DATA', 'Min', '0'), '0'));
+  AddKV(sl, '  ', 'idleLoopMax', SafeInt(StructFieldText(e, 'DATA', 'Max', '0'), '0'));
   AddKV(sl, '  ', 'idleAnimationFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0'));
-  AddKV(sl, '  ', 'idleAnimationGroupSelection', SafeInt(StructFieldText(e, 'DATA', 'Animation Group Selection', '0'), '0'));
+  AddKV(sl, '  ', 'idleAnimationGroupSelection', SafeInt(StructFieldText(e, 'DATA', 'Animation Group Section', '0'), '0'));
   AddKV(sl, '  ', 'idleReplayDelay', SafeInt(StructFieldText(e, 'DATA', 'Replay Delay', '0'), '0'));
-  AddFormRefKV(sl, 'idleParent', LinkedByPath(e, 'ANAM - Parent Idle'));
-  AddFormRefKV(sl, 'idlePrevious', LinkedByPath(e, 'ANAM - Previous Idle'));
-  AddStringKV(sl, '  ', 'idleAnimationFile', FirstText(e, 'DNAM - Animation File', 'DNAM', ''));
+  AddFormRefKV(sl, 'idleParent', StructFieldLinked(e, 'ANAM', 'Parent'));
+  AddFormRefKV(sl, 'idlePrevious', StructFieldLinked(e, 'ANAM', 'Previous Sibling'));
+  AddStringKV(sl, '  ', 'idleAnimationFile', FirstText(e, 'DNAM - FileName', 'DNAM', ''));
   AddStringKV(sl, '  ', 'idleAnimationEvent', FirstText(e, 'ENAM - Animation Event', 'ENAM', ''));
   AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
 end;
@@ -3196,7 +3210,7 @@ begin AddKV(sl, '  ', 'lensFlareFadeDistanceRadiusScale', SafeFloat(StructFieldT
 
 procedure AddDebrisFields(sl: TStringList; e: IInterface);
 var node, row: IInterface; i: Integer;
-begin sl.Add('  "debrisEntries": ['); node := FirstElementByPath(e, 'Models', 'Debris Models', 'Model', ''); if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin row := ElementByIndex(node, i); sl.Add('    {'); AddKV(sl, '      ', 'percentage', SafeInt(FirstText(row, 'DATA - Percentage', 'Percentage', 'DATA'), '100')); AddKV(sl, '      ', 'flags', ElementIntegerText(StructFieldElement(row, 'DATA', 'Flags'), '0')); AddStringKV(sl, '      ', 'modelPath', FirstText(row, 'MODL - Model FileName', 'Model FileName', 'MODL')); RemoveTrailingComma(sl); sl.Add('    },'); end; RemoveTrailingComma(sl); sl.Add('  ],'); end;
+begin sl.Add('  "debrisEntries": ['); node := FirstElementByPath(e, 'Models', 'Debris Models', 'Model', ''); if Assigned(node) then for i := 0 to ElementCount(node) - 1 do begin row := ElementByIndex(node, i); sl.Add('    {'); AddKV(sl, '      ', 'percentage', JsonInt(StructFieldText(row, 'DATA', 'Percentage', '100'), '100')); AddKV(sl, '      ', 'flags', ElementIntegerText(StructFieldElement(row, 'DATA', 'Flags'), '0')); AddStringKV(sl, '      ', 'modelPath', StructFieldText(row, 'DATA', 'Model FileName', '')); RemoveTrailingComma(sl); sl.Add('    },'); end; RemoveTrailingComma(sl); sl.Add('  ],'); end;
 
 procedure AddImageSpaceModifierFields(sl: TStringList; e: IInterface);
 begin
@@ -3322,7 +3336,7 @@ begin
   AddKV(sl, '  ', 'dialogueTopicFlags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0'));
   AddKV(sl, '  ', 'dialogueTopicType', ElementIntegerText(StructFieldElement(e, 'DATA', 'Category'), '0'));
   AddKV(sl, '  ', 'dialogueTopicSubtype', ElementIntegerText(StructFieldElement(e, 'DATA', 'Subtype'), '0'));
-  AddKV(sl, '  ', 'dialogueTopicPriority', SafeInt(FirstText(e, 'PNAM - Priority', 'PNAM', ''), '50'));
+  AddKV(sl, '  ', 'dialogueTopicPriority', ElementIntegerText(FirstElementByPath(e, 'PNAM - Priority', 'PNAM', 'Priority', ''), '50'));
   AddKV(sl, '  ', 'dialogueTopicJournalIndex', SafeInt(FirstText(e, 'INAM - Journal Index', 'INAM', ''), '0'));
   AddFormRefKV(sl, 'dialogueTopicBranch', LinkedByPath(e, 'BNAM - Branch'));
   AddFormRefKV(sl, 'dialogueTopicQuest', LinkedByPath(e, 'QNAM - Quest'));
@@ -3337,19 +3351,25 @@ end;
 
 procedure AddDialogueInfoFields(sl: TStringList; e: IInterface);
 var
-  node, row, parentGroup, parentTopic: IInterface;
+  node, row, parentGroup, parentTopic, sharedInfo: IInterface;
   i: Integer;
 begin
-  parentGroup := GetContainer(e);
-  if Assigned(parentGroup) then
-    parentTopic := ChildrenOf(parentGroup);
+  parentTopic := LinkedByPath(e, 'Topic');
+  if not Assigned(parentTopic) then begin
+    parentGroup := GetContainer(e);
+    if Assigned(parentGroup) then
+      parentTopic := ChildrenOf(parentGroup);
+  end;
   if Assigned(parentTopic) and (Signature(parentTopic) = 'DIAL') then
     AddFormRefKV(sl, 'dialogueInfoTopic', parentTopic);
-  AddFormRefKV(sl, 'dialogueInfoSharedInfo', LinkedByPath(e, 'DNAM - Shared Info'));
+  sharedInfo := LinkedByPath(e, 'DNAM - Response Data');
+  if not Assigned(sharedInfo) then
+    sharedInfo := LinkedByPath(e, 'DNAM - Shared Info');
+  AddFormRefKV(sl, 'dialogueInfoSharedInfo', sharedInfo);
   AddKV(sl, '  ', 'dialogueInfoIndex', SafeInt(FirstText(e, 'INAM - Info Index', 'INAM', ''), '0'));
   AddKV(sl, '  ', 'dialogueInfoFavorLevel', ElementIntegerText(FirstElementByPath(e, 'CNAM - Favor Level', 'CNAM', 'Favor Level', ''), '0'));
   AddKV(sl, '  ', 'dialogueInfoFlags', ElementIntegerText(StructFieldElement(e, 'ENAM', 'Flags'), '0'));
-  AddKV(sl, '  ', 'dialogueInfoResetHours', SafeInt(StructFieldText(e, 'ENAM', 'Reset Hours', '0'), '0'));
+  AddKV(sl, '  ', 'dialogueInfoResetHours', ElementIntegerText(StructFieldElement(e, 'ENAM', 'Reset Hours'), '0'));
   AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
   sl.Add('  "dialogueResponses": [');
   node := FirstElementByPath(e, 'Responses', 'Responses (sorted)', 'Response Data', 'TRDT - Response Data');

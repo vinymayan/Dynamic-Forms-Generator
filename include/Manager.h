@@ -31,7 +31,9 @@ namespace Manager {
     bool SpawnFormAtPlayer(std::size_t index);
     bool SpawnLydiaForDebug();
     bool HasEditorId(std::string_view editorId);
+    bool IsEditorIdReserved(std::string_view editorId);
     bool IsDirty(std::size_t index);
     bool HasDirtyForms();
+    bool IsReady() noexcept;
     void ApplyAllForms();
 }

@@ -1,5 +1,8 @@
 unit userscript;
 
+const
+  MaxNodesPerRecord = 10000;
+
 var
   SeenSignatures: TStringList;
   Report: TStringList;
@@ -7,13 +10,27 @@ var
   DumpedCount: Integer;
   SkippedCount: Integer;
   MirrorToMessages: Boolean;
+  CurrentRecordNodeCount: Integer;
+  CurrentRecordLimitReported: Boolean;
 
 function CleanLogText(const value: string): string;
+const
+  MaxLoggedValueLength = 2048;
+var
+  i, originalLength: Integer;
 begin
-  Result := StringReplace(value, #13, '\r', [rfReplaceAll]);
+  originalLength := Length(value);
+  Result := Copy(value, 1, MaxLoggedValueLength);
+  Result := StringReplace(Result, #13, '\r', [rfReplaceAll]);
   Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
   Result := StringReplace(Result, #9, '\t', [rfReplaceAll]);
   Result := StringReplace(Result, '"', '''', [rfReplaceAll]);
+  Result := StringReplace(Result, #0, '\0', [rfReplaceAll]);
+  for i := 1 to Length(Result) do
+    if Ord(Result[i]) < 32 then
+      Result[i] := '?';
+  if originalLength > MaxLoggedValueLength then
+    Result := Result + '...<truncated; original length=' + IntToStr(originalLength) + '>';
 end;
 
 procedure WriteLine(const value: string);
@@ -154,6 +171,16 @@ var
   linkedText: string;
   line: string;
 begin
+  if CurrentRecordNodeCount >= MaxNodesPerRecord then begin
+    if not CurrentRecordLimitReported then begin
+      WriteLine('[DFG-DUMP] NODE-LIMIT path="' + CleanLogText(nodePath) +
+        '" remaining nodes omitted after ' + IntToStr(MaxNodesPerRecord) + ' nodes');
+      CurrentRecordLimitReported := True;
+    end;
+    Exit;
+  end;
+  Inc(CurrentRecordNodeCount);
+
   if not Assigned(e) then begin
     WriteLine('[DFG-DUMP] NODE depth=' + IntToStr(depth) +
       ' path="' + CleanLogText(nodePath) + '" <not assigned>');
@@ -196,7 +223,7 @@ var
 begin
   DumpedCount := 0;
   SkippedCount := 0;
-  MirrorToMessages := True;
+  MirrorToMessages := False;
 
   SeenSignatures := TStringList.Create;
   SeenSignatures.Sorted := True;
@@ -213,6 +240,7 @@ begin
   WriteLine('[DFG-DUMP] Select any number of records. Only the first selected record of each signature is dumped.');
   WriteLine('[DFG-DUMP] ==================================================');
   Report.SaveToFile(ReportPath);
+  AddMessage('[DFG-DUMP] Writing diagnostics to: ' + ReportPath);
 
   Result := 0;
 end;
@@ -253,8 +281,11 @@ begin
     ' file="' + CleanLogText(SafeRecordFileName(e)) + '"' +
     ' name="' + CleanLogText(SafeName(e)) + '"');
   WriteLine('[DFG-DUMP] ##################################################');
+  AddMessage('[DFG-DUMP] Dumping first ' + sig + ' record: ' + editorID);
 
   rootPath := sig + ':' + SafeFixedFormID(e);
+  CurrentRecordNodeCount := 0;
+  CurrentRecordLimitReported := False;
   DumpElement(e, rootPath, 0);
   Inc(DumpedCount);
 
@@ -273,6 +304,9 @@ begin
   WriteLine('[DFG-DUMP] ==================================================');
 
   Report.SaveToFile(ReportPath);
+  AddMessage('[DFG-DUMP] Done. Dumped signatures=' + IntToStr(DumpedCount) +
+    ', skipped selected records=' + IntToStr(SkippedCount));
+  AddMessage('[DFG-DUMP] Report saved to: ' + ReportPath);
   SeenSignatures.Free;
   Report.Free;
   Result := 0;

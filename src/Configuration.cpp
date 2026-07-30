@@ -1128,7 +1128,25 @@ namespace {
     }
 
     std::vector<const char*> PackageComboItems(const bool includeAll) {
+        for (const auto& form : Manager::GetForms()) {
+            const auto addPackage = [](const std::string& package) {
+                if (!package.empty() &&
+                    std::ranges::none_of(previewPackages, [&package](const std::string& existing) {
+                        return existing == package;
+                    }))
+                {
+                    previewPackages.push_back(package);
+                }
+            };
+            addPackage(form.packageName);
+            addPackage(form.basePackageName);
+            for (const auto& package : form.patchPackageNames) {
+                addPackage(package);
+            }
+        }
+
         std::vector<const char*> items;
+        items.reserve(previewPackages.size() + (includeAll ? 1 : 0));
         if (includeAll) {
             items.push_back("All packages");
         }
@@ -1858,13 +1876,13 @@ namespace {
             return false;
         }
 
-        std::string editorId = editorIdBuffer.data();
-        const bool validEditorId = IsValidEditorId(editorId);
-        const bool duplicateEditorId = validEditorId && Manager::HasEditorId(editorId);
-
         ImGui::SetNextItemWidth(280.0F);
         ImGui::InputText(Configuration::GetLoc("menu.editor_id", "EditorID"), editorIdBuffer.data(), editorIdBuffer.size());
-        editorId = editorIdBuffer.data();
+        const std::string editorId = editorIdBuffer.data();
+        const bool validEditorId = IsValidEditorId(editorId);
+        const bool duplicateEditorId = validEditorId && Manager::HasEditorId(editorId);
+        const bool reservedEditorId =
+            validEditorId && !duplicateEditorId && Manager::IsEditorIdReserved(editorId);
 
         if (editorId.empty()) {
             ImGui::TextColored({ 1.0F, 0.75F, 0.35F, 1.0F }, "%s", Configuration::GetLoc("menu.editor_id_required", "EditorID is required."));
@@ -1872,6 +1890,11 @@ namespace {
             ImGui::TextColored({ 1.0F, 0.35F, 0.35F, 1.0F }, "%s", Configuration::GetLoc("menu.editor_id_invalid", "Use only letters, numbers and underscore."));
         } else if (duplicateEditorId) {
             ImGui::TextColored({ 1.0F, 0.35F, 0.35F, 1.0F }, "%s", Configuration::GetLoc("menu.editor_id_duplicate", "A form with this EditorID already exists."));
+        } else if (reservedEditorId) {
+            ImGui::TextColored(
+                { 1.0F, 0.35F, 0.35F, 1.0F },
+                "%s",
+                Configuration::GetLoc("menu.editor_id_reserved", "This EditorID belongs to an existing game form."));
         }
 
         ImGui::Text("%s", Configuration::GetLoc("menu.form_type", "Form type"));
@@ -1889,7 +1912,7 @@ namespace {
 
         ImGui::Separator();
         const bool missingTemplate = createWithTemplate && createGameTemplate.empty();
-        if (!validEditorId || duplicateEditorId || missingTemplate) {
+        if (!validEditorId || duplicateEditorId || reservedEditorId || missingTemplate) {
             ImGui::BeginDisabled();
         }
         if (ImGui::Button(Configuration::GetLoc("menu.confirm", "Confirm"))) {
@@ -2042,7 +2065,7 @@ namespace {
                 createError = Configuration::GetLoc("menu.create_failed", "Could not create form. Check if DPF is available.");
             }
         }
-        if (!validEditorId || duplicateEditorId || missingTemplate) {
+        if (!validEditorId || duplicateEditorId || reservedEditorId || missingTemplate) {
             ImGui::EndDisabled();
         }
 
