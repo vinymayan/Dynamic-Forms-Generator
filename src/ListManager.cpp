@@ -579,13 +579,27 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
     auto& list = _dataStore[a_typeName];
     list.clear();
 
-    const auto& forms = dataHandler->GetFormArray<T>();
+    // TESDataHandler stores TESForm pointers. Reinterpreting that array as T* is
+    // unsafe for forms whose TESForm base is not at offset zero (for example,
+    // BGSMovableStatic). Keep the original TESForm pointer and let As<T>() apply
+    // the required multiple-inheritance adjustment.
+    const auto& forms = dataHandler->GetFormArray(T::FORMTYPE);
     list.reserve(forms.size());
 
-    for (const auto& form : forms) {
-        if (!form) continue;
+    for (auto* rawForm : forms) {
+        if (!rawForm) continue;
 
-        if (form->IsDeleted() || form->IsIgnored()) {
+        if (rawForm->IsDeleted() || rawForm->IsIgnored()) {
+            continue;
+        }
+
+        auto* form = rawForm->As<T>();
+        if (!form) {
+            logger::warn(
+                "[PopulateList] Skipping form {:08X}: expected type '{}' but runtime type is {}.",
+                rawForm->GetFormID(),
+                a_typeName,
+                static_cast<std::uint32_t>(rawForm->GetFormType()));
             continue;
         }
 
@@ -593,16 +607,14 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
             continue;
         }
 
-        RE::FormID currentID = 0;
+        RE::FormID currentID = rawForm->GetFormID();
         std::string currentPlugin = "Unknown";
 
         try {
-            currentID = form->GetFormID();
-
-            if (auto primaryFile = form->GetFile(0)) {
+            if (auto primaryFile = rawForm->GetFile(0)) {
                 currentPlugin = std::string(primaryFile->GetFilename());
             }
-            else if (auto masterFile = FormUtil::GetMasterFile(form)) {
+            else if (auto masterFile = FormUtil::GetMasterFile(rawForm)) {
                 currentPlugin = std::string(masterFile->GetFilename());
             }
             else {
@@ -613,18 +625,18 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
             info.formID = currentID;
             info.formType = a_typeName;
             info.pluginName = ToUTF8(currentPlugin);
-            info.normalizedFormID = FormUtil::NormalizeFormID(form);
+            info.normalizedFormID = FormUtil::NormalizeFormID(rawForm);
 
-            std::string rawEditorID = clib_util::editorID::get_editorID(form);
+            std::string rawEditorID = clib_util::editorID::get_editorID(rawForm);
             info.editorID = ToUTF8(rawEditorID);
 
             std::string rawName = "";
-            if (form->Is(RE::FormType::NPC)) {
-                if (auto npc = form->As<RE::TESNPC>()) {
+            if (rawForm->Is(RE::FormType::NPC)) {
+                if (auto npc = rawForm->As<RE::TESNPC>()) {
                     rawName = npc->fullName.c_str();
                 }
             }
-            else if (auto fullName = form->As<RE::TESFullName>()) {
+            else if (auto fullName = rawForm->As<RE::TESFullName>()) {
                 rawName = fullName->fullName.c_str();
             }
 
@@ -632,7 +644,7 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
             info.description = "";
             info.nextPerkId = "";
 
-            if (auto perk = form->As<RE::BGSPerk>()) {
+            if (auto perk = rawForm->As<RE::BGSPerk>()) {
                 RE::BSString descStr;
                 perk->TESDescription::GetDescription(descStr, perk);
                 info.description = ToUTF8(descStr.c_str());
