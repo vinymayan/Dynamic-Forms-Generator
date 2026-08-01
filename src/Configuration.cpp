@@ -1844,13 +1844,17 @@ namespace {
     }
 
     bool DrawRGBColorEditor(const char* label, std::uint8_t& red, std::uint8_t& green, std::uint8_t& blue) {
-        float color[3]{
+        // SKSE Menu Framework 3.3.0's ColorEdit3 wrapper has an invalid ABI:
+        // it passes col[3] as a float instead of forwarding the float pointer.
+        // Route RGB editing through the working ColorEdit4 wrapper and hide alpha.
+        float color[4]{
             static_cast<float>(red) / 255.0F,
             static_cast<float>(green) / 255.0F,
-            static_cast<float>(blue) / 255.0F
+            static_cast<float>(blue) / 255.0F,
+            1.0F
         };
         ImGui::SetNextItemWidth(260.0F);
-        if (ImGui::ColorEdit3(label, color, ImGui::ImGuiColorEditFlags_DisplayRGB | ImGui::ImGuiColorEditFlags_Uint8 | ImGui::ImGuiColorEditFlags_InputRGB)) {
+        if (ImGui::ColorEdit4(label, color, ImGui::ImGuiColorEditFlags_DisplayRGB | ImGui::ImGuiColorEditFlags_Uint8 | ImGui::ImGuiColorEditFlags_InputRGB | ImGui::ImGuiColorEditFlags_NoAlpha)) {
             red = static_cast<std::uint8_t>(std::clamp(color[0], 0.0F, 1.0F) * 255.0F);
             green = static_cast<std::uint8_t>(std::clamp(color[1], 0.0F, 1.0F) * 255.0F);
             blue = static_cast<std::uint8_t>(std::clamp(color[2], 0.0F, 1.0F) * 255.0F);
