@@ -1015,13 +1015,14 @@ var
 begin
   t := LowerCase(s);
   if t = '' then Result := '1'
+  else if Pos('unknown 0', t) > 0 then Result := '0'
   else if Pos('set value', t) > 0 then Result := '1'
   else if Pos('add value', t) > 0 then Result := '2'
   else if Pos('multiply value', t) > 0 then Result := '3'
   else if Pos('add range', t) > 0 then Result := '4'
   else if Pos('add actor value', t) > 0 then Result := '5'
-  else if Pos('absolute value', t) > 0 then Result := '6'
   else if Pos('negative absolute', t) > 0 then Result := '7'
+  else if Pos('absolute value', t) > 0 then Result := '6'
   else if Pos('add leveled list', t) > 0 then Result := '8'
   else if Pos('add activate choice', t) > 0 then Result := '9'
   else if Pos('select spell', t) > 0 then Result := '10'
@@ -1236,7 +1237,7 @@ begin
 
   nativeType := NativeIntOfElement(typeElement, -1);
   if nativeType >= 0 then begin
-    Result := nativeType mod 8;
+    Result := (nativeType div 32) and 7;
     if Result <= 5 then
       Exit;
   end;
@@ -1306,11 +1307,12 @@ procedure WritePerkConditionJson(
 );
 var
   functionElement, typeElement, comparisonElement: IInterface;
-  param1Element, param2Element, comparisonLinked: IInterface;
+  param1Element, param2Element, param3Element, comparisonLinked: IInterface;
+  runOnElement, referenceElement, referenceLinked: IInterface;
   functionText, kind, comparisonValue: string;
-  comparisonGlobal, param1, param2, conditionText: string;
-  functionId, opCode: Integer;
-  isOr, useGlobalComparison: Boolean;
+  comparisonGlobal, param1, param2, conditionText, runOnRef, dataIdText: string;
+  functionId, opCode, runOn, dataId: Integer;
+  isOr, useAliases, useGlobalComparison, usePackData, swapTarget: Boolean;
 begin
   functionElement := FindDescendantByExactName(conditionNode, 'Function');
   if not Assigned(functionElement) then begin
@@ -1322,12 +1324,20 @@ begin
   comparisonElement := FindDescendantByNameContains(conditionNode, 'Comparison Value');
   param1Element := FindDescendantByExactName(conditionNode, 'Parameter #1');
   param2Element := FindDescendantByExactName(conditionNode, 'Parameter #2');
+  param3Element := FindDescendantByExactName(conditionNode, 'Parameter #3');
+  runOnElement := FindDescendantByExactName(conditionNode, 'Run On');
+  referenceElement := FindDescendantByExactName(conditionNode, 'Reference');
 
   functionText := GetEditValue(functionElement);
   kind := PerkConditionKindFromFunctionText(functionText);
   functionId := NativeIntOfElement(functionElement, 0);
   opCode := ConditionOpCode(conditionNode, typeElement);
   isOr := ConditionIsOr(conditionNode, typeElement);
+  useAliases := EnabledNamedFlagRecursive(typeElement, 'Use Aliases');
+  usePackData := EnabledNamedFlagRecursive(typeElement, 'Use Pack Data');
+  swapTarget :=
+    EnabledNamedFlagRecursive(typeElement, 'Swap Target') or
+    EnabledNamedFlagRecursive(typeElement, 'Swap Subject and Target');
 
   comparisonLinked := nil;
   if Assigned(comparisonElement) then
@@ -1347,15 +1357,38 @@ begin
 
   param1 := ConditionParameterText(param1Element);
   param2 := ConditionParameterText(param2Element);
+  runOn := NativeIntOfElement(runOnElement, 0);
+  if (runOn < 0) or (runOn > 8) then
+    runOn := 0;
+
+  runOnRef := '';
+  referenceLinked := nil;
+  if Assigned(referenceElement) then
+    referenceLinked := FirstLinkedInElement(referenceElement);
+  if Assigned(referenceLinked) then
+    runOnRef := PluginLocalID(referenceLinked);
+
+  dataId := NativeIntOfElement(param3Element, -1);
+  if dataId < 0 then
+    dataIdText := '4294967295'
+  else
+    dataIdText := IntToStr(dataId);
   conditionText := GetEditValue(conditionNode);
 
   sl.Add(indent + '{');
   AddStringKV(sl, indent + '  ', 'kind', kind);
   AddKV(sl, indent + '  ', 'functionId', IntToStr(functionId));
+  AddStringKV(sl, indent + '  ', 'functionName', functionText);
   AddKV(sl, indent + '  ', 'opCode', IntToStr(opCode));
   AddKV(sl, indent + '  ', 'comparisonValue', comparisonValue);
   AddKV(sl, indent + '  ', 'isOr', BoolJson(isOr));
+  AddKV(sl, indent + '  ', 'useAliases', BoolJson(useAliases));
   AddKV(sl, indent + '  ', 'useGlobalComparison', BoolJson(useGlobalComparison));
+  AddKV(sl, indent + '  ', 'usePackData', BoolJson(usePackData));
+  AddKV(sl, indent + '  ', 'swapTarget', BoolJson(swapTarget));
+  AddKV(sl, indent + '  ', 'runOn', IntToStr(runOn));
+  AddKV(sl, indent + '  ', 'dataId', dataIdText);
+  AddStringKV(sl, indent + '  ', 'runOnRef', runOnRef);
   AddStringKV(sl, indent + '  ', 'comparisonGlobal', comparisonGlobal);
   AddStringKV(sl, indent + '  ', 'param1', param1);
   AddStringKV(sl, indent + '  ', 'param2', param2);
@@ -1372,6 +1405,12 @@ begin
     ' comparison=' + comparisonValue +
     ' OR=' + DebugBoolText(isOr) +
     ' global=' + DebugBoolText(useGlobalComparison) +
+    ' aliases=' + DebugBoolText(useAliases) +
+    ' packData=' + DebugBoolText(usePackData) +
+    ' swapTarget=' + DebugBoolText(swapTarget) +
+    ' runOn=' + IntToStr(runOn) +
+    ' dataId=' + dataIdText +
+    ' runOnRef="' + runOnRef + '"' +
     ' param1="' + param1 + '"' +
     ' param2="' + param2 + '"' +
     ' text="' + conditionText + '"'
@@ -2029,12 +2068,214 @@ begin
 end;
 
 
+function PerkFunctionDataTypeName(functionValue: Integer): string;
+begin
+  case functionValue of
+    1, 2, 3: Result := 'OneValue';
+    4: Result := 'TwoValue';
+    5, 12, 13, 14: Result := 'ActorValueAndValue';
+    8: Result := 'LeveledList';
+    9: Result := 'ActivateChoice';
+    10: Result := 'Spell';
+    11: Result := 'BooleanGraphVariable';
+    15: Result := 'Text';
+  else
+    Result := 'None';
+  end;
+end;
+
+function PerkConditionTabIndex(row: IInterface): Integer;
+var
+  indexElement: IInterface;
+begin
+  indexElement := FirstElementByPath(
+    row,
+    'PRKC - Run On (Tab Index)',
+    'Run On (Tab Index)',
+    'PRKC',
+    ''
+  );
+  if not Assigned(indexElement) then
+    indexElement := FindDescendantByNameContains(row, 'Run On (Tab Index)');
+  Result := NativeIntOfElement(indexElement, 0);
+end;
+
+procedure AddPerkConditionTabs(
+  sl: TStringList;
+  entryRow: IInterface;
+  tabCount: Integer;
+  const indent: string
+);
+var
+  conditionsArray, conditionRow, conditionList: IInterface;
+  i, tabIndex, rowTabIndex, writtenCount, highestTab: Integer;
+begin
+  conditionsArray := FirstElementByPath(
+    entryRow,
+    'Perk Conditions',
+    'Conditions',
+    'PRKC - Perk Conditions',
+    ''
+  );
+
+  highestTab := tabCount - 1;
+  if Assigned(conditionsArray) then
+    for i := 0 to ElementCount(conditionsArray) - 1 do begin
+      rowTabIndex := PerkConditionTabIndex(ElementByIndex(conditionsArray, i));
+      if rowTabIndex > highestTab then
+        highestTab := rowTabIndex;
+    end;
+
+  sl.Add(indent + '"conditionTabs": [');
+  for tabIndex := 0 to highestTab do begin
+    sl.Add(indent + '  {');
+    AddKV(sl, indent + '    ', 'index', IntToStr(tabIndex));
+    sl.Add(indent + '    "conditions": [');
+    writtenCount := 0;
+    if Assigned(conditionsArray) then
+      for i := 0 to ElementCount(conditionsArray) - 1 do begin
+        conditionRow := ElementByIndex(conditionsArray, i);
+        if PerkConditionTabIndex(conditionRow) <> tabIndex then
+          Continue;
+        conditionList := FirstElementByPath(
+          conditionRow,
+          'Conditions',
+          'CTDA - Conditions',
+          'Condition',
+          ''
+        );
+        if Assigned(conditionList) then
+          WritePerkConditionsRecursive(
+            sl,
+            conditionList,
+            indent + '      ',
+            writtenCount
+          );
+      end;
+    RemoveTrailingComma(sl);
+    sl.Add(indent + '    ]');
+    sl.Add(indent + '  },');
+  end;
+  RemoveTrailingComma(sl);
+  sl.Add(indent + '],');
+end;
+
+function ActorValueFromPerkData(dataElement: IInterface): Integer;
+var
+  actorValueElement: IInterface;
+  rawValue: Int64;
+  rawCardinal: Cardinal;
+  floatValue: Single;
+begin
+  Result := 0;
+  actorValueElement := FindDescendantByExactName(dataElement, 'Actor Value');
+  if not Assigned(actorValueElement) then
+    Exit;
+  rawValue := NativeIntOfElement(actorValueElement, 0);
+  if (rawValue >= 0) and (rawValue < 1000) then begin
+    Result := rawValue;
+    Exit;
+  end;
+  rawCardinal := rawValue;
+  Move(rawCardinal, floatValue, SizeOf(floatValue));
+  if (floatValue >= 0.0) and (floatValue < 1000.0) then
+    Result := Round(floatValue);
+end;
+
+procedure AddPerkFunctionData(
+  sl: TStringList;
+  row: IInterface;
+  functionValue: Integer;
+  const indent: string
+);
+var
+  dataElement, firstElement, secondElement, linked, flagsElement: IInterface;
+  dataType, textValue: string;
+begin
+  dataType := PerkFunctionDataTypeName(functionValue);
+  dataElement := FirstElementByPath(
+    row,
+    'Function Parameters\EPFD - Data',
+    'EPFD - Data',
+    'Function Parameters\Data',
+    ''
+  );
+  if not Assigned(dataElement) then
+    dataElement := FindDescendantByNameContains(row, 'EPFD - Data');
+
+  sl.Add(indent + '"functionData": {');
+  AddStringKV(sl, indent + '  ', 'type', dataType);
+  case functionValue of
+    1, 2, 3:
+      AddKV(sl, indent + '  ', 'value1', FirstFloatInElement(dataElement, '1.0'));
+    4: begin
+      firstElement := FindDescendantByExactName(dataElement, 'Float 1');
+      secondElement := FindDescendantByExactName(dataElement, 'Float 2');
+      AddKV(sl, indent + '  ', 'value1', JsonFloat(GetEditValue(firstElement), '0.0'));
+      AddKV(sl, indent + '  ', 'value2', JsonFloat(GetEditValue(secondElement), '0.0'));
+    end;
+    5, 12, 13, 14: begin
+      secondElement := FindDescendantByExactName(dataElement, 'Float');
+      AddKV(sl, indent + '  ', 'actorValue', IntToStr(ActorValueFromPerkData(dataElement)));
+      AddKV(sl, indent + '  ', 'value2', JsonFloat(GetEditValue(secondElement), '0.0'));
+    end;
+    8, 10: begin
+      linked := FirstLinkedInElement(dataElement);
+      AddKV(sl, indent + '  ', 'form', FormRefJson(linked));
+    end;
+    9: begin
+      linked := FirstLinkedInElement(dataElement);
+      AddKV(sl, indent + '  ', 'form', FormRefJson(linked));
+      AddStringKV(
+        sl,
+        indent + '  ',
+        'buttonLabel',
+        GetFirstText(
+          row,
+          'Function Parameters\EPF2 - Button Label',
+          'EPF2 - Button Label',
+          'Button Label',
+          '',
+          ''
+        )
+      );
+      flagsElement := FirstElementByPath(
+        row,
+        'Function Parameters\EPF3 - Script Flags',
+        'EPF3 - Script Flags',
+        'Script Flags',
+        ''
+      );
+      AddKV(
+        sl,
+        indent + '  ',
+        'flags',
+        ElementIntegerText(FindDescendantByExactName(flagsElement, 'Script Flags'), '0')
+      );
+      AddKV(
+        sl,
+        indent + '  ',
+        'fragmentIndex',
+        ElementIntegerText(FindDescendantByExactName(flagsElement, 'Fragment Index'), '0')
+      );
+    end;
+    11, 15: begin
+      textValue := GetEditValue(dataElement);
+      if textValue = '' then
+        textValue := GetFirstText(dataElement, 'Text', 'String', 'Value', '', '');
+      AddStringKV(sl, indent + '  ', 'text', textValue);
+    end;
+  end;
+  RemoveTrailingComma(sl);
+  sl.Add(indent + '},');
+end;
+
 procedure AddPerkEntriesArray(sl: TStringList; e: IInterface);
 var
-  arr, row, header: IInterface;
-  entryPointElement, functionElement, numArgsElement, valueElement: IInterface;
-  i, entryCount: Integer;
-  rank, priority, entryPoint, functionValue, numArgs, value: string;
+  arr, row, header, entryTypeElement, dataElement, linked: IInterface;
+  entryPointElement, functionElement, numArgsElement: IInterface;
+  i, entryCount, functionNumber, tabCount: Integer;
+  rank, priority, entryType, entryPoint, functionValue, numArgs, stage: string;
 begin
   arr := FirstElementByPath(e, 'Effects', 'PRKE - Effects', 'Perk Entries', 'Entries');
   if not Assigned(arr) then
@@ -2046,8 +2287,6 @@ begin
   if Assigned(arr) then begin
     for i := 0 to ElementCount(arr) - 1 do begin
       row := ElementByIndex(arr, i);
-
-      // Skip helper/marker nodes that are not actual perk effects.
       if not Assigned(FindDescendantByNameContains(row, 'PRKE - Header')) then
         if not Assigned(FindDescendantByExactName(row, 'Rank')) then
           Continue;
@@ -2055,114 +2294,85 @@ begin
       header := FirstElementByPath(row, 'PRKE - Header', 'Header', 'PRKE', '');
       if not Assigned(header) then
         header := row;
-
-      rank := JsonInt(
-        GetFirstText(
-          header,
-          'Rank',
-          'PRKE - Header\Rank',
-          'Perk Rank',
-          'PRKR - Perk Rank',
-          '0'
-        ),
-        '0'
-      );
-
-      priority := JsonInt(
-        GetFirstText(
-          header,
-          'Priority',
-          'PRKE - Header\Priority',
-          '',
-          '',
-          '0'
-        ),
-        '0'
-      );
-
-      entryPointElement := FirstElementByPath(
-        row,
-        'DATA - Effect Data\Entry Point\Entry Point',
-        'DATA\Entry Point\Entry Point',
-        'Effect Data\Entry Point\Entry Point',
-        'Entry Point\Entry Point'
-      );
-      if not Assigned(entryPointElement) then
-        entryPointElement := FindDescendantByExactName(row, 'Entry Point');
-
-      entryPoint := ElementIntegerText(entryPointElement, '75');
-
-      functionElement := FirstElementByPath(
-        row,
-        'DATA - Effect Data\Entry Point\Function',
-        'DATA\Entry Point\Function',
-        'Effect Data\Entry Point\Function',
-        'Entry Point\Function'
-      );
-      if not Assigned(functionElement) then
-        functionElement := FindDescendantByExactName(row, 'Function');
-
-      functionValue := PerkEntryFunctionValue(GetEditValue(functionElement));
-
-      numArgsElement := FirstElementByPath(
-        row,
-        'DATA - Effect Data\Entry Point\Perk Condition Tab Count',
-        'DATA\Entry Point\Perk Condition Tab Count',
-        'Effect Data\Entry Point\Perk Condition Tab Count',
-        'Entry Point\Perk Condition Tab Count'
-      );
-      if not Assigned(numArgsElement) then
-        numArgsElement := FindDescendantByNameContains(
-          row,
-          'Perk Condition Tab Count'
-        );
-
-      numArgs := ElementIntegerText(numArgsElement, '0');
-
-      valueElement := FirstElementByPath(
-        row,
-        'Function Parameters\EPFD - Data\Float',
-        'Function Parameters\EPFD - Data',
-        'EPFD - Data\Float',
-        'EPFD - Data'
-      );
-      if not Assigned(valueElement) then
-        valueElement := FindDescendantByNameContains(row, 'EPFD - Data');
-
-      value := FirstFloatInElement(valueElement, '1.0');
+      rank := JsonInt(GetFirstText(header, 'Rank', 'PRKE - Header\Rank', 'Perk Rank', 'PRKR - Perk Rank', '0'), '0');
+      priority := JsonInt(GetFirstText(header, 'Priority', 'PRKE - Header\Priority', '', '', '0'), '0');
+      entryTypeElement := FindDescendantByExactName(header, 'Type');
+      entryType := LowerCase(GetEditValue(entryTypeElement));
 
       sl.Add('    {');
-      AddKV(sl, '      ', 'rank', rank);
-      AddKV(sl, '      ', 'priority', priority);
-      AddKV(sl, '      ', 'entryPoint', entryPoint);
-      AddKV(sl, '      ', 'function', functionValue);
-      AddKV(sl, '      ', 'numArgs', numArgs);
-      AddKV(sl, '      ', 'value', value);
-
-      // Perk-condition tabs are flattened in their original xEdit order because
-      // the current DFG JSON schema stores a single condition array per entry.
-      AddPerkConditionsArray(sl, 'conditions', row, '      ');
+      if Pos('quest', entryType) > 0 then begin
+        AddStringKV(sl, '      ', 'type', 'Quest');
+        AddKV(sl, '      ', 'rank', rank);
+        AddKV(sl, '      ', 'priority', priority);
+        dataElement := FirstElementByPath(
+          row,
+          'DATA - Effect Data\Quest + Stage',
+          'DATA\Quest + Stage',
+          'Quest + Stage',
+          ''
+        );
+        linked := FirstLinkedInElement(dataElement);
+        stage := JsonInt(GetFirstText(dataElement, 'Quest Stage', 'Stage', '', '', '0'), '0');
+        AddKV(sl, '      ', 'quest', FormRefJson(linked));
+        AddKV(sl, '      ', 'questStage', stage);
+      end else if Pos('ability', entryType) > 0 then begin
+        AddStringKV(sl, '      ', 'type', 'Ability');
+        AddKV(sl, '      ', 'rank', rank);
+        AddKV(sl, '      ', 'priority', priority);
+        dataElement := FirstElementByPath(
+          row,
+          'DATA - Effect Data\Ability',
+          'DATA\Ability',
+          'Ability',
+          ''
+        );
+        linked := FirstLinkedInElement(dataElement);
+        AddKV(sl, '      ', 'ability', FormRefJson(linked));
+      end else begin
+        AddStringKV(sl, '      ', 'type', 'EntryPoint');
+        AddKV(sl, '      ', 'rank', rank);
+        AddKV(sl, '      ', 'priority', priority);
+        entryPointElement := FirstElementByPath(
+          row,
+          'DATA - Effect Data\Entry Point\Entry Point',
+          'DATA\Entry Point\Entry Point',
+          'Effect Data\Entry Point\Entry Point',
+          'Entry Point\Entry Point'
+        );
+        functionElement := FirstElementByPath(
+          row,
+          'DATA - Effect Data\Entry Point\Function',
+          'DATA\Entry Point\Function',
+          'Effect Data\Entry Point\Function',
+          'Entry Point\Function'
+        );
+        numArgsElement := FindDescendantByNameContains(row, 'Perk Condition Tab Count');
+        entryPoint := ElementIntegerText(entryPointElement, '75');
+        functionValue := PerkEntryFunctionValue(GetEditValue(functionElement));
+        numArgs := ElementIntegerText(numArgsElement, '0');
+        functionNumber := StrToIntDef(functionValue, 1);
+        tabCount := StrToIntDef(numArgs, 0);
+        AddKV(sl, '      ', 'entryPoint', entryPoint);
+        AddKV(sl, '      ', 'function', functionValue);
+        AddKV(sl, '      ', 'numArgs', numArgs);
+        AddPerkFunctionData(sl, row, functionNumber, '      ');
+        AddPerkConditionTabs(sl, row, tabCount, '      ');
+      end;
 
       RemoveTrailingComma(sl);
       sl.Add('    },');
-
       AddMessage(
         '[DFG][PERK] Entry #' + IntToStr(entryCount) +
+        ' type=' + entryType +
         ' rank=' + rank +
-        ' priority=' + priority +
-        ' entryPoint=' + entryPoint +
-        ' function=' + functionValue +
-        ' numArgs=' + numArgs +
-        ' value=' + value
+        ' priority=' + priority
       );
-
       Inc(entryCount);
     end;
   end;
 
   RemoveTrailingComma(sl);
   sl.Add('  ],');
-
   AddMessage('[DFG][PERK] Exported entries: ' + IntToStr(entryCount));
 end;
 
@@ -4000,6 +4210,7 @@ end;
 function Initialize: Integer;
 var
   packageFolder: string;
+  requestedPackageName: string;
 begin
   ExportedCount := 0;
   SkippedCount := 0;
@@ -4008,16 +4219,17 @@ begin
   DebugNpcEditorID := '';
   // Use DebugNpcEditorID := ''; to log every selected NPC.
 
-  PackageName := 'DFG_Import';
-  if not InputQuery('Dynamic Forms Generator', 'Package name (creates/updates package.db when DFG loads):', PackageName) then begin
-    AddMessage('[DFG] Export cancelled: no package selected.');
+  requestedPackageName := Trim(InputBox(
+    'Dynamic Forms Generator',
+    'Package name (creates/updates package.db when DFG loads):',
+    ''
+  ));
+  if requestedPackageName = '' then begin
+    AddMessage('[DFG] Export cancelled: package name is empty.');
     Result := 1;
     Exit;
   end;
-
-  PackageName := Trim(PackageName);
-  if PackageName = '' then
-    PackageName := 'DFG_Import';
+  PackageName := requestedPackageName;
 
   ExportedRecords := TStringList.Create;
   ExportedRecords.Sorted := True;

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -169,21 +170,36 @@ namespace DynamicForms {
         bool usePackData{ false };
         bool swapTarget{ false };
         std::uint32_t runOn{ 0 };
-        std::uint32_t dataId{ 0 };
+        std::uint32_t dataId{ std::numeric_limits<std::uint32_t>::max() };
         std::string runOnRef;
         std::string comparisonGlobal;
         std::string param1;
         std::string param2;
     };
 
-    struct PerkEntry
+    enum class PerkEntryKind : std::uint8_t
     {
-        std::uint32_t rank{ 0 };
-        std::uint32_t priority{ 0 };
-        std::uint32_t entryPoint{ 75 };
-        std::uint32_t function{ 1 };
-        std::uint32_t numArgs{ 0 };
-        float value{ 1.0F };
+        Quest,
+        Ability,
+        EntryPoint
+    };
+
+    enum class PerkFunctionDataKind : std::uint8_t
+    {
+        None,
+        OneValue,
+        TwoValue,
+        ActorValueAndValue,
+        LeveledList,
+        ActivateChoice,
+        Spell,
+        BooleanGraphVariable,
+        Text
+    };
+
+    struct PerkConditionTab
+    {
+        std::uint32_t index{ 0 };
         std::vector<PerkCondition> conditions;
     };
 
@@ -212,6 +228,34 @@ namespace DynamicForms {
         {
             return lhs.editorID == rhs.editorID && lhs.formID == rhs.formID;
         }
+    };
+
+    struct PerkFunctionData
+    {
+        PerkFunctionDataKind kind{ PerkFunctionDataKind::OneValue };
+        float value1{ 1.0F };
+        float value2{ 0.0F };
+        std::uint32_t actorValue{ 0 };
+        FormRef form;
+        std::string text;
+        std::string buttonLabel;
+        std::uint32_t flags{ 0 };
+        std::uint32_t fragmentIndex{ 0 };
+    };
+
+    struct PerkEntry
+    {
+        PerkEntryKind kind{ PerkEntryKind::EntryPoint };
+        std::uint32_t rank{ 0 };
+        std::uint32_t priority{ 0 };
+        FormRef quest;
+        std::uint32_t questStage{ 0 };
+        FormRef ability;
+        std::uint32_t entryPoint{ 75 };
+        std::uint32_t function{ 1 };
+        std::uint32_t numArgs{ 0 };
+        PerkFunctionData functionData;
+        std::vector<PerkConditionTab> conditionTabs;
     };
 
     struct ClimateWeatherEntry

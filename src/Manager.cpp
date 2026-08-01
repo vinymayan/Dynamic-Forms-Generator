@@ -32,11 +32,13 @@
 #include <ranges>
 #include <set>
 #include <sqlite3.h>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace {
     std::vector<DynamicForms::DynamicForm> forms;
     std::atomic_bool apiReady{ false };
+    bool questPerkEntryLayoutValid{ true };
     std::unordered_map<RE::TESTopicInfo*, RE::TESTopicInfo::TESResponse*> dynamicDialogueResponses;
     using GetResponseListFn = RE::TESTopicInfo::TESResponseList* (*)(RE::TESTopicInfo*, RE::TESTopicInfo::TESResponseList*);
     GetResponseListFn originalGetResponseList{ nullptr };
@@ -1514,15 +1516,35 @@ namespace {
 
     void ApplyKeywords(RE::BGSKeywordForm& keywordForm, const std::vector<DynamicForms::FormRef>& refs) {
         std::vector<RE::BGSKeyword*> keywords;
+        keywords.reserve(refs.size());
         for (const auto& keywordRef : refs) {
             if (auto* keyword = ResolveAs<RE::BGSKeyword>(keywordRef)) {
-                keywords.push_back(keyword);
+                if (std::ranges::find(keywords, keyword) == keywords.end()) {
+                    keywords.push_back(keyword);
+                }
             }
         }
-        while (keywordForm.GetNumKeywords() > 0) {
-            keywordForm.RemoveKeyword(static_cast<std::uint32_t>(0));
+
+        RE::BGSKeyword** replacement = nullptr;
+        if (!keywords.empty()) {
+            replacement = RE::calloc<RE::BGSKeyword*>(keywords.size());
+            if (!replacement) {
+                logger::warn("Could not allocate storage for {} keywords.", keywords.size());
+                return;
+            }
+            std::ranges::copy(keywords, replacement);
         }
-        keywordForm.AddKeywords(keywords);
+
+        auto* previous = keywordForm.keywords;
+        const auto previousCount = keywordForm.numKeywords;
+        keywordForm.keywords = replacement;
+        keywordForm.numKeywords = static_cast<std::uint32_t>(keywords.size());
+
+        // MemoryManager may return a non-owning sentinel for a zero-byte allocation.
+        // Only arrays that actually held entries are safe and necessary to release.
+        if (previous && previousCount > 0) {
+            RE::free(previous);
+        }
     }
 
     void ApplyPickupPutdownSounds(RE::BGSPickupPutdownSounds& sounds, const DynamicForms::DynamicForm& form) {
@@ -2444,17 +2466,8 @@ namespace {
             }
         }
 
-        std::vector<RE::BGSKeyword*> keywords;
-        for (const auto& keywordRef : form.keywords) {
-            if (auto* keyword = ResolveAs<RE::BGSKeyword>(keywordRef)) {
-                keywords.push_back(keyword);
-            }
-        }
-        while (armor->GetNumKeywords() > 0) {
-            armor->RemoveKeyword(static_cast<std::uint32_t>(0));
-        }
-        armor->AddKeywords(keywords);
-        logger::info("Configured armor '{}' with {} armor add-ons and {} keywords.", form.editorId, armor->armorAddons.size(), keywords.size());
+        ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*armor), form.keywords);
+        logger::info("Configured armor '{}' with {} armor add-ons and {} keywords.", form.editorId, armor->armorAddons.size(), armor->GetNumKeywords());
         return true;
     }
 
@@ -2655,74 +2668,565 @@ namespace {
         *reinterpret_cast<std::uintptr_t*>(object) = runtimeVTable.address();
     }
 
+    struct QuestPerkEntryLayout : RE::BGSPerkEntry
+    {
+        RE::TESQuest* quest;
+        std::uint8_t questStage;
+        std::uint8_t pad19[7];
+    };
+    static_assert(offsetof(QuestPerkEntryLayout, quest) == 0x10);
+    static_assert(offsetof(QuestPerkEntryLayout, questStage) == 0x18);
+    static_assert(sizeof(QuestPerkEntryLayout) == 0x20);
+
+    struct EntryPointFunctionDataTwoValueLayout : RE::BGSEntryPointFunctionData
+    {
+        float value1;
+        float value2;
+    };
+    static_assert(sizeof(EntryPointFunctionDataTwoValueLayout) == 0x10);
+
+    struct EntryPointFunctionDataLeveledListLayout : RE::BGSEntryPointFunctionData
+    {
+        RE::TESLevItem* leveledList;
+    };
+    static_assert(sizeof(EntryPointFunctionDataLeveledListLayout) == 0x10);
+
+    struct EntryPointFunctionDataBooleanGraphVariableLayout : RE::BGSEntryPointFunctionData
+    {
+        RE::BSFixedString variableName;
+    };
+    static_assert(sizeof(EntryPointFunctionDataBooleanGraphVariableLayout) == 0x10);
+
+    void ValidatePerkEntryRuntimeLayouts() {
+        questPerkEntryLayoutValid = true;
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler) {
+            logger::warn("Could not validate perk entry layouts: TESDataHandler is unavailable.");
+            return;
+        }
+
+        const auto& quests = dataHandler->GetFormArray<RE::TESQuest>();
+        const auto& perks = dataHandler->GetFormArray<RE::BGSPerk>();
+        for (const auto* perk : perks) {
+            if (!perk) {
+                continue;
+            }
+            for (const auto* base : perk->perkEntries) {
+                if (!base || base->GetType() != RE::PERK_ENTRY_TYPE::kQuest) {
+                    continue;
+                }
+
+                const auto* entry = reinterpret_cast<const QuestPerkEntryLayout*>(base);
+                const auto found = std::ranges::find(quests, entry->quest);
+                if (!entry->quest || found == quests.end()) {
+                    questPerkEntryLayoutValid = false;
+                    logger::error(
+                        "BGSQuestPerkEntry runtime layout validation failed for perk '{}'; "
+                        "DFG Quest perk entries will be disabled.",
+                        perk->GetFormEditorID());
+                    return;
+                }
+
+                logger::info(
+                    "Validated BGSQuestPerkEntry layout using perk '{}' -> quest '{}' stage {} "
+                    "(quest=0x10, stage=0x18, size=0x20).",
+                    perk->GetFormEditorID(),
+                    entry->quest->GetFormEditorID(),
+                    entry->questStage);
+                return;
+            }
+        }
+
+        logger::info(
+            "No loaded Quest perk entry was available for live layout validation; "
+            "using the verified 0x20 layout.");
+    }
+
     RE::BGSEntryPointPerkEntry* CreateEntryPointPerkEntryObject() {
         auto* entry = RE::calloc<RE::BGSEntryPointPerkEntry>(1);
         SetRuntimeVTable(entry, RE::VTABLE_BGSEntryPointPerkEntry[0]);
         return entry;
     }
 
-    RE::BGSEntryPointFunctionDataOneValue* CreateOneValueFunctionDataObject() {
-        auto* functionData = RE::calloc<RE::BGSEntryPointFunctionDataOneValue>(1);
-        SetRuntimeVTable(functionData, RE::VTABLE_BGSEntryPointFunctionDataOneValue[0]);
-        return functionData;
+    RE::BGSAbilityPerkEntry* CreateAbilityPerkEntryObject() {
+        auto* entry = RE::calloc<RE::BGSAbilityPerkEntry>(1);
+        SetRuntimeVTable(entry, RE::VTABLE_BGSAbilityPerkEntry[0]);
+        return entry;
     }
 
-    bool PerkEntryFunctionUsesOneValue(const std::uint32_t function) {
+    QuestPerkEntryLayout* CreateQuestPerkEntryObject() {
+        auto* entry = RE::calloc<QuestPerkEntryLayout>(1);
+        SetRuntimeVTable(entry, RE::VTABLE_BGSQuestPerkEntry[0]);
+        return entry;
+    }
+
+    DynamicForms::PerkFunctionDataKind ExpectedPerkFunctionDataKind(const std::uint32_t function) {
         using Function = RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION;
         switch (static_cast<Function>(function)) {
         case Function::kSetValue:
         case Function::kAddValue:
         case Function::kMultiplyValue:
-        case Function::kAbsoluteValue:
-        case Function::kNegativeAbsoluteValue:
-        case Function::kAddActorValueMult:
-        case Function::kSetToActorValueMult:
-        case Function::kMultiplyActorValueMult:
-        case Function::kMultiplyOnePlusActorValueMult:
-            return true;
-        default:
-            return false;
-        }
-    }
-
-    const char* PerkEntryFunctionName(const std::uint32_t function) {
-        using Function = RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION;
-        switch (static_cast<Function>(function)) {
-        case Function::kNullFunction:
-            return "Null Function";
-        case Function::kSetValue:
-            return "Set Value";
-        case Function::kAddValue:
-            return "Add Value";
-        case Function::kMultiplyValue:
-            return "Multiply Value";
+            return DynamicForms::PerkFunctionDataKind::OneValue;
         case Function::kAddRangeToValue:
-            return "Add Range To Value";
+            return DynamicForms::PerkFunctionDataKind::TwoValue;
         case Function::kAddActorValueMult:
-            return "Add Actor Value Mult";
-        case Function::kAbsoluteValue:
-            return "Absolute Value";
-        case Function::kNegativeAbsoluteValue:
-            return "Negative Absolute Value";
-        case Function::kAddLeveledList:
-            return "Add Leveled List";
-        case Function::kAddActivateChoice:
-            return "Add Activate Choice";
-        case Function::kSelectSpell:
-            return "Select Spell";
-        case Function::kSelectText:
-            return "Select Text";
         case Function::kSetToActorValueMult:
-            return "Set To Actor Value Mult";
         case Function::kMultiplyActorValueMult:
-            return "Multiply Actor Value Mult";
         case Function::kMultiplyOnePlusActorValueMult:
-            return "Multiply 1 + Actor Value Mult";
+            return DynamicForms::PerkFunctionDataKind::ActorValueAndValue;
+        case Function::kAddLeveledList:
+            return DynamicForms::PerkFunctionDataKind::LeveledList;
+        case Function::kAddActivateChoice:
+            return DynamicForms::PerkFunctionDataKind::ActivateChoice;
+        case Function::kSelectSpell:
+            return DynamicForms::PerkFunctionDataKind::Spell;
+        case Function::kSelectText:
+            return DynamicForms::PerkFunctionDataKind::BooleanGraphVariable;
         case Function::kSetText:
-            return "Set Text";
+            return DynamicForms::PerkFunctionDataKind::Text;
+        case Function::kAbsoluteValue:
+        case Function::kNegativeAbsoluteValue:
+        case Function::kNullFunction:
         default:
-            return "Unknown";
+            return DynamicForms::PerkFunctionDataKind::None;
         }
+    }
+
+    const RE::BGSEntryPoint::EntryPoint* GetPerkEntryPointDefinition(const std::uint32_t entryPoint) {
+        if (entryPoint >= static_cast<std::uint32_t>(RE::BGSEntryPoint::ENTRY_POINT::kTotal)) {
+            return nullptr;
+        }
+        return RE::BGSEntryPoint::GetEntryPoint(
+            static_cast<RE::BGSEntryPoint::ENTRY_POINT>(entryPoint));
+    }
+
+    const RE::BGSEntryPointFunction::EntryPointFunction* GetPerkFunctionDefinition(
+        const std::uint32_t function)
+    {
+        if (function >= static_cast<std::uint32_t>(
+                            RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION::kTotal)) {
+            return nullptr;
+        }
+        return RE::BGSEntryPointFunction::GetEntryPointFunction(
+            static_cast<RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION>(function));
+    }
+
+    bool IsPerkFunctionCompatible(const std::uint32_t entryPoint, const std::uint32_t function) {
+        const auto* entryPointDefinition = GetPerkEntryPointDefinition(entryPoint);
+        const auto* functionDefinition = GetPerkFunctionDefinition(function);
+        return entryPointDefinition && functionDefinition &&
+               entryPointDefinition->functionType == functionDefinition->type;
+    }
+
+    std::uint32_t NativePerkConditionTabCount(const std::uint32_t entryPoint) {
+        const auto* definition = GetPerkEntryPointDefinition(entryPoint);
+        return definition ? definition->parameters.count : 0U;
+    }
+
+    void NormalizePerkForm(DynamicForms::DynamicForm& form) {
+        if (form.kind != DynamicForms::FormKind::Perk) {
+            return;
+        }
+        for (auto& entry : form.entries) {
+            if (entry.kind != DynamicForms::PerkEntryKind::EntryPoint) {
+                continue;
+            }
+            entry.numArgs = NativePerkConditionTabCount(entry.entryPoint);
+            entry.functionData.kind = ExpectedPerkFunctionDataKind(entry.function);
+        }
+    }
+
+    void ValidateCondition(
+        const DynamicForms::PerkCondition& condition,
+        const std::string_view path,
+        std::vector<std::string>& errors)
+    {
+        const auto functionId = FunctionIdForCondition(condition);
+        if (functionId >= static_cast<std::uint32_t>(RE::FUNCTION_DATA::FunctionID::kTotal)) {
+            errors.push_back(std::format("{} uses invalid condition function ID {}.", path, functionId));
+        }
+        if (condition.opCode > 5U) {
+            errors.push_back(std::format("{} uses invalid comparison operator {}.", path, condition.opCode));
+        }
+        if (condition.runOn > 8U) {
+            errors.push_back(std::format("{} uses invalid Run On value {}.", path, condition.runOn));
+        }
+
+        if (condition.useGlobalComparison) {
+            const auto* comparisonGlobal =
+                ResolveConfigForm(condition.comparisonGlobal);
+            if (!comparisonGlobal ||
+                !comparisonGlobal->Is(RE::FormType::Global)) {
+                errors.push_back(std::format(
+                    "{} requires a valid Global for global comparison.",
+                    path));
+            }
+        }
+        if (condition.runOn == 2U) {
+            const auto* runOnForm = ResolveConfigForm(condition.runOnRef);
+            if (!runOnForm || !runOnForm->Is(RE::FormType::Reference)) {
+                errors.push_back(std::format(
+                    "{} requires a valid placed reference when Run On is Reference.",
+                    path));
+            }
+        }
+
+        const auto* function = ConditionCatalog::FindFunction(functionId);
+        if (!function) {
+            return;
+        }
+        const std::array params{
+            std::pair{ function->rawParam1, std::string_view(condition.param1) },
+            std::pair{ function->rawParam2, std::string_view(condition.param2) }
+        };
+        for (std::size_t index = 0; index < params.size(); ++index) {
+            const auto [rawType, value] = params[index];
+            if (value.empty()) {
+                continue;
+            }
+            try {
+                if (ConditionCatalog::IsFormParam(rawType)) {
+                    if (!ResolveConfigForm(std::string(value))) {
+                        errors.push_back(std::format(
+                            "{} parameter {} does not resolve to a form: '{}'.",
+                            path,
+                            index + 1,
+                            value));
+                    }
+                } else if (ConditionCatalog::IsIntegerParam(rawType)) {
+                    std::size_t parsed = 0;
+                    const auto parsedValue =
+                        std::stoll(std::string(value), &parsed, 0);
+                    static_cast<void>(parsedValue);
+                    if (parsed != value.size()) {
+                        throw std::invalid_argument("trailing characters");
+                    }
+                } else if (ConditionCatalog::IsFloatParam(rawType)) {
+                    std::size_t parsed = 0;
+                    const auto parsedValue =
+                        std::stof(std::string(value), &parsed);
+                    static_cast<void>(parsedValue);
+                    if (parsed != value.size()) {
+                        throw std::invalid_argument("trailing characters");
+                    }
+                }
+            } catch (...) {
+                errors.push_back(std::format(
+                    "{} parameter {} is not valid for {}: '{}'.",
+                    path,
+                    index + 1,
+                    rawType,
+                    value));
+            }
+        }
+    }
+
+    bool ValidatePerkForm(
+        const DynamicForms::DynamicForm& form,
+        std::vector<std::string>& errors)
+    {
+        if (form.numRanks < 1) {
+            errors.emplace_back("PERK numRanks must be between 1 and 127.");
+        }
+        if (!form.nextPerk.empty() && !ResolveAs<RE::BGSPerk>(form.nextPerk)) {
+            errors.push_back(std::format(
+                "Next perk '{}' does not resolve to a PERK.",
+                form.nextPerk.Display()));
+        }
+
+        for (std::size_t index = 0; index < form.conditions.size(); ++index) {
+            ValidateCondition(
+                form.conditions[index],
+                std::format("PERK condition {}", index),
+                errors);
+        }
+
+        const auto rankCount = static_cast<std::uint32_t>(
+            std::max<std::int32_t>(form.numRanks, 1));
+        for (std::size_t index = 0; index < form.entries.size(); ++index) {
+            const auto& entry = form.entries[index];
+            const auto path = std::format("PERK entry {}", index);
+            if (entry.rank > 255U) {
+                errors.push_back(std::format("{} rank {} exceeds 255.", path, entry.rank));
+            } else if (entry.rank >= rankCount) {
+                errors.push_back(std::format(
+                    "{} rank {} is outside numRanks {}.",
+                    path,
+                    entry.rank,
+                    rankCount));
+            }
+            if (entry.priority > 255U) {
+                errors.push_back(std::format("{} priority {} exceeds 255.", path, entry.priority));
+            }
+
+            if (entry.kind == DynamicForms::PerkEntryKind::Quest) {
+                if (!ResolveAs<RE::TESQuest>(entry.quest)) {
+                    errors.push_back(std::format(
+                        "{} requires a valid Quest reference.",
+                        path));
+                }
+                if (entry.questStage > 255U) {
+                    errors.push_back(std::format(
+                        "{} quest stage {} exceeds 255.",
+                        path,
+                        entry.questStage));
+                }
+                continue;
+            }
+            if (entry.kind == DynamicForms::PerkEntryKind::Ability) {
+                const auto* ability = ResolveAs<RE::SpellItem>(entry.ability);
+                if (!ability) {
+                    errors.push_back(std::format(
+                        "{} requires a valid Spell reference.",
+                        path));
+                } else if (ability->GetSpellType() != RE::MagicSystem::SpellType::kAbility) {
+                    errors.push_back(std::format(
+                        "{} spell '{}' is not an Ability.",
+                        path,
+                        entry.ability.Display()));
+                }
+                continue;
+            }
+
+            const auto* entryPointDefinition = GetPerkEntryPointDefinition(entry.entryPoint);
+            const auto* functionDefinition = GetPerkFunctionDefinition(entry.function);
+            if (!entryPointDefinition) {
+                errors.push_back(std::format(
+                    "{} uses invalid entry point {}.",
+                    path,
+                    entry.entryPoint));
+                continue;
+            }
+            if (!functionDefinition) {
+                errors.push_back(std::format(
+                    "{} uses invalid function {}.",
+                    path,
+                    entry.function));
+            } else if (!IsPerkFunctionCompatible(entry.entryPoint, entry.function)) {
+                errors.push_back(std::format(
+                    "{} function '{}' is incompatible with entry point '{}'.",
+                    path,
+                    functionDefinition->name ? functionDefinition->name : "Unknown",
+                    entryPointDefinition->name ? entryPointDefinition->name : "Unknown"));
+            }
+
+            const auto nativeTabCount = entryPointDefinition->parameters.count;
+            if (entry.numArgs != nativeTabCount) {
+                errors.push_back(std::format(
+                    "{} has {} condition tabs in JSON, but '{}' requires {}.",
+                    path,
+                    entry.numArgs,
+                    entryPointDefinition->name ? entryPointDefinition->name : "Unknown",
+                    nativeTabCount));
+            }
+            std::set<std::uint32_t> tabIndices;
+            for (const auto& tab : entry.conditionTabs) {
+                if (tab.index >= nativeTabCount) {
+                    errors.push_back(std::format(
+                        "{} condition tab {} is outside the native range 0..{}.",
+                        path,
+                        tab.index,
+                        nativeTabCount > 0 ? nativeTabCount - 1 : 0));
+                    continue;
+                }
+                if (!tabIndices.insert(tab.index).second) {
+                    errors.push_back(std::format(
+                        "{} contains duplicate condition tab {}.",
+                        path,
+                        tab.index));
+                }
+                for (std::size_t conditionIndex = 0;
+                     conditionIndex < tab.conditions.size();
+                     ++conditionIndex) {
+                    ValidateCondition(
+                        tab.conditions[conditionIndex],
+                        std::format(
+                            "{} tab {} condition {}",
+                            path,
+                            tab.index,
+                            conditionIndex),
+                        errors);
+                }
+            }
+
+            switch (ExpectedPerkFunctionDataKind(entry.function)) {
+            case DynamicForms::PerkFunctionDataKind::ActorValueAndValue:
+                if (entry.functionData.actorValue != std::numeric_limits<std::uint32_t>::max() &&
+                    entry.functionData.actorValue >=
+                        static_cast<std::uint32_t>(RE::ActorValue::kTotal)) {
+                    errors.push_back(std::format(
+                        "{} uses invalid actor value {}.",
+                        path,
+                        entry.functionData.actorValue));
+                }
+                break;
+            case DynamicForms::PerkFunctionDataKind::LeveledList:
+                if (!ResolveAs<RE::TESLevItem>(entry.functionData.form)) {
+                    errors.push_back(std::format(
+                        "{} requires a valid Leveled Item function-data reference.",
+                        path));
+                }
+                break;
+            case DynamicForms::PerkFunctionDataKind::Spell:
+                if (!ResolveAs<RE::SpellItem>(entry.functionData.form)) {
+                    errors.push_back(std::format(
+                        "{} requires a valid Spell function-data reference.",
+                        path));
+                }
+                break;
+            case DynamicForms::PerkFunctionDataKind::ActivateChoice:
+                if (!entry.functionData.form.empty() &&
+                    !ResolveAs<RE::SpellItem>(entry.functionData.form)) {
+                    errors.push_back(std::format(
+                        "{} Activate Choice spell '{}' does not resolve.",
+                        path,
+                        entry.functionData.form.Display()));
+                }
+                if ((entry.functionData.flags & ~0x3U) != 0U) {
+                    errors.push_back(std::format(
+                        "{} Activate Choice uses unsupported flags 0x{:X}.",
+                        path,
+                        entry.functionData.flags));
+                }
+                if (entry.functionData.fragmentIndex > 65535U) {
+                    errors.push_back(std::format(
+                        "{} Activate Choice fragment index {} exceeds 65535.",
+                        path,
+                        entry.functionData.fragmentIndex));
+                }
+                break;
+            case DynamicForms::PerkFunctionDataKind::BooleanGraphVariable:
+                if (entry.functionData.text.empty()) {
+                    errors.push_back(std::format(
+                        "{} requires a graph-variable name.",
+                        path));
+                }
+                break;
+            case DynamicForms::PerkFunctionDataKind::Text:
+                if (entry.functionData.text.empty()) {
+                    errors.push_back(std::format("{} requires text.", path));
+                }
+                break;
+            default:
+                break;
+            }
+        }
+        return errors.empty();
+    }
+
+    std::string JoinValidationErrors(const std::vector<std::string>& errors) {
+        std::string message;
+        constexpr std::size_t maxErrors = 4;
+        for (std::size_t index = 0; index < std::min(errors.size(), maxErrors); ++index) {
+            if (!message.empty()) {
+                message += " ";
+            }
+            message += errors[index];
+        }
+        if (errors.size() > maxErrors) {
+            message += std::format(" (and {} more)", errors.size() - maxErrors);
+        }
+        return message;
+    }
+
+    RE::BGSEntryPointFunctionData* CreatePerkFunctionData(
+        RE::BGSPerk& perk,
+        const DynamicForms::PerkEntry& source)
+    {
+        const auto kind = ExpectedPerkFunctionDataKind(source.function);
+        RE::BGSEntryPointFunctionData* result = nullptr;
+        switch (kind) {
+        case DynamicForms::PerkFunctionDataKind::None:
+            return nullptr;
+        case DynamicForms::PerkFunctionDataKind::OneValue: {
+            auto* value = RE::calloc<RE::BGSEntryPointFunctionDataOneValue>(1);
+            SetRuntimeVTable(value, RE::VTABLE_BGSEntryPointFunctionDataOneValue[0]);
+            if (value) {
+                value->data = source.functionData.value1;
+            }
+            result = value;
+            break;
+        }
+        case DynamicForms::PerkFunctionDataKind::TwoValue:
+        case DynamicForms::PerkFunctionDataKind::ActorValueAndValue: {
+            auto* value = RE::calloc<EntryPointFunctionDataTwoValueLayout>(1);
+            SetRuntimeVTable(value, RE::VTABLE_BGSEntryPointFunctionDataTwoValue[0]);
+            if (value) {
+                if (kind == DynamicForms::PerkFunctionDataKind::ActorValueAndValue) {
+                    const auto actorValue = static_cast<float>(
+                        static_cast<std::int32_t>(source.functionData.actorValue));
+                    std::memcpy(&value->value1, &actorValue, sizeof(actorValue));
+                } else {
+                    value->value1 = source.functionData.value1;
+                }
+                value->value2 = source.functionData.value2;
+            }
+            result = value;
+            break;
+        }
+        case DynamicForms::PerkFunctionDataKind::LeveledList: {
+            auto* value = RE::calloc<EntryPointFunctionDataLeveledListLayout>(1);
+            SetRuntimeVTable(value, RE::VTABLE_BGSEntryPointFunctionDataLeveledList[0]);
+            if (value) {
+                value->leveledList = ResolveAs<RE::TESLevItem>(source.functionData.form);
+            }
+            result = value;
+            break;
+        }
+        case DynamicForms::PerkFunctionDataKind::ActivateChoice: {
+            auto* value = RE::calloc<RE::BGSEntryPointFunctionDataActivateChoice>(1);
+            SetRuntimeVTable(value, RE::VTABLE_BGSEntryPointFunctionDataActivateChoice[0]);
+            if (value) {
+                std::construct_at(&value->label);
+                value->label = source.functionData.buttonLabel.c_str();
+                value->perk = &perk;
+                value->appliedSpell = ResolveAs<RE::SpellItem>(source.functionData.form);
+                value->flags = static_cast<RE::BGSEntryPointFunctionDataActivateChoice::Flag>(
+                    source.functionData.flags & 0x3U);
+                value->id = static_cast<std::uint16_t>(
+                    std::min(source.functionData.fragmentIndex, 65535U));
+            }
+            result = value;
+            break;
+        }
+        case DynamicForms::PerkFunctionDataKind::Spell: {
+            auto* value = RE::calloc<RE::BGSEntryPointFunctionDataSpellItem>(1);
+            SetRuntimeVTable(value, RE::VTABLE_BGSEntryPointFunctionDataSpellItem[0]);
+            if (value) {
+                value->spell = ResolveAs<RE::SpellItem>(source.functionData.form);
+            }
+            result = value;
+            break;
+        }
+        case DynamicForms::PerkFunctionDataKind::BooleanGraphVariable: {
+            auto* value = RE::calloc<EntryPointFunctionDataBooleanGraphVariableLayout>(1);
+            SetRuntimeVTable(value, RE::VTABLE_BGSEntryPointFunctionDataBooleanGraphVariable[0]);
+            if (value) {
+                std::construct_at(&value->variableName);
+                value->variableName = source.functionData.text.c_str();
+            }
+            result = value;
+            break;
+        }
+        case DynamicForms::PerkFunctionDataKind::Text: {
+            auto* value = RE::calloc<RE::BGSEntryPointFunctionDataText>(1);
+            SetRuntimeVTable(value, RE::VTABLE_BGSEntryPointFunctionDataText[0]);
+            if (value) {
+                std::construct_at(&value->text);
+                value->text = source.functionData.text.c_str();
+            }
+            result = value;
+            break;
+        }
+        }
+
+        if (!result) {
+            logger::warn(
+                "Could not allocate function data for perk '{}' function {}.",
+                perk.GetFormEditorID(),
+                source.function);
+        }
+        return result;
     }
 
     RE::BGSStandardSoundDef* CreateStandardSoundDefObject() {
@@ -2732,24 +3236,121 @@ namespace {
         return soundDef;
     }
 
+    void ClearPerkFunctionData(RE::BGSEntryPointFunctionData*& functionData) {
+        if (!functionData) {
+            return;
+        }
+
+        switch (functionData->GetType()) {
+        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kActivateChoice: {
+            auto* value = static_cast<RE::BGSEntryPointFunctionDataActivateChoice*>(functionData);
+            std::destroy_at(&value->label);
+            break;
+        }
+        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kBooleanGraphVariable: {
+            auto* value = reinterpret_cast<EntryPointFunctionDataBooleanGraphVariableLayout*>(functionData);
+            std::destroy_at(&value->variableName);
+            break;
+        }
+        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kText: {
+            auto* value = static_cast<RE::BGSEntryPointFunctionDataText*>(functionData);
+            std::destroy_at(&value->text);
+            break;
+        }
+        default:
+            break;
+        }
+
+        RE::free(functionData);
+        functionData = nullptr;
+    }
+
     void ClearPerkEntries(RE::BGSPerk& perk) {
         for (auto* entry : perk.perkEntries) {
             if (!entry) {
                 continue;
             }
-            auto* entryPoint = static_cast<RE::BGSEntryPointPerkEntry*>(entry);
-            for (auto& condition : entryPoint->conditions) {
-                ClearCondition(condition);
+
+            if (entry->GetType() == RE::PERK_ENTRY_TYPE::kEntryPoint) {
+                auto* entryPoint = static_cast<RE::BGSEntryPointPerkEntry*>(entry);
+                for (auto& condition : entryPoint->conditions) {
+                    ClearCondition(condition);
+                }
+                entryPoint->conditions.clear();
+                ClearPerkFunctionData(entryPoint->functionData);
             }
-            entryPoint->conditions.clear();
-            RE::free(entryPoint->functionData);
-            entryPoint->functionData = nullptr;
             RE::free(entry);
         }
         perk.perkEntries.clear();
     }
 
     RE::BGSPerkEntry* CreatePerkEntry(RE::BGSPerk& perk, const DynamicForms::PerkEntry& source) {
+        if (source.kind == DynamicForms::PerkEntryKind::Quest) {
+            if (!questPerkEntryLayoutValid) {
+                logger::warn(
+                    "Skipped quest entry for perk '{}' because the runtime layout validation failed.",
+                    perk.GetFormEditorID());
+                return nullptr;
+            }
+            auto* quest = ResolveAs<RE::TESQuest>(source.quest);
+            if (!quest) {
+                logger::warn(
+                    "Could not resolve quest entry '{}' for perk '{}'.",
+                    source.quest.Display(),
+                    perk.GetFormEditorID());
+                return nullptr;
+            }
+            auto* entry = CreateQuestPerkEntryObject();
+            if (!entry) {
+                logger::warn("Could not allocate BGSQuestPerkEntry for perk '{}'.", perk.GetFormEditorID());
+                return nullptr;
+            }
+            entry->header.rank = static_cast<std::uint8_t>(std::min(source.rank, 255U));
+            entry->header.priority = static_cast<std::uint8_t>(std::min(source.priority, 255U));
+            entry->quest = quest;
+            entry->questStage = static_cast<std::uint8_t>(std::min(source.questStage, 255U));
+            entry->SetParent(&perk);
+            logger::debug(
+                "[PerkEntry] type=Quest quest={} stage={} rank={} priority={}",
+                quest->GetFormEditorID(),
+                source.questStage,
+                source.rank,
+                source.priority);
+            return entry;
+        }
+
+        if (source.kind == DynamicForms::PerkEntryKind::Ability) {
+            auto* ability = ResolveAs<RE::SpellItem>(source.ability);
+            if (!ability) {
+                logger::warn(
+                    "Could not resolve ability entry '{}' for perk '{}'.",
+                    source.ability.Display(),
+                    perk.GetFormEditorID());
+                return nullptr;
+            }
+            if (ability->GetSpellType() != RE::MagicSystem::SpellType::kAbility) {
+                logger::warn(
+                    "Perk '{}' ability entry references spell '{}' whose spell type is not Ability.",
+                    perk.GetFormEditorID(),
+                    ability->GetFormEditorID());
+            }
+            auto* entry = CreateAbilityPerkEntryObject();
+            if (!entry) {
+                logger::warn("Could not allocate BGSAbilityPerkEntry for perk '{}'.", perk.GetFormEditorID());
+                return nullptr;
+            }
+            entry->header.rank = static_cast<std::uint8_t>(std::min(source.rank, 255U));
+            entry->header.priority = static_cast<std::uint8_t>(std::min(source.priority, 255U));
+            entry->ability = ability;
+            entry->SetParent(&perk);
+            logger::debug(
+                "[PerkEntry] type=Ability spell={} rank={} priority={}",
+                ability->GetFormEditorID(),
+                source.rank,
+                source.priority);
+            return entry;
+        }
+
         auto* entry = CreateEntryPointPerkEntryObject();
         if (!entry) {
             logger::warn("Could not allocate BGSEntryPointPerkEntry for perk '{}'.", perk.GetFormEditorID());
@@ -2759,43 +3360,195 @@ namespace {
         entry->header.rank = static_cast<std::uint8_t>(std::min(source.rank, 255U));
         entry->header.priority = static_cast<std::uint8_t>(std::min(source.priority, 255U));
         entry->entryData.entryPoint = static_cast<RE::BGSPerkEntry::EntryPoint>(std::min(source.entryPoint, 91U));
-        entry->entryData.function = static_cast<RE::BGSEntryPointPerkEntry::Function>(std::min(std::max(source.function, 1U), 15U));
-        entry->entryData.numArgs = static_cast<std::uint8_t>(std::min(source.numArgs, 255U));
+        entry->entryData.function =
+            static_cast<RE::BGSEntryPointPerkEntry::Function>(std::min(source.function, 15U));
         entry->perk = &perk;
 
-        if (PerkEntryFunctionUsesOneValue(source.function)) {
-            if (auto* functionData = CreateOneValueFunctionDataObject()) {
-                functionData->data = source.value;
-                entry->functionData = functionData;
-            } else {
-                logger::warn("Could not allocate BGSEntryPointFunctionDataOneValue for perk '{}'.", perk.GetFormEditorID());
+        const auto tabCount = NativePerkConditionTabCount(source.entryPoint);
+        entry->entryData.numArgs = static_cast<std::uint8_t>(tabCount);
+        entry->conditions.resize(tabCount);
+        std::vector<std::vector<DynamicForms::PerkCondition>> conditionsByTab(tabCount);
+        for (const auto& tab : source.conditionTabs) {
+            const auto tabIndex = std::min(tab.index, 254U);
+            if (tabIndex < conditionsByTab.size()) {
+                auto& conditions = conditionsByTab[tabIndex];
+                conditions.insert(conditions.end(), tab.conditions.begin(), tab.conditions.end());
             }
-        } else if (source.function == static_cast<std::uint32_t>(RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION::kNullFunction)) {
-            entry->functionData = nullptr;
-        } else {
-            logger::warn(
-                "Perk entry function {} ({}) needs function data not represented by the current DFG JSON schema. Creating entry without function data.",
-                source.function,
-                PerkEntryFunctionName(source.function));
+        }
+        for (std::size_t tabIndex = 0; tabIndex < conditionsByTab.size(); ++tabIndex) {
+            ApplyConditions(entry->conditions[tabIndex], conditionsByTab[tabIndex]);
         }
 
-        entry->conditions.resize(1);
-        ApplyConditions(entry->conditions[0], source.conditions);
+        entry->functionData = CreatePerkFunctionData(perk, source);
+        entry->SetParent(&perk);
 
-        logger::debug("[PerkEntry] entryPoint={} function={} rank={} priority={} value={} conditions={}",
+        logger::debug("[PerkEntry] type=EntryPoint entryPoint={} function={} rank={} priority={} tabs={}",
             source.entryPoint,
             source.function,
             source.rank,
             source.priority,
-            source.value,
-            source.conditions.size());
+            source.conditionTabs.size());
         return entry;
+    }
+
+    struct LoadedActorPerkSnapshot
+    {
+        RE::Actor* actor{ nullptr };
+        std::vector<std::pair<RE::TESQuest*, std::uint8_t>> questEntries;
+    };
+
+    class MatchingPerkEntriesVisitor final : public RE::PerkEntryVisitor
+    {
+    public:
+        explicit MatchingPerkEntriesVisitor(const RE::BSTArray<RE::BGSPerkEntry*>& candidates) :
+            candidates_(candidates)
+        {}
+
+        RE::BSContainer::ForEachResult Visit(RE::BGSPerkEntry* entry) override
+        {
+            if (entry && std::ranges::find(candidates_, entry) != candidates_.end()) {
+                matches.push_back(entry);
+            }
+            return RE::BSContainer::ForEachResult::kContinue;
+        }
+
+        std::vector<RE::BGSPerkEntry*> matches;
+
+    private:
+        const RE::BSTArray<RE::BGSPerkEntry*>& candidates_;
+    };
+
+    std::vector<LoadedActorPerkSnapshot> RemoveAppliedAbilityEntries(RE::BGSPerk& perk) {
+        std::vector<LoadedActorPerkSnapshot> snapshots;
+        if (perk.perkEntries.empty()) {
+            return snapshots;
+        }
+        auto* processLists = RE::ProcessLists::GetSingleton();
+        if (!processLists) {
+            return snapshots;
+        }
+
+        processLists->ForAllActors([&](RE::Actor* actor) {
+            if (!actor || !actor->HasPerk(&perk)) {
+                return RE::BSContainer::ForEachResult::kContinue;
+            }
+
+            MatchingPerkEntriesVisitor visitor(perk.perkEntries);
+            actor->ForEachPerk(visitor);
+            LoadedActorPerkSnapshot snapshot;
+            snapshot.actor = actor;
+            for (auto* entry : visitor.matches) {
+                if (entry->GetType() == RE::PERK_ENTRY_TYPE::kAbility) {
+                    entry->RemovePerkEntry(actor);
+                } else if (
+                    questPerkEntryLayoutValid &&
+                    entry->GetType() == RE::PERK_ENTRY_TYPE::kQuest) {
+                    const auto* questEntry = reinterpret_cast<const QuestPerkEntryLayout*>(entry);
+                    snapshot.questEntries.emplace_back(questEntry->quest, questEntry->questStage);
+                }
+            }
+            snapshots.push_back(std::move(snapshot));
+            return RE::BSContainer::ForEachResult::kContinue;
+        });
+        return snapshots;
+    }
+
+    void ApplyUpdatedAbilityAndQuestEntries(
+        RE::BGSPerk& perk,
+        const std::vector<LoadedActorPerkSnapshot>& snapshots)
+    {
+        for (const auto& snapshot : snapshots) {
+            if (!snapshot.actor || !snapshot.actor->HasPerk(&perk)) {
+                continue;
+            }
+            MatchingPerkEntriesVisitor visitor(perk.perkEntries);
+            snapshot.actor->ForEachPerk(visitor);
+            for (auto* entry : visitor.matches) {
+                if (entry->GetType() == RE::PERK_ENTRY_TYPE::kAbility) {
+                    entry->ApplyPerkEntry(snapshot.actor);
+                } else if (
+                    questPerkEntryLayoutValid &&
+                    entry->GetType() == RE::PERK_ENTRY_TYPE::kQuest) {
+                    const auto* questEntry = reinterpret_cast<const QuestPerkEntryLayout*>(entry);
+                    const auto key = std::pair{ questEntry->quest, questEntry->questStage };
+                    if (std::ranges::find(snapshot.questEntries, key) == snapshot.questEntries.end()) {
+                        entry->ApplyPerkEntry(snapshot.actor);
+                    }
+                }
+            }
+        }
+    }
+
+    struct RemovedActorPerkSnapshot
+    {
+        RE::Actor* actor{ nullptr };
+        std::uint32_t rank{ 0 };
+    };
+
+    std::vector<RemovedActorPerkSnapshot> RemovePerkFromLoadedActors(
+        RE::BGSPerk& perk)
+    {
+        std::vector<RemovedActorPerkSnapshot> snapshots;
+        auto* processLists = RE::ProcessLists::GetSingleton();
+        if (!processLists) {
+            return snapshots;
+        }
+
+        processLists->ForAllActors([&](RE::Actor* actor) {
+            if (!actor || !actor->HasPerk(&perk)) {
+                return RE::BSContainer::ForEachResult::kContinue;
+            }
+
+            MatchingPerkEntriesVisitor visitor(perk.perkEntries);
+            actor->ForEachPerk(visitor);
+            std::uint32_t rank = 0;
+            for (const auto* entry : visitor.matches) {
+                rank = std::max(rank, static_cast<std::uint32_t>(entry->GetRank()));
+            }
+            snapshots.push_back(RemovedActorPerkSnapshot{ actor, rank });
+            actor->RemovePerk(&perk);
+            return RE::BSContainer::ForEachResult::kContinue;
+        });
+
+        if (!snapshots.empty()) {
+            logger::info(
+                "Removed dynamic perk '{}' from {} loaded actor(s) before DPF release.",
+                perk.GetFormEditorID(),
+                snapshots.size());
+        }
+        return snapshots;
+    }
+
+    void RestorePerkToLoadedActors(
+        RE::BGSPerk& perk,
+        const std::vector<RemovedActorPerkSnapshot>& snapshots)
+    {
+        for (const auto& snapshot : snapshots) {
+            if (snapshot.actor && !snapshot.actor->HasPerk(&perk)) {
+                snapshot.actor->AddPerk(&perk, snapshot.rank);
+            }
+        }
+        if (!snapshots.empty()) {
+            logger::info(
+                "Restored dynamic perk '{}' to {} loaded actor(s) after delete rollback.",
+                perk.GetFormEditorID(),
+                snapshots.size());
+        }
     }
 
     bool ConfigurePerk(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
         auto* perk = tesForm ? tesForm->As<RE::BGSPerk>() : nullptr;
         if (!perk) {
             logger::warn("Dynamic form '{}' is not a BGSPerk", form.editorId);
+            return false;
+        }
+
+        std::vector<std::string> validationErrors;
+        if (!ValidatePerkForm(form, validationErrors)) {
+            logger::warn(
+                "Perk '{}' was not configured: {}",
+                form.editorId,
+                JoinValidationErrors(validationErrors));
             return false;
         }
 
@@ -2817,12 +3570,14 @@ namespace {
         }
 
         ApplyConditions(perk->perkConditions, form.conditions);
+        const auto loadedActorSnapshots = RemoveAppliedAbilityEntries(*perk);
         ClearPerkEntries(*perk);
         for (const auto& entry : form.entries) {
             if (auto* perkEntry = CreatePerkEntry(*perk, entry)) {
                 perk->perkEntries.push_back(perkEntry);
             }
         }
+        ApplyUpdatedAbilityAndQuestEntries(*perk, loadedActorSnapshots);
 
         logger::info("Configured perk '{}' with {} conditions and {} entries.",
             form.editorId,
@@ -3640,8 +4395,125 @@ namespace {
         using FK = DynamicForms::FormKind;
         switch (target.kind) {
         case FK::Perk: {
-            auto* value=source.As<RE::BGSPerk>(); if(!value)return false; target.fullName=value->fullName.c_str(); target.trait=value->data.trait; target.level=value->data.level; target.numRanks=value->data.numRanks; target.playable=value->data.playable; target.hidden=value->data.hidden; target.nextPerk=RuntimeFormRef(value->nextPerk); CaptureConditions(value->perkConditions,target.conditions); target.entries.clear();
-            for(auto* base:value->perkEntries){auto* entry=skyrim_cast<RE::BGSEntryPointPerkEntry*>(base);if(!entry)continue;DynamicForms::PerkEntry out;out.rank=entry->header.rank;out.priority=entry->header.priority;out.entryPoint=entry->entryData.entryPoint.underlying();out.function=entry->entryData.function.underlying();out.numArgs=entry->entryData.numArgs;if(PerkEntryFunctionUsesOneValue(out.function)&&entry->functionData)out.value=static_cast<RE::BGSEntryPointFunctionDataOneValue*>(entry->functionData)->data;if(!entry->conditions.empty())CaptureConditions(entry->conditions[0],out.conditions);target.entries.push_back(std::move(out));} return true;
+            auto* value = source.As<RE::BGSPerk>();
+            if (!value) {
+                return false;
+            }
+            target.fullName = value->fullName.c_str();
+            target.trait = value->data.trait;
+            target.level = value->data.level;
+            target.numRanks = value->data.numRanks;
+            target.playable = value->data.playable;
+            target.hidden = value->data.hidden;
+            target.nextPerk = RuntimeFormRef(value->nextPerk);
+            CaptureConditions(value->perkConditions, target.conditions);
+            target.entries.clear();
+
+            for (auto* base : value->perkEntries) {
+                if (!base) {
+                    continue;
+                }
+                DynamicForms::PerkEntry out;
+                out.rank = base->header.rank;
+                out.priority = base->header.priority;
+                switch (base->GetType()) {
+                case RE::PERK_ENTRY_TYPE::kQuest: {
+                    if (!questPerkEntryLayoutValid) {
+                        logger::warn(
+                            "Skipped quest perk entry while capturing '{}' because its runtime layout is unavailable.",
+                            value->GetFormEditorID());
+                        continue;
+                    }
+                    const auto* entry = reinterpret_cast<const QuestPerkEntryLayout*>(base);
+                    if (!entry->quest || entry->quest->GetFormType() != RE::FormType::Quest) {
+                        logger::warn(
+                            "Skipped quest perk entry with an invalid runtime layout while capturing '{}'.",
+                            value->GetFormEditorID());
+                        continue;
+                    }
+                    out.kind = DynamicForms::PerkEntryKind::Quest;
+                    out.quest = RuntimeFormRef(entry->quest);
+                    out.questStage = entry->questStage;
+                    break;
+                }
+                case RE::PERK_ENTRY_TYPE::kAbility: {
+                    const auto* entry = static_cast<const RE::BGSAbilityPerkEntry*>(base);
+                    out.kind = DynamicForms::PerkEntryKind::Ability;
+                    out.ability = RuntimeFormRef(entry->ability);
+                    break;
+                }
+                case RE::PERK_ENTRY_TYPE::kEntryPoint: {
+                    const auto* entry = static_cast<const RE::BGSEntryPointPerkEntry*>(base);
+                    out.kind = DynamicForms::PerkEntryKind::EntryPoint;
+                    out.entryPoint = entry->entryData.entryPoint.underlying();
+                    out.function = entry->entryData.function.underlying();
+                    out.numArgs = entry->entryData.numArgs;
+                    out.functionData.kind = ExpectedPerkFunctionDataKind(out.function);
+                    if (entry->functionData) {
+                        switch (entry->functionData->GetType()) {
+                        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kOneValue:
+                            out.functionData.value1 =
+                                static_cast<const RE::BGSEntryPointFunctionDataOneValue*>(entry->functionData)->data;
+                            break;
+                        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kTwoValue: {
+                            const auto* data =
+                                reinterpret_cast<const EntryPointFunctionDataTwoValueLayout*>(entry->functionData);
+                            if (out.functionData.kind == DynamicForms::PerkFunctionDataKind::ActorValueAndValue) {
+                                out.functionData.actorValue = static_cast<std::uint32_t>(
+                                    static_cast<std::int32_t>(std::lround(data->value1)));
+                            } else {
+                                out.functionData.value1 = data->value1;
+                            }
+                            out.functionData.value2 = data->value2;
+                            break;
+                        }
+                        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kLeveledList:
+                            out.functionData.form = RuntimeFormRef(
+                                reinterpret_cast<const EntryPointFunctionDataLeveledListLayout*>(
+                                    entry->functionData)->leveledList);
+                            break;
+                        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kActivateChoice: {
+                            const auto* data =
+                                static_cast<const RE::BGSEntryPointFunctionDataActivateChoice*>(entry->functionData);
+                            out.functionData.buttonLabel = data->label.c_str();
+                            out.functionData.form = RuntimeFormRef(data->appliedSpell);
+                            out.functionData.flags = data->flags.underlying();
+                            out.functionData.fragmentIndex = data->id;
+                            break;
+                        }
+                        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kSpellItem:
+                            out.functionData.form = RuntimeFormRef(
+                                static_cast<const RE::BGSEntryPointFunctionDataSpellItem*>(
+                                    entry->functionData)->spell);
+                            break;
+                        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kBooleanGraphVariable:
+                            out.functionData.text =
+                                reinterpret_cast<const EntryPointFunctionDataBooleanGraphVariableLayout*>(
+                                    entry->functionData)->variableName.c_str();
+                            break;
+                        case RE::BGSEntryPointFunctionData::ENTRY_POINT_FUNCTION_DATA::kText:
+                            out.functionData.text =
+                                static_cast<const RE::BGSEntryPointFunctionDataText*>(
+                                    entry->functionData)->text.c_str();
+                            break;
+                        default:
+                            break;
+                        }
+                    }
+                    for (std::uint32_t tabIndex = 0; tabIndex < entry->conditions.size(); ++tabIndex) {
+                        DynamicForms::PerkConditionTab tab;
+                        tab.index = tabIndex;
+                        CaptureConditions(entry->conditions[tabIndex], tab.conditions);
+                        out.conditionTabs.push_back(std::move(tab));
+                    }
+                    break;
+                }
+                default:
+                    continue;
+                }
+                target.entries.push_back(std::move(out));
+            }
+            return true;
         }
         case FK::Color: { auto* value=source.As<RE::BGSColorForm>(); if(!value)return false; target.fullName=value->fullName.c_str(); target.red=value->color.red; target.green=value->color.green; target.blue=value->color.blue; target.alpha=value->color.alpha; target.playable=value->flags.any(RE::BGSColorForm::Flag::kPlayable); return true; }
         case FK::ArtObject: { auto* value=source.As<RE::BGSArtObject>(); if(!value)return false; target.modelPath=value->GetModel(); target.artType=static_cast<DynamicForms::ArtObjectType>(value->data.artType.underlying()); target.boundX1=value->boundData.boundMin.x; target.boundY1=value->boundData.boundMin.y; target.boundZ1=value->boundData.boundMin.z; target.boundX2=value->boundData.boundMax.x; target.boundY2=value->boundData.boundMax.y; target.boundZ2=value->boundData.boundMax.z; return true; }
@@ -5476,16 +6348,79 @@ namespace {
         array.PushBack(item, allocator);
     }
 
+    const char* PerkEntryKindName(const DynamicForms::PerkEntryKind kind) {
+        switch (kind) {
+        case DynamicForms::PerkEntryKind::Quest:
+            return "Quest";
+        case DynamicForms::PerkEntryKind::Ability:
+            return "Ability";
+        case DynamicForms::PerkEntryKind::EntryPoint:
+        default:
+            return "EntryPoint";
+        }
+    }
+
+    DynamicForms::PerkEntryKind ReadPerkEntryKind(const rapidjson::Value& value) {
+        if (!value.IsString()) {
+            return DynamicForms::PerkEntryKind::EntryPoint;
+        }
+        const auto normalized = NormalizeKindName(value.GetString());
+        if (normalized == "quest") {
+            return DynamicForms::PerkEntryKind::Quest;
+        }
+        if (normalized == "ability") {
+            return DynamicForms::PerkEntryKind::Ability;
+        }
+        return DynamicForms::PerkEntryKind::EntryPoint;
+    }
+
+    const char* PerkFunctionDataKindName(const DynamicForms::PerkFunctionDataKind kind) {
+        switch (kind) {
+        case DynamicForms::PerkFunctionDataKind::None:
+            return "None";
+        case DynamicForms::PerkFunctionDataKind::OneValue:
+            return "OneValue";
+        case DynamicForms::PerkFunctionDataKind::TwoValue:
+            return "TwoValue";
+        case DynamicForms::PerkFunctionDataKind::ActorValueAndValue:
+            return "ActorValueAndValue";
+        case DynamicForms::PerkFunctionDataKind::LeveledList:
+            return "LeveledList";
+        case DynamicForms::PerkFunctionDataKind::ActivateChoice:
+            return "ActivateChoice";
+        case DynamicForms::PerkFunctionDataKind::Spell:
+            return "Spell";
+        case DynamicForms::PerkFunctionDataKind::BooleanGraphVariable:
+            return "BooleanGraphVariable";
+        case DynamicForms::PerkFunctionDataKind::Text:
+            return "Text";
+        default:
+            return "None";
+        }
+    }
+
     DynamicForms::PerkEntry ReadPerkEntry(const rapidjson::Value& value) {
         DynamicForms::PerkEntry entry;
         if (!value.IsObject()) {
             return entry;
+        }
+        if (value.HasMember("type")) {
+            entry.kind = ReadPerkEntryKind(value["type"]);
         }
         if (value.HasMember("rank") && value["rank"].IsUint()) {
             entry.rank = value["rank"].GetUint();
         }
         if (value.HasMember("priority") && value["priority"].IsUint()) {
             entry.priority = value["priority"].GetUint();
+        }
+        if (value.HasMember("quest")) {
+            entry.quest = ReadFormRefValue(value["quest"]);
+        }
+        if (value.HasMember("questStage") && value["questStage"].IsUint()) {
+            entry.questStage = value["questStage"].GetUint();
+        }
+        if (value.HasMember("ability")) {
+            entry.ability = ReadFormRefValue(value["ability"]);
         }
         if (value.HasMember("entryPoint") && value["entryPoint"].IsUint()) {
             entry.entryPoint = value["entryPoint"].GetUint();
@@ -5496,30 +6431,112 @@ namespace {
         if (value.HasMember("numArgs") && value["numArgs"].IsUint()) {
             entry.numArgs = value["numArgs"].GetUint();
         }
-        if (value.HasMember("value") && value["value"].IsNumber()) {
-            entry.value = value["value"].GetFloat();
-        }
-        if (value.HasMember("conditions") && value["conditions"].IsArray()) {
-            for (const auto& condition : value["conditions"].GetArray()) {
-                entry.conditions.push_back(ReadCondition(condition));
+
+        entry.functionData.kind = ExpectedPerkFunctionDataKind(entry.function);
+        if (value.HasMember("functionData") && value["functionData"].IsObject()) {
+            const auto& data = value["functionData"];
+            entry.functionData.value1 = ReadFloat(data, "value1", entry.functionData.value1);
+            entry.functionData.value2 = ReadFloat(data, "value2", entry.functionData.value2);
+            entry.functionData.actorValue = ReadUInt32(data, "actorValue", entry.functionData.actorValue);
+            if (data.HasMember("form")) {
+                entry.functionData.form = ReadFormRefValue(data["form"]);
             }
+            ReadString(data, "text", entry.functionData.text);
+            ReadString(data, "buttonLabel", entry.functionData.buttonLabel);
+            entry.functionData.flags = ReadUInt32(data, "flags", entry.functionData.flags);
+            entry.functionData.fragmentIndex = ReadUInt32(data, "fragmentIndex", entry.functionData.fragmentIndex);
+        } else if (value.HasMember("value") && value["value"].IsNumber()) {
+            entry.functionData.value1 = value["value"].GetFloat();
+        }
+
+        if (value.HasMember("conditionTabs") && value["conditionTabs"].IsArray()) {
+            for (const auto& item : value["conditionTabs"].GetArray()) {
+                if (!item.IsObject()) {
+                    continue;
+                }
+                DynamicForms::PerkConditionTab tab;
+                tab.index = ReadUInt32(item, "index", static_cast<std::uint32_t>(entry.conditionTabs.size()));
+                tab.conditions = ReadConditionArray(item, "conditions");
+                entry.conditionTabs.push_back(std::move(tab));
+            }
+        } else if (value.HasMember("conditions") && value["conditions"].IsArray()) {
+            DynamicForms::PerkConditionTab tab;
+            tab.conditions = ReadConditionArray(value, "conditions");
+            entry.conditionTabs.push_back(std::move(tab));
         }
         return entry;
     }
 
     void WritePerkEntry(rapidjson::Value& array, rapidjson::Document::AllocatorType& allocator, const DynamicForms::PerkEntry& entry) {
         rapidjson::Value item(rapidjson::kObjectType);
+        item.AddMember(
+            "type",
+            rapidjson::Value(PerkEntryKindName(entry.kind), allocator),
+            allocator);
         item.AddMember("rank", entry.rank, allocator);
         item.AddMember("priority", entry.priority, allocator);
+        if (entry.kind == DynamicForms::PerkEntryKind::Quest) {
+            AddFormRef(item, allocator, "quest", entry.quest);
+            item.AddMember("questStage", entry.questStage, allocator);
+            array.PushBack(item, allocator);
+            return;
+        }
+        if (entry.kind == DynamicForms::PerkEntryKind::Ability) {
+            AddFormRef(item, allocator, "ability", entry.ability);
+            array.PushBack(item, allocator);
+            return;
+        }
+
         item.AddMember("entryPoint", entry.entryPoint, allocator);
         item.AddMember("function", entry.function, allocator);
         item.AddMember("numArgs", entry.numArgs, allocator);
-        item.AddMember("value", entry.value, allocator);
-        rapidjson::Value conditions(rapidjson::kArrayType);
-        for (const auto& condition : entry.conditions) {
-            WriteCondition(conditions, allocator, condition);
+
+        const auto dataKind = ExpectedPerkFunctionDataKind(entry.function);
+        rapidjson::Value data(rapidjson::kObjectType);
+        data.AddMember(
+            "type",
+            rapidjson::Value(PerkFunctionDataKindName(dataKind), allocator),
+            allocator);
+        switch (dataKind) {
+        case DynamicForms::PerkFunctionDataKind::OneValue:
+            data.AddMember("value1", entry.functionData.value1, allocator);
+            break;
+        case DynamicForms::PerkFunctionDataKind::TwoValue:
+            data.AddMember("value1", entry.functionData.value1, allocator);
+            data.AddMember("value2", entry.functionData.value2, allocator);
+            break;
+        case DynamicForms::PerkFunctionDataKind::ActorValueAndValue:
+            data.AddMember("actorValue", entry.functionData.actorValue, allocator);
+            data.AddMember("value2", entry.functionData.value2, allocator);
+            break;
+        case DynamicForms::PerkFunctionDataKind::LeveledList:
+        case DynamicForms::PerkFunctionDataKind::Spell:
+            AddFormRef(data, allocator, "form", entry.functionData.form);
+            break;
+        case DynamicForms::PerkFunctionDataKind::ActivateChoice:
+            AddFormRef(data, allocator, "form", entry.functionData.form);
+            data.AddMember("buttonLabel", rapidjson::Value(entry.functionData.buttonLabel.c_str(), allocator), allocator);
+            data.AddMember("flags", entry.functionData.flags, allocator);
+            data.AddMember("fragmentIndex", entry.functionData.fragmentIndex, allocator);
+            break;
+        case DynamicForms::PerkFunctionDataKind::BooleanGraphVariable:
+        case DynamicForms::PerkFunctionDataKind::Text:
+            data.AddMember("text", rapidjson::Value(entry.functionData.text.c_str(), allocator), allocator);
+            break;
+        case DynamicForms::PerkFunctionDataKind::None:
+        default:
+            break;
         }
-        item.AddMember("conditions", conditions, allocator);
+        item.AddMember("functionData", data, allocator);
+
+        rapidjson::Value tabs(rapidjson::kArrayType);
+        for (const auto& sourceTab : entry.conditionTabs) {
+            rapidjson::Value tab(rapidjson::kObjectType);
+            tab.AddMember("index", sourceTab.index, allocator);
+            AddConditionArray(tab, allocator, "conditions", sourceTab.conditions);
+            tabs.PushBack(tab, allocator);
+        }
+        item.AddMember("conditionTabs", tabs, allocator);
         array.PushBack(item, allocator);
     }
 
@@ -6364,6 +7381,7 @@ namespace {
         ReadFormRefArray(doc, "spells", out.spells);
         ReadFormRefArray(doc, "packages", out.packages);
 
+        NormalizePerkForm(out);
         return true;
     }
 
@@ -6849,10 +7867,13 @@ namespace {
         return true;
     }
 
-    void AddOrReplaceResolvedForm(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
+    void AddOrReplaceBaseForm(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
         if (form.packageName.empty()) {
             form.packageName = sourcePackage;
         }
+        form.basePackageName.clear();
+        form.patchPackageNames.clear();
+
         const auto existing = std::ranges::find_if(forms, [&form](const DynamicForms::DynamicForm& current) {
             return current.editorId == form.editorId;
         });
@@ -6870,15 +7891,48 @@ namespace {
 
         const auto pluginNumber = existing->pluginNumber;
         const auto localId = existing->localId;
-        const auto packageName = existing->packageName;
+        const auto previousPackage = EffectivePackageName(*existing);
+        if (previousPackage != sourcePackage) {
+            logger::warn(
+                "Base form '{}' exists in packages '{}' and '{}'; '{}' owns the resolved form. This is not a patch layer.",
+                form.editorId,
+                previousPackage,
+                sourcePackage,
+                sourcePackage);
+        }
+
+        form.pluginNumber = pluginNumber;
+        form.localId = localId;
+        form.packageName = sourcePackage;
+        form.basePackageName.clear();
+        form.patchPackageNames.clear();
+        *existing = std::move(form);
+    }
+
+    void ApplyResolvedPatch(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
+        const auto existing = std::ranges::find_if(forms, [&form](const DynamicForms::DynamicForm& current) {
+            return current.editorId == form.editorId;
+        });
+        if (existing == forms.end()) {
+            logger::warn("Patch '{}' in package '{}' was skipped because the target form does not exist.", form.editorId, sourcePackage);
+            return;
+        }
+
+        const auto pluginNumber = existing->pluginNumber;
+        const auto localId = existing->localId;
+        const auto packageName = EffectivePackageName(*existing);
+        const auto basePackageName = existing->basePackageName.empty() ? packageName : existing->basePackageName;
         auto patchPackageNames = existing->patchPackageNames;
-        if (!sourcePackage.empty() && sourcePackage != packageName && std::ranges::find(patchPackageNames, sourcePackage) == patchPackageNames.end()) {
+        if (!sourcePackage.empty() && sourcePackage != packageName &&
+            std::ranges::find(patchPackageNames, sourcePackage) == patchPackageNames.end())
+        {
             patchPackageNames.push_back(sourcePackage);
         }
 
         form.pluginNumber = pluginNumber;
         form.localId = localId;
         form.packageName = packageName;
+        form.basePackageName = basePackageName;
         form.patchPackageNames = std::move(patchPackageNames);
         *existing = std::move(form);
     }
@@ -6907,9 +7961,17 @@ namespace {
                     if (storedPluginNumber > 0) form.pluginNumber = static_cast<std::uint32_t>(storedPluginNumber);
                     if (storedLocalId > 0) form.localId = static_cast<std::uint32_t>(storedLocalId);
                     form.packageName = form.packageName.empty() ? packageName : form.packageName;
-                    AddOrReplaceResolvedForm(std::move(form), packageName);
+                    AddOrReplaceBaseForm(std::move(form), packageName);
                 }
             }
+        }
+
+        if (!ExecSql(
+                db.handle,
+                "DELETE FROM patches WHERE target_editor_id IN (SELECT editor_id FROM forms);",
+                std::format("{} base/patch cleanup", packageName)))
+        {
+            logger::warn("Could not remove patch rows shadowed by base forms in package '{}'.", packageName);
         }
 
         SqliteStatement patchesStatement;
@@ -6933,7 +7995,7 @@ namespace {
                 DynamicForms::DynamicForm patch;
                 if (ReadFormPayload(payloadText, std::format("{} patch:{}", packageName, editorText), editorText, patch)) {
                     patch.packageName = targetPackageText && targetPackageText[0] != '\0' ? targetPackageText : existing->packageName;
-                    AddOrReplaceResolvedForm(std::move(patch), packageName);
+                    ApplyResolvedPatch(std::move(patch), packageName);
                 }
             }
         }
@@ -6971,10 +8033,22 @@ namespace Manager {
         return forms;
     }
 
+    bool ValidateForm(
+        const DynamicForms::DynamicForm& form,
+        std::vector<std::string>& errors)
+    {
+        errors.clear();
+        if (form.kind == DynamicForms::FormKind::Perk) {
+            return ValidatePerkForm(form, errors);
+        }
+        return true;
+    }
+
     void LoadForms() {
         apiReady.store(false, std::memory_order_release);
         forms.clear();
         dynamicDialogueResponses.clear();
+        ValidatePerkEntryRuntimeLayouts();
 
         const auto packageNames = DiscoverPackageNames();
         for (const auto& packageName : packageNames) {
@@ -7915,6 +8989,15 @@ namespace Manager {
             return false;
         }
 
+        NormalizePerkForm(forms[index]);
+        std::vector<std::string> validationErrors;
+        if (!ValidateForm(forms[index], validationErrors)) {
+            logger::warn(
+                "Could not save '{}': {}",
+                forms[index].editorId,
+                JoinValidationErrors(validationErrors));
+            return false;
+        }
         if (!ResolveDPFForm(forms[index])) {
             return false;
         }
@@ -7936,6 +9019,16 @@ namespace Manager {
         std::size_t savedCount = 0;
         for (std::size_t i = 0; i < forms.size(); ++i) {
             const bool wasDirty = forms[i].dirty;
+            NormalizePerkForm(forms[i]);
+            std::vector<std::string> validationErrors;
+            if (!ValidateForm(forms[i], validationErrors)) {
+                logger::warn(
+                    "Could not save '{}': {}",
+                    forms[i].editorId,
+                    JoinValidationErrors(validationErrors));
+                saved = false;
+                continue;
+            }
             if (ResolveDPFForm(forms[i]) && SaveForm(forms[i])) {
                 forms[i].dirty = dispatchUpdate ? false : wasDirty;
                 updatedSignatures.insert(ToSignature(forms[i].kind));
@@ -8054,6 +9147,15 @@ namespace Manager {
         }
 
         auto createdForm = form;
+        NormalizePerkForm(createdForm);
+        std::vector<std::string> validationErrors;
+        if (!ValidateForm(createdForm, validationErrors)) {
+            logger::warn(
+                "Could not create '{}': {}",
+                createdForm.editorId,
+                JoinValidationErrors(validationErrors));
+            return false;
+        }
         if (!ResolveDPFForm(createdForm)) {
             return false;
         }
@@ -8073,6 +9175,7 @@ namespace Manager {
         }
 
         forms[index] = form;
+        NormalizePerkForm(forms[index]);
         forms[index].dirty = true;
         return true;
     }
@@ -8089,28 +9192,62 @@ namespace Manager {
         }
 
         const auto form = forms[index];
+        auto runtimeSnapshot = form;
+        bool recoveredExistingSlot = false;
+        auto* runtimeForm =
+            ResolveDPFFormObject(runtimeSnapshot, false, &recoveredExistingSlot);
+        const auto& releasedForm = runtimeForm ? runtimeSnapshot : form;
+        auto* runtimePerk = runtimeForm ? runtimeForm->As<RE::BGSPerk>() : nullptr;
+        const auto actorSnapshots = runtimePerk ?
+            RemovePerkFromLoadedActors(*runtimePerk) :
+            std::vector<RemovedActorPerkSnapshot>{};
+
         bool released = false;
-        if (form.pluginNumber != 0 && form.localId != 0) {
-            released = api->ReleaseByPluginLocalId(form.pluginNumber, form.localId, DPF_OWNER);
+        if (releasedForm.pluginNumber != 0 && releasedForm.localId != 0) {
+            released = api->ReleaseByPluginLocalId(
+                releasedForm.pluginNumber,
+                releasedForm.localId,
+                DPF_OWNER);
         }
         if (!released) {
             released = api->ReleaseByOwnerKey(DPF_OWNER, form.editorId.c_str());
         }
         if (!released) {
-            logger::warn("DPF release failed for dynamic form '{}' slot {}:{:06X}.", form.editorId, form.pluginNumber, form.localId);
+            if (runtimePerk) {
+                RestorePerkToLoadedActors(*runtimePerk, actorSnapshots);
+            }
+            logger::warn(
+                "DPF release failed for dynamic form '{}' slot {}:{:06X}.",
+                form.editorId,
+                releasedForm.pluginNumber,
+                releasedForm.localId);
             return false;
         }
 
         if (!DeleteStoredForm(form)) {
             logger::warn("Could not delete dynamic form '{}' from package storage.", form.editorId);
+            auto restored = form;
+            restored.pluginNumber = 0;
+            restored.localId = 0;
+            if (auto* restoredRuntime = ResolveDPFFormObject(restored, true)) {
+                forms[index] = restored;
+                SaveForm(forms[index]);
+                if (auto* restoredPerk = restoredRuntime->As<RE::BGSPerk>()) {
+                    RestorePerkToLoadedActors(*restoredPerk, actorSnapshots);
+                }
+            }
             return false;
         }
 
         const auto signature = ToSignature(form.kind);
         forms.erase(forms.begin() + static_cast<std::ptrdiff_t>(index));
         ListManager::GetSingleton()->PopulateAllLists(true);
-        DispatchEvent(UPDATED_EVENT, signature, static_cast<float>(form.localId));
-        logger::info("Deleted dynamic form '{}' from DPF slot {}:{:06X}.", form.editorId, form.pluginNumber, form.localId);
+        DispatchEvent(UPDATED_EVENT, signature, static_cast<float>(releasedForm.localId));
+        logger::info(
+            "Deleted dynamic form '{}' from DPF slot {}:{:06X}.",
+            form.editorId,
+            releasedForm.pluginNumber,
+            releasedForm.localId);
         return true;
     }
 
@@ -8658,6 +9795,14 @@ namespace
         form.localId = 0;
         form.dirty = false;
 
+        std::vector<std::string> validationErrors;
+        if (!Manager::ValidateForm(form, validationErrors)) {
+            return Fail(
+                result,
+                DFG::Status::InvalidArgument,
+                JoinValidationErrors(validationErrors));
+        }
+
         bool recoveredExistingSlot = false;
         ResolveDPFFailure resolveFailure = ResolveDPFFailure::None;
         auto* runtimeForm = ResolveDPFFormObject(form, false, &recoveredExistingSlot, &resolveFailure);
@@ -8779,6 +9924,14 @@ namespace
         updated.localId = oldForm.localId;
         updated.dirty = false;
 
+        std::vector<std::string> validationErrors;
+        if (!Manager::ValidateForm(updated, validationErrors)) {
+            return Fail(
+                result,
+                DFG::Status::InvalidArgument,
+                JoinValidationErrors(validationErrors));
+        }
+
         bool recoveredExistingSlot = false;
         ResolveDPFFailure resolveFailure = ResolveDPFFailure::None;
         auto* runtimeForm = ResolveDPFFormObject(updated, false, &recoveredExistingSlot, &resolveFailure);
@@ -8840,9 +9993,17 @@ namespace
         const auto& releasedForm = deletedRuntimeForm ? runtimeSnapshot : form;
         FillFormResult(result, releasedForm, deletedRuntimeForm, recoveredExistingSlot);
         const auto deletedFormID = deletedRuntimeForm ? deletedRuntimeForm->GetFormID() : 0;
+        auto* deletedRuntimePerk =
+            deletedRuntimeForm ? deletedRuntimeForm->As<RE::BGSPerk>() : nullptr;
+        const auto actorSnapshots = deletedRuntimePerk ?
+            RemovePerkFromLoadedActors(*deletedRuntimePerk) :
+            std::vector<RemovedActorPerkSnapshot>{};
 
         auto* api = DPF::GetAPI();
         if (!api) {
+            if (deletedRuntimePerk) {
+                RestorePerkToLoadedActors(*deletedRuntimePerk, actorSnapshots);
+            }
             return Fail(result, DFG::Status::DPFUnavailable, "Dynamic Persistent Forms API is unavailable.");
         }
 
@@ -8854,6 +10015,9 @@ namespace
             released = api->ReleaseByOwnerKey(Manager::DPF_OWNER, form.editorId.c_str());
         }
         if (!released) {
+            if (deletedRuntimePerk) {
+                RestorePerkToLoadedActors(*deletedRuntimePerk, actorSnapshots);
+            }
             return Fail(result,
                 DFG::Status::DPFReleaseFailed,
                 std::format("DPF could not release slot {}:{:06X}.", releasedForm.pluginNumber, releasedForm.localId));
@@ -8866,6 +10030,9 @@ namespace
             if (auto* restoredRuntime = ResolveDPFFormObject(restored, true)) {
                 forms[index] = restored;
                 Manager::SaveForm(forms[index]);
+                if (auto* restoredPerk = restoredRuntime->As<RE::BGSPerk>()) {
+                    RestorePerkToLoadedActors(*restoredPerk, actorSnapshots);
+                }
                 FillFormResult(result, forms[index], restoredRuntime, false);
             }
             return Fail(result, DFG::Status::PersistenceFailed, "DPF released the form, but package.db deletion failed; DFG attempted to restore it.");

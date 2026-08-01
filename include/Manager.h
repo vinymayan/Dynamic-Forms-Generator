@@ -3,6 +3,7 @@
 #include "FormData.h"
 
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -22,6 +23,7 @@ namespace Manager {
     bool SaveAllForms(bool dispatchUpdate = true);
     bool AddForm(const DynamicForms::DynamicForm& form);
     bool PopulateFormFromGameTemplate(DynamicForms::DynamicForm& form, const DynamicForms::FormRef& templateRef);
+    bool ValidateForm(const DynamicForms::DynamicForm& form, std::vector<std::string>& errors);
     const char* GetListTypeName(DynamicForms::FormKind kind);
     bool UpdateForm(std::size_t index, const DynamicForms::DynamicForm& form);
     bool DeleteForm(std::size_t index);

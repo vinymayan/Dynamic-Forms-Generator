@@ -229,6 +229,25 @@ namespace {
     constexpr std::array ART_TYPE_ITEMS{ "MagicCasting", "MagicHitEffect", "MagicEnchantEffect" };
     constexpr std::array HEAD_PART_TYPE_ITEMS{ "Misc", "Face", "Eyes", "Hair", "FacialHair", "Scar", "Eyebrows" };
     constexpr std::array CONDITION_KIND_ITEMS{ "Raw", "GetGlobalValue", "GetActorValue", "GetBaseActorValue", "HasPerk", "GetQuestCompleted", "HasSpell" };
+    constexpr std::array PERK_ENTRY_TYPE_ITEMS{ "Quest", "Ability", "Entry Point" };
+    constexpr std::array PERK_FUNCTION_ITEMS{
+        "Unknown 0",
+        "Set Value",
+        "Add Value",
+        "Multiply Value",
+        "Add Range To Value",
+        "Add Actor Value Mult",
+        "Absolute Value",
+        "Negative Absolute Value",
+        "Add Leveled List",
+        "Add Activate Choice",
+        "Select Spell",
+        "Select Text",
+        "Set To Actor Value Mult",
+        "Multiply Actor Value Mult",
+        "Multiply 1 + Actor Value Mult",
+        "Set Text"
+    };
     constexpr std::array CONDITION_OP_ITEMS{ "==", "!=", ">", ">=", "<", "<=" };
     constexpr std::array CONDITION_RUN_ON_ITEMS{ "Subject", "Target", "Reference", "Combat Target", "Linked Ref", "Quest Alias", "Package Data", "Event Data", "Command Target" };
     constexpr std::array DIALOGUE_TYPE_ITEMS{ "Player Dialogue", "Command Dialogue", "Scene Dialogue", "Combat", "Favors", "Detection", "Service", "Miscellaneous" };
@@ -1624,18 +1643,6 @@ namespace {
                     } else {
                         lastTestActionSucceeded = false;
                         testActionMessage = std::format("{} {}", Configuration::GetLoc("menu.spawn_at_player_failed", "Could not spawn:"), form.editorId);
-                    }
-                }
-                if (form.kind == DynamicForms::FormKind::NPC) {
-                    ImGui::SameLine();
-                    if (ImGui::Button(Configuration::GetLoc("menu.spawn_lydia_debug", "Spawn Lydia debug"))) {
-                        if (Manager::SpawnLydiaForDebug()) {
-                            lastTestActionSucceeded = true;
-                            testActionMessage = Configuration::GetLoc("menu.spawned_lydia_debug", "Lydia debug spawned.");
-                        } else {
-                            lastTestActionSucceeded = false;
-                            testActionMessage = Configuration::GetLoc("menu.spawn_lydia_debug_failed", "Could not spawn Lydia debug.");
-                        }
                     }
                 }
             }
@@ -4979,26 +4986,73 @@ namespace {
         if (rawType == "ptQuest") {
             return "Quest";
         }
-        if (rawType == "ptMagicItem") {
-            return "Spell";
-        }
         if (rawType == "ptKeyword") {
             return "Keyword";
         }
         if (rawType == "ptFormList") {
             return "FormList";
         }
-        if (rawType == "ptObjectReference" || rawType == "ptActor" || rawType == "ptReferencableObject") {
-            return "Activator";
-        }
-        if (rawType == "ptInventoryObject") {
-            return "Armor";
-        }
         if (rawType == "ptLocation") {
-            return "FormList";
+            return "Location";
         }
         if (rawType == "ptActorBase") {
             return "NPC";
+        }
+        if (rawType == "ptFaction") {
+            return "Faction";
+        }
+        if (rawType == "ptRace") {
+            return "Race";
+        }
+        if (rawType == "ptClass") {
+            return "Class";
+        }
+        if (rawType == "ptRegion") {
+            return "Region";
+        }
+        if (rawType == "ptAssociationType") {
+            return "AssociationType";
+        }
+        if (rawType == "ptEncounterZone") {
+            return "EncounterZone";
+        }
+        if (rawType == "ptEquipType") {
+            return "EquipSlot";
+        }
+        if (rawType == "ptFurniture") {
+            return "Furniture";
+        }
+        if (rawType == "ptIdleForm") {
+            return "Idle";
+        }
+        if (rawType == "ptMagicEffect") {
+            return "MagicEffect";
+        }
+        if (rawType == "ptPackage") {
+            return "Package";
+        }
+        if (rawType == "ptRefType") {
+            return "LocationRefType";
+        }
+        if (rawType == "ptScene") {
+            return "Scene";
+        }
+        if (rawType == "ptShout") {
+            return "Shout";
+        }
+        if (rawType == "ptVoiceType") {
+            return "VoiceType";
+        }
+        if (rawType == "ptWeather") {
+            return "Weather";
+        }
+        if (
+            rawType == "ptInventoryObject" ||
+            rawType == "ptMagicItem" ||
+            rawType == "ptKnowable" ||
+            rawType == "ptOwner" ||
+            rawType == "ptReferencableObject") {
+            return "Any";
         }
         return nullptr;
     }
@@ -5066,7 +5120,15 @@ namespace {
         bool changed = false;
         ImGui::TextDisabled("%s: %s", label, rawType);
         if (const auto* listType = ListTypeForConditionParam(rawType)) {
-            changed |= DrawFormReferencePicker(label, listType, value);
+            if (std::string_view(listType) == "Any") {
+                auto ref = ParseDisplayFormRef(value);
+                changed |= DrawAnyFormReferencePicker(label, ref);
+                if (changed) {
+                    value = ref.Display();
+                }
+            } else {
+                changed |= DrawFormReferencePicker(label, listType, value);
+            }
         } else {
             changed |= InputString(label, value, 360.0F);
         }
@@ -5129,11 +5191,15 @@ namespace {
             ImGui::TextDisabled("%s", Configuration::GetLoc("menu.run_on_ref_hint", "Run on ref is used only when Run on = Reference."));
         }
 
-        if (condition.runOn == 5 || condition.runOn == 6 || condition.runOn == 7) {
-            int dataId = static_cast<int>(condition.dataId);
+        const bool hasThirdParameter =
+            functionInfo && std::string_view(functionInfo->rawParam3) != "ptNone";
+        if (hasThirdParameter || condition.runOn == 5 || condition.runOn == 6 || condition.runOn == 7) {
+            auto dataId = static_cast<std::int32_t>(condition.dataId);
             ImGui::SetNextItemWidth(160.0F);
-            if (ImGui::InputInt(Configuration::GetLoc("menu.data_id", "Data ID"), &dataId)) {
-                condition.dataId = static_cast<std::uint32_t>(std::max(dataId, 0));
+            if (ImGui::InputInt(
+                    Configuration::GetLoc("menu.data_id", "Param 3 / Data ID"),
+                    &dataId)) {
+                condition.dataId = static_cast<std::uint32_t>(dataId);
                 changed = true;
             }
         } else {
@@ -5144,7 +5210,7 @@ namespace {
             changed |= DrawConditionParam("Param 1", functionInfo->rawParam1, condition.param1);
             changed |= DrawConditionParam("Param 2", functionInfo->rawParam2, condition.param2);
             if (std::string_view(functionInfo->rawParam3) != "ptNone") {
-                ImGui::TextColored({ 1.0F, 0.75F, 0.35F, 1.0F }, Configuration::GetLoc("menu.param_3_exists_in_catalog_but_this_commonlib_condition_layou", "Param 3 exists in catalog (%s), but this CommonLib condition layout exposes params[2]."), functionInfo->rawParam3);
+                ImGui::TextDisabled("Param 3 type: %s", functionInfo->rawParam3);
             }
         } else {
             changed |= InputString("Param 1", condition.param1, 360.0F);
@@ -5186,13 +5252,152 @@ namespace {
         return changed;
     }
 
+    DynamicForms::PerkFunctionDataKind PerkFunctionDataKindForUI(const std::uint32_t function) {
+        switch (function) {
+        case 1:
+        case 2:
+        case 3:
+            return DynamicForms::PerkFunctionDataKind::OneValue;
+        case 4:
+            return DynamicForms::PerkFunctionDataKind::TwoValue;
+        case 5:
+        case 12:
+        case 13:
+        case 14:
+            return DynamicForms::PerkFunctionDataKind::ActorValueAndValue;
+        case 8:
+            return DynamicForms::PerkFunctionDataKind::LeveledList;
+        case 9:
+            return DynamicForms::PerkFunctionDataKind::ActivateChoice;
+        case 10:
+            return DynamicForms::PerkFunctionDataKind::Spell;
+        case 11:
+            return DynamicForms::PerkFunctionDataKind::BooleanGraphVariable;
+        case 15:
+            return DynamicForms::PerkFunctionDataKind::Text;
+        default:
+            return DynamicForms::PerkFunctionDataKind::None;
+        }
+    }
+
+    const RE::BGSEntryPoint::EntryPoint* PerkEntryPointDefinitionForUI(
+        const std::uint32_t entryPoint)
+    {
+        if (entryPoint >= static_cast<std::uint32_t>(RE::BGSEntryPoint::ENTRY_POINT::kTotal)) {
+            return nullptr;
+        }
+        return RE::BGSEntryPoint::GetEntryPoint(
+            static_cast<RE::BGSEntryPoint::ENTRY_POINT>(entryPoint));
+    }
+
+    const RE::BGSEntryPointFunction::EntryPointFunction* PerkFunctionDefinitionForUI(
+        const std::uint32_t function)
+    {
+        if (function >= static_cast<std::uint32_t>(
+                            RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION::kTotal)) {
+            return nullptr;
+        }
+        return RE::BGSEntryPointFunction::GetEntryPointFunction(
+            static_cast<RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION>(function));
+    }
+
+    bool IsPerkFunctionCompatibleForUI(
+        const std::uint32_t entryPoint,
+        const std::uint32_t function)
+    {
+        const auto* entryPointDefinition = PerkEntryPointDefinitionForUI(entryPoint);
+        const auto* functionDefinition = PerkFunctionDefinitionForUI(function);
+        return entryPointDefinition && functionDefinition &&
+               entryPointDefinition->functionType == functionDefinition->type;
+    }
+
+    std::uint32_t DefaultPerkFunctionForUI(const std::uint32_t entryPoint) {
+        for (std::uint32_t function = 0;
+             function < static_cast<std::uint32_t>(
+                            RE::BGSEntryPointFunction::ENTRY_POINT_FUNCTION::kTotal);
+             ++function) {
+            if (IsPerkFunctionCompatibleForUI(entryPoint, function)) {
+                return function;
+            }
+        }
+        return 0;
+    }
+
+    bool SynchronizePerkConditionTabs(DynamicForms::PerkEntry& entry) {
+        const auto* definition = PerkEntryPointDefinitionForUI(entry.entryPoint);
+        const auto nativeCount = definition ? definition->parameters.count : 0U;
+        bool changed = entry.numArgs != nativeCount;
+        entry.numArgs = nativeCount;
+
+        bool needsRebuild = entry.conditionTabs.size() != nativeCount;
+        if (!needsRebuild) {
+            for (std::size_t index = 0; index < entry.conditionTabs.size(); ++index) {
+                if (entry.conditionTabs[index].index != index) {
+                    needsRebuild = true;
+                    break;
+                }
+            }
+        }
+        if (!needsRebuild) {
+            return changed;
+        }
+
+        std::vector<DynamicForms::PerkConditionTab> normalized(nativeCount);
+        for (std::size_t index = 0; index < normalized.size(); ++index) {
+            normalized[index].index = static_cast<std::uint32_t>(index);
+        }
+        for (auto& oldTab : entry.conditionTabs) {
+            if (oldTab.index >= normalized.size()) {
+                continue;
+            }
+            auto& conditions = normalized[oldTab.index].conditions;
+            conditions.insert(
+                conditions.end(),
+                std::make_move_iterator(oldTab.conditions.begin()),
+                std::make_move_iterator(oldTab.conditions.end()));
+        }
+        entry.conditionTabs = std::move(normalized);
+        return true;
+    }
+
+    bool DrawPerkConditionTabs(DynamicForms::PerkEntry& entry) {
+        bool changed = SynchronizePerkConditionTabs(entry);
+        const auto* definition = PerkEntryPointDefinitionForUI(entry.entryPoint);
+
+        for (std::size_t tabIndex = 0; tabIndex < entry.conditionTabs.size(); ++tabIndex) {
+            auto& tab = entry.conditionTabs[tabIndex];
+            ImGui::PushID(static_cast<int>(tabIndex));
+            const auto* parameter =
+                definition && definition->parameters.data &&
+                        tabIndex < definition->parameters.count ?
+                    &definition->parameters.data[tabIndex] :
+                    nullptr;
+            const auto parameterName =
+                parameter && parameter->name ? parameter->name : "Unknown parameter";
+            const auto tabHeader = std::format(
+                "{} {}: {}{}##perkConditionTab",
+                Configuration::GetLoc("menu.condition_tab", "Condition tab"),
+                tab.index,
+                parameterName,
+                parameter && parameter->nonActor ? " (non-actor)" : "");
+            if (ImGui::CollapsingHeader(tabHeader.c_str())) {
+                changed |= DrawPerkConditions(tab.conditions);
+            }
+            ImGui::PopID();
+        }
+        return changed;
+    }
+
     bool DrawPerkEntries(std::vector<DynamicForms::PerkEntry>& entries) {
         bool changed = false;
         if (ImGui::Button(Configuration::GetLoc("menu.add_entry", "Add entry"))) {
             DynamicForms::PerkEntry entry;
+            entry.kind = DynamicForms::PerkEntryKind::EntryPoint;
             entry.entryPoint = 75;
-            entry.function = 1;
-            entry.value = 2.0F;
+            entry.function = DefaultPerkFunctionForUI(entry.entryPoint);
+            entry.functionData.kind = PerkFunctionDataKindForUI(entry.function);
+            entry.functionData.value1 = 2.0F;
+            SynchronizePerkConditionTabs(entry);
             entries.push_back(std::move(entry));
             changed = true;
         }
@@ -5212,41 +5417,214 @@ namespace {
 
                 int rank = static_cast<int>(entry.rank);
                 int priority = static_cast<int>(entry.priority);
-                int entryPoint = static_cast<int>(entry.entryPoint);
-                int function = static_cast<int>(entry.function);
-                int numArgs = static_cast<int>(entry.numArgs);
+                int entryType = static_cast<int>(entry.kind);
+                SetStableComboWidth(PERK_ENTRY_TYPE_ITEMS, 220.0F);
+                if (ImGui::Combo(
+                        Configuration::GetLoc("menu.entry_type", "Entry type"),
+                        &entryType,
+                        PERK_ENTRY_TYPE_ITEMS.data(),
+                        static_cast<int>(PERK_ENTRY_TYPE_ITEMS.size()))) {
+                    entry.kind = static_cast<DynamicForms::PerkEntryKind>(
+                        std::clamp(entryType, 0, static_cast<int>(PERK_ENTRY_TYPE_ITEMS.size() - 1)));
+                    if (entry.kind == DynamicForms::PerkEntryKind::EntryPoint) {
+                        entry.function = DefaultPerkFunctionForUI(entry.entryPoint);
+                        entry.functionData.kind = PerkFunctionDataKindForUI(entry.function);
+                        SynchronizePerkConditionTabs(entry);
+                    }
+                    changed = true;
+                }
                 ImGui::SetNextItemWidth(160.0F);
                 if (ImGui::InputInt(Configuration::GetLoc("menu.rank", "Rank"), &rank)) {
-                    entry.rank = static_cast<std::uint32_t>(std::max(rank, 0));
+                    entry.rank = static_cast<std::uint32_t>(std::clamp(rank, 0, 255));
                     changed = true;
                 }
                 ImGui::SetNextItemWidth(160.0F);
                 if (ImGui::InputInt(Configuration::GetLoc("menu.priority", "Priority"), &priority)) {
-                    entry.priority = static_cast<std::uint32_t>(std::max(priority, 0));
+                    entry.priority = static_cast<std::uint32_t>(std::clamp(priority, 0, 255));
                     changed = true;
                 }
-                ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt(Configuration::GetLoc("menu.entry_point", "Entry point"), &entryPoint)) {
-                    entry.entryPoint = static_cast<std::uint32_t>(std::clamp(entryPoint, 0, 91));
-                    changed = true;
+
+                if (entry.kind == DynamicForms::PerkEntryKind::Quest) {
+                    changed |= DrawFormReferencePicker(
+                        Configuration::GetLoc("menu.quest", "Quest"),
+                        "Quest",
+                        entry.quest);
+                    int stage = static_cast<int>(entry.questStage);
+                    ImGui::SetNextItemWidth(160.0F);
+                    if (ImGui::InputInt(Configuration::GetLoc("menu.quest_stage", "Quest stage"), &stage)) {
+                        entry.questStage = static_cast<std::uint32_t>(std::clamp(stage, 0, 255));
+                        changed = true;
+                    }
+                } else if (entry.kind == DynamicForms::PerkEntryKind::Ability) {
+                    changed |= DrawFormReferencePicker(
+                        Configuration::GetLoc("menu.ability", "Ability"),
+                        "Ability",
+                        entry.ability);
+                } else {
+                    constexpr auto entryPointCount =
+                        static_cast<std::size_t>(RE::BGSEntryPoint::ENTRY_POINT::kTotal);
+                    static const auto entryPointNames = [] {
+                        std::array<const char*, entryPointCount> names{};
+                        for (std::size_t entryPointIndex = 0; entryPointIndex < names.size(); ++entryPointIndex) {
+                            const auto* definition = RE::BGSEntryPoint::GetEntryPoint(
+                                static_cast<RE::BGSEntryPoint::ENTRY_POINT>(entryPointIndex));
+                            names[entryPointIndex] =
+                                definition && definition->name ? definition->name : "Unknown";
+                        }
+                        return names;
+                    }();
+                    int entryPoint = static_cast<int>(std::min(
+                        entry.entryPoint,
+                        static_cast<std::uint32_t>(entryPointNames.size() - 1)));
+                    SetStableComboWidth(entryPointNames, 360.0F);
+                    if (ImGui::Combo(
+                            Configuration::GetLoc("menu.entry_point", "Entry point"),
+                            &entryPoint,
+                            entryPointNames.data(),
+                            static_cast<int>(entryPointNames.size()))) {
+                        entry.entryPoint = static_cast<std::uint32_t>(entryPoint);
+                        entry.function = DefaultPerkFunctionForUI(entry.entryPoint);
+                        entry.functionData.kind = PerkFunctionDataKindForUI(entry.function);
+                        SynchronizePerkConditionTabs(entry);
+                        changed = true;
+                    }
+
+                    if (!IsPerkFunctionCompatibleForUI(entry.entryPoint, entry.function)) {
+                        entry.function = DefaultPerkFunctionForUI(entry.entryPoint);
+                        entry.functionData.kind = PerkFunctionDataKindForUI(entry.function);
+                        changed = true;
+                    }
+                    const auto* selectedFunction =
+                        PerkFunctionDefinitionForUI(entry.function);
+                    const auto functionPreview =
+                        selectedFunction && selectedFunction->name ?
+                            selectedFunction->name :
+                            "Unknown";
+                    SetAvailableComboWidth(300.0F);
+                    SetFixedComboPopupWidth(300.0F);
+                    if (ImGui::BeginCombo(
+                            Configuration::GetLoc("menu.function", "Function"),
+                            functionPreview)) {
+                        for (std::uint32_t function = 0;
+                             function < static_cast<std::uint32_t>(
+                                            RE::BGSEntryPointFunction::
+                                                ENTRY_POINT_FUNCTION::kTotal);
+                             ++function) {
+                            if (!IsPerkFunctionCompatibleForUI(
+                                    entry.entryPoint,
+                                    function)) {
+                                continue;
+                            }
+                            const auto* definition =
+                                PerkFunctionDefinitionForUI(function);
+                            const auto label =
+                                definition && definition->name ?
+                                    definition->name :
+                                    "Unknown";
+                            if (ImGui::Selectable(
+                                    label,
+                                    entry.function == function)) {
+                                entry.function = function;
+                                entry.functionData.kind =
+                                    PerkFunctionDataKindForUI(entry.function);
+                                changed = true;
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    entry.functionData.kind = PerkFunctionDataKindForUI(entry.function);
+                    switch (entry.functionData.kind) {
+                    case DynamicForms::PerkFunctionDataKind::OneValue:
+                        ImGui::SetNextItemWidth(180.0F);
+                        changed |= ImGui::InputFloat(
+                            Configuration::GetLoc("menu.value", "Value"),
+                            &entry.functionData.value1);
+                        break;
+                    case DynamicForms::PerkFunctionDataKind::TwoValue:
+                        ImGui::SetNextItemWidth(180.0F);
+                        changed |= ImGui::InputFloat(
+                            Configuration::GetLoc("menu.minimum_value", "Minimum value"),
+                            &entry.functionData.value1);
+                        ImGui::SetNextItemWidth(180.0F);
+                        changed |= ImGui::InputFloat(
+                            Configuration::GetLoc("menu.maximum_value", "Maximum value"),
+                            &entry.functionData.value2);
+                        break;
+                    case DynamicForms::PerkFunctionDataKind::ActorValueAndValue: {
+                        auto actorValue = static_cast<std::int32_t>(entry.functionData.actorValue);
+                        if (DrawFullActorValueCombo(
+                                Configuration::GetLoc("menu.actor_value", "Actor value"),
+                                actorValue)) {
+                            entry.functionData.actorValue =
+                                static_cast<std::uint32_t>(actorValue);
+                            changed = true;
+                        }
+                        ImGui::SetNextItemWidth(180.0F);
+                        changed |= ImGui::InputFloat(
+                            Configuration::GetLoc("menu.multiplier", "Multiplier"),
+                            &entry.functionData.value2);
+                        break;
+                    }
+                    case DynamicForms::PerkFunctionDataKind::LeveledList:
+                        changed |= DrawFormReferencePicker(
+                            Configuration::GetLoc("menu.leveled_list", "Leveled list"),
+                            "LeveledItem",
+                            entry.functionData.form);
+                        break;
+                    case DynamicForms::PerkFunctionDataKind::ActivateChoice:
+                        changed |= DrawFormReferencePicker(
+                            Configuration::GetLoc("menu.spell", "Spell"),
+                            "Spell",
+                            entry.functionData.form);
+                        changed |= InputString(
+                            Configuration::GetLoc("menu.button_label", "Button label"),
+                            entry.functionData.buttonLabel);
+                        changed |= FlagCheckbox(
+                            Configuration::GetLoc("menu.run_immediately", "Run immediately"),
+                            entry.functionData.flags,
+                            1U);
+                        changed |= FlagCheckbox(
+                            Configuration::GetLoc("menu.replace_default", "Replace default"),
+                            entry.functionData.flags,
+                            2U);
+                        {
+                            int fragmentIndex = static_cast<int>(entry.functionData.fragmentIndex);
+                            ImGui::SetNextItemWidth(180.0F);
+                            if (ImGui::InputInt(
+                                    Configuration::GetLoc("menu.fragment_index", "Fragment index"),
+                                    &fragmentIndex)) {
+                                entry.functionData.fragmentIndex =
+                                    static_cast<std::uint32_t>(std::clamp(fragmentIndex, 0, 65535));
+                                changed = true;
+                            }
+                        }
+                        break;
+                    case DynamicForms::PerkFunctionDataKind::Spell:
+                        changed |= DrawFormReferencePicker(
+                            Configuration::GetLoc("menu.spell", "Spell"),
+                            "Spell",
+                            entry.functionData.form);
+                        break;
+                    case DynamicForms::PerkFunctionDataKind::BooleanGraphVariable:
+                        changed |= InputString(
+                            Configuration::GetLoc("menu.graph_variable", "Graph variable"),
+                            entry.functionData.text);
+                        break;
+                    case DynamicForms::PerkFunctionDataKind::Text:
+                        changed |= InputString(
+                            Configuration::GetLoc("menu.text", "Text"),
+                            entry.functionData.text);
+                        break;
+                    case DynamicForms::PerkFunctionDataKind::None:
+                    default:
+                        break;
+                    }
+
+                    ImGui::Separator();
+                    ImGui::Text("%s", Configuration::GetLoc("menu.entry_conditions", "Entry conditions"));
+                    changed |= DrawPerkConditionTabs(entry);
                 }
-                ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt(Configuration::GetLoc("menu.function", "Function"), &function)) {
-                    entry.function = static_cast<std::uint32_t>(std::clamp(function, 1, 15));
-                    changed = true;
-                }
-                ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputInt(Configuration::GetLoc("menu.num_args", "Num args"), &numArgs)) {
-                    entry.numArgs = static_cast<std::uint32_t>(std::max(numArgs, 0));
-                    changed = true;
-                }
-                ImGui::SetNextItemWidth(160.0F);
-                if (ImGui::InputFloat(Configuration::GetLoc("menu.value", "Value"), &entry.value)) {
-                    changed = true;
-                }
-                ImGui::Separator();
-                ImGui::Text("%s", Configuration::GetLoc("menu.entry_conditions", "Entry conditions"));
-                changed |= DrawPerkConditions(entry.conditions);
             }
             ImGui::PopID();
         }
@@ -5549,18 +5927,37 @@ namespace {
                 }
                 for (std::size_t i = 0; i < edited.entries.size(); ++i) {
                     const auto& entry = edited.entries[i];
-                    ImGui::Text(Configuration::GetLoc("menu.entry_u_ep_function_rank_priority_value_conditions_u", "entry[%zu]: ep=%u function=%u rank=%u priority=%u value=%.3f conditions=%zu"),
+                    std::size_t entryConditionCount = 0;
+                    for (const auto& tab : entry.conditionTabs) {
+                        entryConditionCount += tab.conditions.size();
+                    }
+                    ImGui::Text(Configuration::GetLoc("menu.perk_entry_debug", "entry[%zu]: type=%u ep=%u function=%u rank=%u priority=%u value=%.3f conditions=%zu"),
                         i,
+                        static_cast<unsigned>(entry.kind),
                         entry.entryPoint,
                         entry.function,
                         entry.rank,
                         entry.priority,
-                        entry.value,
-                        entry.conditions.size());
+                        entry.functionData.value1,
+                        entryConditionCount);
                 }
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
+        }
+
+        std::vector<std::string> validationErrors;
+        if (!Manager::ValidateForm(edited, validationErrors)) {
+            ImGui::Separator();
+            ImGui::TextColored(
+                { 1.0F, 0.45F, 0.35F, 1.0F },
+                "%s",
+                Configuration::GetLoc(
+                    "menu.perk_validation_failed",
+                    "This perk cannot be saved yet:"));
+            for (const auto& error : validationErrors) {
+                ImGui::BulletText("%s", error.c_str());
+            }
         }
 
         if (changed && Manager::UpdateForm(index, edited)) {
@@ -6084,7 +6481,7 @@ namespace Configuration {
         LoadLanguage();
         LoadForms();
 
-        SKSEMenuFramework::SetSection(Configuration::GetLoc("menu.section", "Dynamic Forms Generator"));
+        SKSEMenuFramework::SetSection(Configuration::GetLoc("menu.section", "Dynamic Forms Generator - DFG"));
         SKSEMenuFramework::AddSectionItem(Configuration::GetLoc("menu.forms", "Forms"), RenderFormsMenu);
         SKSEMenuFramework::AddSectionItem(Configuration::GetLoc("menu.export", "Export"), RenderExportMenu);
     }

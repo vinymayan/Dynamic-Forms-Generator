@@ -273,6 +273,10 @@ bool ListManager::PopulateAllLists(const bool forceRefresh) {
     PopulateList<RE::SpellItem>("Spell", [](RE::SpellItem* spell) -> bool {
         return spell != nullptr;
     });
+    PopulateList<RE::SpellItem>("Ability", [](RE::SpellItem* spell) -> bool {
+        return spell &&
+               spell->GetSpellType() == RE::MagicSystem::SpellType::kAbility;
+    });
 
     PopulateList<RE::ScrollItem>("Scroll", [](RE::ScrollItem* scroll) -> bool {
         return scroll != nullptr;
