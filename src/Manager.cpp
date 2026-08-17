@@ -29,17 +29,27 @@
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include <ranges>
 #include <set>
 #include <sqlite3.h>
 #include <stdexcept>
 #include <unordered_map>
 
+namespace Manager {
+    bool BuildFormDocument(const DynamicForms::DynamicForm& form, rapidjson::Document& doc);
+}
+
 namespace {
     std::vector<DynamicForms::DynamicForm> forms;
     std::atomic_bool apiReady{ false };
+    std::atomic_bool responseListHookInstallationAttempted{ false };
+    std::atomic_bool responseListHookInstalled{ false };
     bool questPerkEntryLayoutValid{ true };
     std::unordered_map<RE::TESTopicInfo*, RE::TESTopicInfo::TESResponse*> dynamicDialogueResponses;
+    std::unordered_map<std::string, std::vector<RE::TESForm*>> externalFormsByEditorId;
+    RE::BSSoundHandle soundPreviewHandle;
+    std::string soundPreviewEditorId;
     using GetResponseListFn = RE::TESTopicInfo::TESResponseList* (*)(RE::TESTopicInfo*, RE::TESTopicInfo::TESResponseList*);
     GetResponseListFn originalGetResponseList{ nullptr };
     constexpr const char* UPDATED_EVENT = "DynamicFormsGeneratorUpdated";
@@ -53,6 +63,15 @@ namespace {
         "GetQuestCompleted",
         "HasSpell"
     };
+
+    std::string NormalizeEditorId(const std::string_view value) {
+        std::string normalized;
+        normalized.reserve(value.size());
+        for (const auto ch : value) {
+            normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+        return normalized;
+    }
 
     void DispatchEvent(const char* eventName, const std::string_view strArg = {}, const float numArg = 0.0F) {
         auto* dispatcher = SKSE::GetModCallbackEventSource();
@@ -1386,6 +1405,102 @@ namespace {
         }
     }
 
+    bool IsDPFPluginName(const std::string_view name) {
+        if (name == "DPF.esp") {
+            return true;
+        }
+        if (!name.starts_with("DPF ") || !name.ends_with(".esp")) {
+            return false;
+        }
+        const auto number = name.substr(4, name.size() - 8);
+        return !number.empty() && std::ranges::all_of(number, [](const char value) {
+            return value >= '0' && value <= '9';
+        });
+    }
+
+    bool IsDPFForm(const RE::TESForm* form) {
+        if (!form) {
+            return false;
+        }
+        const auto* file = form->GetFile(0);
+        return file && IsDPFPluginName(file->GetFilename());
+    }
+
+    void BuildExternalEditorIdIndex() {
+        externalFormsByEditorId.clear();
+
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler) {
+            logger::warn("Could not build the CLibUtil EditorID index: TESDataHandler is unavailable.");
+            return;
+        }
+
+        std::set<RE::FormType> supportedTypes;
+        const auto lastKind = static_cast<std::uint32_t>(DynamicForms::FormKind::Race);
+        for (std::uint32_t rawKind = 0; rawKind <= lastKind; ++rawKind) {
+            const auto kind = static_cast<DynamicForms::FormKind>(rawKind);
+            supportedTypes.insert(static_cast<RE::FormType>(FormTypeForKind(kind)));
+        }
+
+        std::size_t indexedForms = 0;
+        std::size_t missingEditorIds = 0;
+        std::size_t skippedDPFForms = 0;
+        for (const auto formType : supportedTypes) {
+            for (auto* form : dataHandler->GetFormArray(formType)) {
+                if (!form || form->IsDeleted() || form->IsIgnored()) {
+                    continue;
+                }
+                if (IsDPFForm(form)) {
+                    ++skippedDPFForms;
+                    continue;
+                }
+
+                const auto editorId = FormUtil::GetEditorIDSafe(form);
+                if (editorId.empty()) {
+                    ++missingEditorIds;
+                    continue;
+                }
+
+                externalFormsByEditorId[NormalizeEditorId(editorId)].push_back(form);
+                ++indexedForms;
+            }
+        }
+
+        const auto duplicateEditorIds = std::ranges::count_if(externalFormsByEditorId, [](const auto& entry) {
+            return entry.second.size() > 1;
+        });
+        logger::info(
+            "Built CLibUtil EditorID index: {} forms, {} unique EditorIDs, {} duplicate EditorIDs, {} forms without an EditorID, {} DPF forms excluded, po3 Tweaks={}",
+            indexedForms,
+            externalFormsByEditorId.size(),
+            duplicateEditorIds,
+            missingEditorIds,
+            skippedDPFForms,
+            GetModuleHandleW(L"po3_Tweaks") != nullptr);
+    }
+
+    const std::vector<RE::TESForm*>* FindExternalFormsByEditorId(const std::string_view editorId) {
+        if (editorId.empty()) {
+            return nullptr;
+        }
+        const auto found = externalFormsByEditorId.find(NormalizeEditorId(editorId));
+        return found != externalFormsByEditorId.end() ? std::addressof(found->second) : nullptr;
+    }
+
+    RE::TESForm* FindManagedFormByEditorId(const std::string_view editorId) {
+        const auto key = NormalizeEditorId(editorId);
+        const auto found = std::ranges::find_if(forms, [&key](const DynamicForms::DynamicForm& form) {
+            return !form.externalPatch && NormalizeEditorId(form.editorId) == key;
+        });
+        if (found == forms.end() || found->pluginNumber == 0 || found->localId == 0) {
+            return nullptr;
+        }
+
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        const auto pluginName = DPF::PluginNameForNumber(found->pluginNumber);
+        return dataHandler && !pluginName.empty() ? dataHandler->LookupForm(found->localId, pluginName) : nullptr;
+    }
+
     RE::BGSArtObject::ArtType ToTESArtType(const DynamicForms::ArtObjectType type) {
         switch (type) {
         case DynamicForms::ArtObjectType::MagicHitEffect:
@@ -1433,21 +1548,44 @@ namespace {
 
     RE::TESForm* ResolveConfigForm(const DynamicForms::FormRef& value) {
         if (!value.editorID.empty()) {
+            if (auto* form = FindManagedFormByEditorId(value.editorID)) {
+                return form;
+            }
+        }
+
+        RE::TESForm* explicitForm = nullptr;
+        try {
+            if (!value.formID.empty()) {
+                const auto formId = FormUtil::FormIDFromString(value.formID);
+                explicitForm = formId != 0 ? RE::TESForm::LookupByID(formId) : nullptr;
+            }
+        } catch (...) {
+            logger::warn("Invalid form ref '{}'", value.Display());
+        }
+
+        if (!value.editorID.empty()) {
+            if (const auto* indexed = FindExternalFormsByEditorId(value.editorID); indexed && !indexed->empty()) {
+                if (explicitForm && std::ranges::find(*indexed, explicitForm) != indexed->end()) {
+                    return explicitForm;
+                }
+                if (indexed->size() == 1) {
+                    return indexed->front();
+                }
+                logger::warn(
+                    "Form ref '{}' is ambiguous: CLibUtil found {} loaded forms with that EditorID.",
+                    value.Display(),
+                    indexed->size());
+                return explicitForm;
+            }
+
+            // Keep the game lookup only as a compatibility fallback. It is not
+            // authoritative when deciding whether an EditorID is available.
             if (auto* form = RE::TESForm::LookupByEditorID(value.editorID)) {
                 return form;
             }
         }
-        if (value.formID.empty()) {
-            return nullptr;
-        }
 
-        try {
-            const auto formId = FormUtil::FormIDFromString(value.formID);
-            return formId != 0 ? RE::TESForm::LookupByID(formId) : nullptr;
-        } catch (...) {
-            logger::warn("Invalid form ref '{}'", value.Display());
-            return nullptr;
-        }
+        return explicitForm;
     }
 
     RE::TESForm* ResolveConfigForm(const std::string& value) {
@@ -1584,7 +1722,7 @@ namespace {
 
     void ApplyMiscLikeItem(RE::TESObjectMISC& item, const DynamicForms::DynamicForm& form) {
         item.SetFormEditorID(form.editorId.c_str());
-        item.fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        item.fullName = form.fullName.c_str();
         item.SetModel(form.modelPath.c_str());
         item.value = form.itemValue;
         item.weight = form.itemWeight;
@@ -1708,7 +1846,7 @@ namespace {
         }
 
         book->SetFormEditorID(form.editorId.c_str());
-        book->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        book->fullName = form.fullName.c_str();
         book->SetModel(form.modelPath.c_str());
         book->value = form.itemValue;
         book->weight = form.itemWeight;
@@ -1733,7 +1871,7 @@ namespace {
         }
 
         ammo->SetFormEditorID(form.editorId.c_str());
-        ammo->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        ammo->fullName = form.fullName.c_str();
         ammo->SetModel(form.modelPath.c_str());
         ammo->value = form.itemValue;
         auto& data = ammo->GetRuntimeData().data;
@@ -1758,7 +1896,7 @@ namespace {
         }
 
         weapon->SetFormEditorID(form.editorId.c_str());
-        weapon->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        weapon->fullName = form.fullName.c_str();
         weapon->SetModel(form.modelPath.c_str());
         weapon->value = form.itemValue;
         weapon->weight = form.itemWeight;
@@ -1807,7 +1945,7 @@ namespace {
         }
 
         item->SetFormEditorID(form.editorId.c_str());
-        item->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        item->fullName = form.fullName.c_str();
         item->SetModel(form.modelPath.c_str());
         item->weight = form.itemWeight;
         item->SetEquipSlot(ResolveAs<RE::BGSEquipSlot>(form.equipSlot));
@@ -1831,7 +1969,7 @@ namespace {
         }
 
         item->SetFormEditorID(form.editorId.c_str());
-        item->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        item->fullName = form.fullName.c_str();
         item->SetModel(form.modelPath.c_str());
         item->value = form.itemValue;
         item->weight = form.itemWeight;
@@ -1855,7 +1993,7 @@ namespace {
         }
 
         spell->SetFormEditorID(form.editorId.c_str());
-        spell->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        spell->fullName = form.fullName.c_str();
         spell->data.costOverride = form.spellCostOverride;
         spell->data.flags = static_cast<RE::SpellItem::SpellFlag>(form.spellFlags);
         spell->data.spellType = static_cast<RE::MagicSystem::SpellType>(std::clamp(form.spellType, 0u, 13u));
@@ -1892,7 +2030,7 @@ namespace {
         }
 
         enchantment->SetFormEditorID(form.editorId.c_str());
-        enchantment->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        enchantment->fullName = form.fullName.c_str();
         enchantment->data.costOverride = form.enchantmentCostOverride;
         enchantment->data.flags = static_cast<RE::EnchantmentItem::EnchantmentFlag>(form.enchantmentFlags);
         enchantment->data.castingType = static_cast<RE::MagicSystem::CastingType>(std::clamp(form.enchantmentCastingType, 0u, 3u));
@@ -1924,7 +2062,7 @@ namespace {
         }
 
         scroll->SetFormEditorID(form.editorId.c_str());
-        scroll->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        scroll->fullName = form.fullName.c_str();
         scroll->SetModel(form.modelPath.c_str());
         scroll->value = form.itemValue;
         scroll->weight = form.itemWeight;
@@ -1961,7 +2099,7 @@ namespace {
         }
 
         projectile->SetFormEditorID(form.editorId.c_str());
-        projectile->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        projectile->fullName = form.fullName.c_str();
         projectile->SetModel(form.modelPath.c_str());
         projectile->muzzleFlashModel.SetModel(form.projectileMuzzleFlashModel.c_str());
 
@@ -2040,7 +2178,7 @@ namespace {
         auto* hazard = tesForm ? tesForm->As<RE::BGSHazard>() : nullptr;
         if (!hazard) return false;
         hazard->SetFormEditorID(form.editorId.c_str());
-        hazard->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        hazard->fullName = form.fullName.c_str();
         hazard->SetModel(form.modelPath.c_str());
         hazard->imageSpaceModifying = ResolveAs<RE::TESImageSpaceModifier>(form.hazardImageSpaceModifier);
         hazard->data.limit = form.hazardLimit;
@@ -2124,7 +2262,7 @@ namespace {
         auto* stat = tesForm ? tesForm->As<RE::BGSMovableStatic>() : nullptr;
         if (!stat) return false;
         stat->SetFormEditorID(form.editorId.c_str());
-        stat->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        stat->fullName = form.fullName.c_str();
         ApplyStaticData(static_cast<RE::TESObjectSTAT&>(*stat), form);
         stat->soundLoop = ResolveAs<RE::BGSSoundDescriptorForm>(form.movableStaticSoundLoop);
         stat->data.flags = static_cast<RE::MOVABLE_STATIC_DATA::Flag>(form.movableStaticFlags);
@@ -2136,7 +2274,7 @@ namespace {
         auto* door = tesForm ? tesForm->As<RE::TESObjectDOOR>() : nullptr;
         if (!door) return false;
         door->SetFormEditorID(form.editorId.c_str());
-        door->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        door->fullName = form.fullName.c_str();
         door->SetModel(form.modelPath.c_str());
         door->openSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.doorOpenSound);
         door->closeSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.doorCloseSound);
@@ -2169,7 +2307,7 @@ namespace {
         auto* category = tesForm ? tesForm->As<RE::BGSSoundCategory>() : nullptr;
         if (!category) return false;
         category->SetFormEditorID(form.editorId.c_str());
-        category->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        category->fullName = form.fullName.c_str();
         category->flags = static_cast<RE::BGSSoundCategory::Flag>(form.soundCategoryFlags);
         category->parentCategory = ResolveAs<RE::BGSSoundCategory>(form.soundCategoryParent);
         category->attenuation = form.soundCategoryAttenuation;
@@ -2184,7 +2322,7 @@ namespace {
         auto* npcClass = tesForm ? tesForm->As<RE::TESClass>() : nullptr;
         if (!npcClass) return false;
         npcClass->SetFormEditorID(form.editorId.c_str());
-        npcClass->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        npcClass->fullName = form.fullName.c_str();
         npcClass->data.teaches = static_cast<RE::CLASS_DATA::Skill>(std::clamp(form.classTeachesSkill, 0u, 17u));
         npcClass->data.maximumTrainingLevel = form.classMaximumTrainingLevel;
         std::copy(form.classSkillWeights.begin(), form.classSkillWeights.end(), std::addressof(npcClass->data.skillWeights.oneHanded));
@@ -2206,7 +2344,7 @@ namespace {
         auto* flora = tesForm ? tesForm->As<RE::TESFlora>() : nullptr;
         if (!flora) return false;
         flora->SetFormEditorID(form.editorId.c_str());
-        flora->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        flora->fullName = form.fullName.c_str();
         flora->SetModel(form.modelPath.c_str());
         flora->soundLoop = ResolveAs<RE::BGSSoundDescriptorForm>(form.floraSoundLoop);
         flora->soundActivate = ResolveAs<RE::BGSSoundDescriptorForm>(form.floraSoundActivate);
@@ -2221,7 +2359,7 @@ namespace {
         auto* tree = tesForm ? tesForm->As<RE::TESObjectTREE>() : nullptr;
         if (!tree) return false;
         tree->SetFormEditorID(form.editorId.c_str());
-        tree->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        tree->fullName = form.fullName.c_str();
         tree->SetModel(form.modelPath.c_str());
         CopyFloatArray(tree->data, form.treeAnimation);
         tree->type = static_cast<RE::TESObjectTREE::etTreeType>(std::clamp(form.treeType, 0u, 3u));
@@ -2297,7 +2435,7 @@ namespace {
             return false;
         }
         container->SetFormEditorID(form.editorId.c_str());
-        container->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        container->fullName = form.fullName.c_str();
         container->SetModel(form.modelPath.c_str());
         container->weight = form.itemWeight;
         container->data.flags = static_cast<RE::CONT_DATA::Flag>(form.containerFlags);
@@ -2318,7 +2456,7 @@ namespace {
         }
 
         effect->SetFormEditorID(form.editorId.c_str());
-        effect->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        effect->fullName = form.fullName.c_str();
         effect->menuDispObject = ResolveAs<RE::TESBoundObject>(form.menuDisplayObject);
         ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*effect), form.keywords);
 
@@ -2434,7 +2572,7 @@ namespace {
         }
 
         armor->SetFormEditorID(form.editorId.c_str());
-        armor->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        armor->fullName = form.fullName.c_str();
         armor->race = ResolveAs<RE::TESRace>(form.race);
         armor->value = form.armorValue;
         armor->weight = form.armorWeight;
@@ -2479,7 +2617,7 @@ namespace {
         }
 
         color->SetFormEditorID(form.editorId.c_str());
-        color->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        color->fullName = form.fullName.c_str();
         color->color = RE::Color(form.red, form.green, form.blue, form.alpha);
         color->flags = form.playable ? RE::BGSColorForm::Flag::kPlayable : RE::BGSColorForm::Flag::kNone;
         return true;
@@ -3553,7 +3691,7 @@ namespace {
         }
 
         perk->SetFormEditorID(form.editorId.c_str());
-        perk->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        perk->fullName = form.fullName.c_str();
         if (!form.description.empty()) {
             logger::debug("Perk '{}' description is saved in JSON but cannot be assigned directly with this CommonLib TESDescription layout.", form.editorId);
         }
@@ -3594,7 +3732,7 @@ namespace {
         }
 
         headPart->SetFormEditorID(form.editorId.c_str());
-        headPart->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        headPart->fullName = form.fullName.c_str();
         headPart->SetModel(form.modelPath.c_str());
         headPart->type = ToTESHeadPartType(form.headPartType);
         headPart->flags = RE::BGSHeadPart::Flag::kNone;
@@ -3730,7 +3868,7 @@ namespace {
         }
 
         light->SetFormEditorID(form.editorId.c_str());
-        light->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        light->fullName = form.fullName.c_str();
         light->SetModel(form.modelPath.c_str());
         light->data.time = form.lightTime;
         light->data.radius = form.lightRadius;
@@ -3766,7 +3904,7 @@ namespace {
         }
 
         explosion->SetFormEditorID(form.editorId.c_str());
-        explosion->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        explosion->fullName = form.fullName.c_str();
         explosion->SetModel(form.modelPath.c_str());
         explosion->formEnchanting = nullptr;
         if (!form.objectEffect.empty()) {
@@ -3834,7 +3972,7 @@ namespace {
         }
 
         activator->SetFormEditorID(form.editorId.c_str());
-        activator->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        activator->fullName = form.fullName.c_str();
         activator->SetModel(form.modelPath.c_str());
         activator->soundLoop = nullptr;
         if (!form.soundLoop.empty()) {
@@ -3950,7 +4088,7 @@ namespace {
         if (!form) {
             return ref;
         }
-        ref.editorID = clib_util::editorID::get_editorID(form);
+        ref.editorID = FormUtil::GetEditorIDSafe(form);
         ref.formID = FormUtil::NormalizeFormID(form);
         return ref;
     }
@@ -4643,7 +4781,7 @@ namespace {
         if (!form) {
             return "<null>";
         }
-        auto editorId = clib_util::editorID::get_editorID(const_cast<RE::TESForm*>(form));
+        auto editorId = FormUtil::GetEditorIDSafe(form);
         if (editorId.empty()) {
             return std::format("{:08X}", form->GetFormID());
         }
@@ -4934,8 +5072,8 @@ namespace {
                 templateNpc->GetFormID(),
                 oldFormID,
                 npc->GetFormID(),
-                templateNpc->race ? clib_util::editorID::get_editorID(templateNpc->race) : "<null>",
-                npc->race ? clib_util::editorID::get_editorID(npc->race) : "<null>");
+                templateNpc->race ? FormUtil::GetEditorIDSafe(templateNpc->race) : "<null>",
+                npc->race ? FormUtil::GetEditorIDSafe(npc->race) : "<null>");
         } else if (rawFactoryNpc) {
             logger::warn("Using fallback InitializeData/InitItemImpl for NPC '{}' because the DPF NPC template was not available.", form.editorId);
             npc->InitializeData();
@@ -4943,7 +5081,7 @@ namespace {
         }
 
         npc->SetFormEditorID(form.editorId.c_str());
-        npc->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+        npc->fullName = form.fullName.c_str();
         npc->height = form.height;
         npc->weight = form.weight;
         npc->bodyTintColor = RE::Color(form.red, form.green, form.blue, form.alpha);
@@ -5164,12 +5302,12 @@ namespace {
         logger::info("Configured NPC '{}' FormID={:08X} race={} class={} voice={} skin={} defaultOutfit={} sleepOutfit={} flags={:08X} level={} calcMin={} calcMax={} health={} magicka={} stamina={} speedMult={} height={} weight={} aiAggression={} aiConfidence={} aiEnergy={} aiMorality={} aiMood={} aiAssistance={} packages={} headParts={} headPartsPtr={} faceData={} tintLayers={} tintLayersPtr={} factions={} perks={} spells={}.",
             form.editorId,
             npc->GetFormID(),
-            npc->race ? clib_util::editorID::get_editorID(npc->race) : "<null>",
-            npc->npcClass ? clib_util::editorID::get_editorID(npc->npcClass) : "<null>",
-            npc->voiceType ? clib_util::editorID::get_editorID(npc->voiceType) : "<null>",
-            npc->farSkin ? clib_util::editorID::get_editorID(npc->farSkin) : "<null>",
-            npc->defaultOutfit ? clib_util::editorID::get_editorID(npc->defaultOutfit) : "<null>",
-            npc->sleepOutfit ? clib_util::editorID::get_editorID(npc->sleepOutfit) : "<null>",
+            npc->race ? FormUtil::GetEditorIDSafe(npc->race) : "<null>",
+            npc->npcClass ? FormUtil::GetEditorIDSafe(npc->npcClass) : "<null>",
+            npc->voiceType ? FormUtil::GetEditorIDSafe(npc->voiceType) : "<null>",
+            npc->farSkin ? FormUtil::GetEditorIDSafe(npc->farSkin) : "<null>",
+            npc->defaultOutfit ? FormUtil::GetEditorIDSafe(npc->defaultOutfit) : "<null>",
+            npc->sleepOutfit ? FormUtil::GetEditorIDSafe(npc->sleepOutfit) : "<null>",
             npc->actorData.actorBaseFlags.underlying(),
             npc->actorData.level,
             npc->actorData.calcLevelMin,
@@ -5446,11 +5584,11 @@ namespace {
         }
         case FK::WordOfPower: {
             auto* value = tesForm->As<RE::TESWordOfPower>(); if (!value) return false;
-            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); value->translation = form.wordTranslation.c_str(); return true;
+            value->fullName = form.fullName.c_str(); value->translation = form.wordTranslation.c_str(); return true;
         }
         case FK::Water: {
             auto* value = tesForm->As<RE::TESWaterForm>(); if (!value) return false;
-            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+            value->fullName = form.fullName.c_str();
             for (std::size_t i = 0; i < form.waterNoiseTextures.size(); ++i) value->noiseTextures[i].textureName = form.waterNoiseTextures[i].c_str();
             value->alpha = static_cast<std::int8_t>(form.waterAlpha); value->flags = static_cast<RE::TESWaterForm::Flag>(form.waterFlags);
             value->materialType = ResolveAs<RE::BGSMaterialType>(form.waterMaterial); value->waterSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.waterSound);
@@ -5477,7 +5615,7 @@ namespace {
         }
         case FK::Shout: {
             auto* value = tesForm->As<RE::TESShout>(); if (!value) return false;
-            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+            value->fullName = form.fullName.c_str();
             static_cast<RE::BGSMenuDisplayObject&>(*value).menuDispObject = ResolveAs<RE::TESBoundObject>(form.menuDisplayObject);
             static_cast<RE::BGSEquipType&>(*value).equipSlot = ResolveAs<RE::BGSEquipSlot>(form.equipSlot);
             for (std::size_t i = 0; i < form.shoutWords.size(); ++i) {
@@ -5496,11 +5634,11 @@ namespace {
         case FK::MenuIcon: { auto* value = tesForm->As<RE::BGSMenuIcon>(); if (!value) return false; static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); return true; }
         case FK::Eyes: {
             auto* value = tesForm->As<RE::TESEyes>(); if (!value) return false;
-            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); static_cast<RE::TESTexture&>(*value).textureName = form.eyesTexture.c_str(); value->flags = static_cast<RE::TESEyes::Flag>(form.eyesFlags); ApplyRecordFlags(*value, form.recordFlags, 1u << 2); return true;
+            value->fullName = form.fullName.c_str(); static_cast<RE::TESTexture&>(*value).textureName = form.eyesTexture.c_str(); value->flags = static_cast<RE::TESEyes::Flag>(form.eyesFlags); ApplyRecordFlags(*value, form.recordFlags, 1u << 2); return true;
         }
         case FK::Note: {
             auto* value = tesForm->As<RE::BGSNote>(); if (!value) return false;
-            value->SetModel(form.modelPath.c_str()); value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*value), form); return true;
+            value->SetModel(form.modelPath.c_str()); value->fullName = form.fullName.c_str(); static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); ApplyPickupPutdownSounds(static_cast<RE::BGSPickupPutdownSounds&>(*value), form); return true;
         }
         case FK::AnimatedObject: {
             auto* value = tesForm->As<RE::TESObjectANIO>(); if (!value) return false; value->SetModel(form.modelPath.c_str()); value->unloadEventName = form.animatedUnloadEvent.c_str(); return true;
@@ -5530,7 +5668,7 @@ namespace {
         }
         case FK::Faction: {
             auto* value = tesForm->As<RE::TESFaction>(); if (!value) return false;
-            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str();
+            value->fullName = form.fullName.c_str();
             value->data.flags = static_cast<RE::FACTION_DATA::Flag>(form.factionFlags);
             value->groupFormType = RE::FormType::Faction;
             value->reactions.clear();
@@ -5574,7 +5712,7 @@ namespace {
             data.falloffScale = form.materialDirectionalData[0]; data.falloffBias = form.materialDirectionalData[1]; data.noiseUVScale = form.materialDirectionalData[2]; data.materialUVScale = form.materialDirectionalData[3]; data.ProjectionDir = { form.materialDirectionalData[4], form.materialDirectionalData[5], form.materialDirectionalData[6] }; data.normalDampener = form.materialDirectionalData[7]; data.singlePassColor = { form.materialDirectionalData[8], form.materialDirectionalData[9], form.materialDirectionalData[10] }; data.singlePass = form.materialSinglePass; data.flags = static_cast<RE::BSMaterialObject::DIRECTIONAL_DATA::Flag>(form.materialObjectFlags); return true;
         }
         case FK::Message: {
-            auto* value = tesForm->As<RE::BGSMessage>(); if (!value) return false; value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); value->icon = ResolveAs<RE::BGSMenuIcon>(form.messageMenuIcon); value->ownerQuest = ResolveAs<RE::TESQuest>(form.messageOwnerQuest); value->flags = static_cast<RE::BGSMessage::MessageFlag>(form.messageFlags); value->displayTime = form.messageDisplayTime; value->menuButtons.clear();
+            auto* value = tesForm->As<RE::BGSMessage>(); if (!value) return false; value->fullName = form.fullName.c_str(); value->icon = ResolveAs<RE::BGSMenuIcon>(form.messageMenuIcon); value->ownerQuest = ResolveAs<RE::TESQuest>(form.messageOwnerQuest); value->flags = static_cast<RE::BGSMessage::MessageFlag>(form.messageFlags); value->displayTime = form.messageDisplayTime; value->menuButtons.clear();
             for (const auto& source : form.messageButtons) { auto* button = new RE::BGSMessage::MESSAGEBOX_BUTTON(); button->text = source.text.c_str(); ApplyConditions(button->conditions, source.conditions); value->menuButtons.insert_at(value->menuButtons.size(), button); }
             if (!form.description.empty()) logger::debug("Message '{}' description persisted but not assigned to TESDescription.", form.editorId); return true;
         }
@@ -5635,7 +5773,7 @@ namespace {
         }
         case FK::Location: {
             auto* value = tesForm->As<RE::BGSLocation>(); if (!value) return false;
-            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*value), form.keywords);
+            value->fullName = form.fullName.c_str(); ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*value), form.keywords);
             value->parentLoc = ResolveAs<RE::BGSLocation>(form.locationParent); value->unreportedCrimeFaction = ResolveAs<RE::TESFaction>(form.locationCrimeFaction); value->musicType = ResolveAs<RE::BGSMusicType>(form.locationMusicType); value->worldLocRadius = form.locationWorldRadius; return true;
         }
         case FK::MusicType: {
@@ -5658,7 +5796,7 @@ namespace {
         case FK::ActorValueInfo: {
             auto* value = tesForm->As<RE::ActorValueInfo>(); if (!value) return false;
             const auto copyString = [](const std::string& source) -> const char* { if (source.empty()) return nullptr; auto* result = RE::malloc<char>(source.size() + 1); std::memcpy(result, source.c_str(), source.size() + 1); return result; };
-            value->fullName = form.fullName.empty() ? form.editorId.c_str() : form.fullName.c_str(); static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); value->abbreviation = form.actorValueAbbreviation.c_str(); value->enumName = copyString(form.actorValueEnumName); value->flags = static_cast<RE::ActorValueInfo::ActorValueFlag>(form.actorValueFlags); value->type = static_cast<RE::ActorValueInfo::ActorValueType>(std::min(form.actorValueType, 6u));
+            value->fullName = form.fullName.c_str(); static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); value->abbreviation = form.actorValueAbbreviation.c_str(); value->enumName = copyString(form.actorValueEnumName); value->flags = static_cast<RE::ActorValueInfo::ActorValueFlag>(form.actorValueFlags); value->type = static_cast<RE::ActorValueInfo::ActorValueType>(std::min(form.actorValueType, 6u));
             value->enumValueCount = std::min<std::size_t>(form.actorValueEnumValues.size(), 10); for (std::size_t i = 0; i < value->enumValueCount; ++i) value->enumValues[i] = copyString(form.actorValueEnumValues[i]);
             if (form.actorValueHasSkillData) { if (!value->skill) value->skill = RE::calloc<RE::ActorValueInfo::Skill>(1); std::copy(form.actorValueSkillData.begin(), form.actorValueSkillData.end(), std::addressof(value->skill->useMult)); }
             if (!form.description.empty()) logger::debug("Actor value info '{}' description persisted but not assigned to TESDescription.", form.editorId); return true;
@@ -5675,6 +5813,10 @@ namespace {
         }
         case FK::DialogueInfo: {
             auto* value = tesForm->As<RE::TESTopicInfo>(); if (!value) return false;
+            if (!responseListHookInstalled.load(std::memory_order_acquire)) {
+                logger::error("Dialogue info '{}' was not applied because the TESTopicInfo::GetResponseList hook is unavailable.", form.editorId);
+                return false;
+            }
             value->parentTopic = ResolveAs<RE::TESTopic>(form.dialogueInfoTopic); value->dataInfo = ResolveAs<RE::TESTopicInfo>(form.dialogueInfoSharedInfo); ApplyConditions(value->objConditions, form.conditions); value->infoIndex = form.dialogueInfoIndex; value->favorLevel = static_cast<RE::TESTopicInfo::FavorLevel>(std::min(form.dialogueInfoFavorLevel, 3u)); value->data.flags = static_cast<RE::TOPIC_INFO_DATA::TOPIC_INFO_FLAGS>(form.dialogueInfoFlags); value->data.timeUntilReset = form.dialogueInfoResetHours; dynamicDialogueResponses[value] = BuildDialogueResponses(form); if (value->parentTopic) AppendDialogueInfo(*value->parentTopic, *value); return true;
         }
         case FK::Quest: { auto* value = tesForm->As<RE::TESQuest>(); if (!value) return false; ApplyQuestData(*value, form); return true; }
@@ -7433,6 +7575,24 @@ namespace {
         return name.empty() ? "Local_Forms" : name;
     }
 
+    std::string PackageIdFromName(const std::string_view name) {
+        std::string result;
+        result.reserve(name.size());
+        bool pendingSeparator = false;
+        for (const unsigned char ch : name) {
+            if (std::isalnum(ch)) {
+                if (pendingSeparator && !result.empty()) {
+                    result.push_back('-');
+                }
+                result.push_back(static_cast<char>(std::tolower(ch)));
+                pendingSeparator = false;
+            } else {
+                pendingSeparator = true;
+            }
+        }
+        return result.empty() ? "dfg-package" : result;
+    }
+
     std::filesystem::path PackageDirectory(const std::string_view packageName) {
         return std::filesystem::path(Manager::PACKAGES_DIR) / SanitizePackageFolder(std::string(packageName));
     }
@@ -7454,6 +7614,1018 @@ namespace {
         rapidjson::PrettyWriter writer(buffer);
         doc.Accept(writer);
         return buffer.GetString();
+    }
+
+    bool IsExternalPatchMetadataKey(const std::string_view key) {
+        static constexpr std::array<std::string_view, 9> ignored{
+            "schemaVersion",
+            "formKind",
+            "sourceSignature",
+            "editorId",
+            "packageName",
+            "basePackageName",
+            "patchPackageNames",
+            "pluginNumber",
+            "localId"
+        };
+        return std::ranges::find(ignored, key) != ignored.end();
+    }
+
+    bool BuildExternalChangesDocument(
+        const rapidjson::Document& baseline,
+        const rapidjson::Document& resolved,
+        rapidjson::Document& changes)
+    {
+        if (!baseline.IsObject() || !resolved.IsObject()) {
+            return false;
+        }
+
+        changes.SetObject();
+        auto& allocator = changes.GetAllocator();
+        changes.AddMember("schemaVersion", 1, allocator);
+        rapidjson::Value fields(rapidjson::kObjectType);
+
+        for (auto member = resolved.MemberBegin(); member != resolved.MemberEnd(); ++member) {
+            const std::string_view key(member->name.GetString(), member->name.GetStringLength());
+            if (IsExternalPatchMetadataKey(key)) {
+                continue;
+            }
+
+            const auto baselineMember = baseline.FindMember(member->name);
+            if (baselineMember != baseline.MemberEnd() && baselineMember->value == member->value) {
+                continue;
+            }
+
+            rapidjson::Value operation(rapidjson::kObjectType);
+            operation.AddMember(
+                "operation",
+                rapidjson::Value(member->value.IsArray() ? "replace" : "set", allocator),
+                allocator);
+            operation.AddMember("value", rapidjson::Value(member->value, allocator), allocator);
+            fields.AddMember(rapidjson::Value(member->name, allocator), operation, allocator);
+        }
+
+        for (auto member = baseline.MemberBegin(); member != baseline.MemberEnd(); ++member) {
+            const std::string_view key(member->name.GetString(), member->name.GetStringLength());
+            if (IsExternalPatchMetadataKey(key) || resolved.HasMember(member->name)) {
+                continue;
+            }
+
+            rapidjson::Value operation(rapidjson::kObjectType);
+            operation.AddMember("operation", "clear", allocator);
+            fields.AddMember(rapidjson::Value(member->name, allocator), operation, allocator);
+        }
+
+        changes.AddMember("fields", fields, allocator);
+        return true;
+    }
+
+    std::vector<std::string> ExternalChangeFieldNames(const rapidjson::Document& changes) {
+        std::vector<std::string> names;
+        if (!changes.IsObject() || !changes.HasMember("fields") || !changes["fields"].IsObject()) {
+            return names;
+        }
+        names.reserve(changes["fields"].MemberCount());
+        for (auto member = changes["fields"].MemberBegin(); member != changes["fields"].MemberEnd(); ++member) {
+            names.emplace_back(member->name.GetString(), member->name.GetStringLength());
+        }
+        return names;
+    }
+
+    void ApplyExternalArrayOperationChoices(
+        const DynamicForms::DynamicForm& form,
+        const rapidjson::Document& baseline,
+        const rapidjson::Document& resolved,
+        rapidjson::Document& changes)
+    {
+        if (!changes.HasMember("fields") || !changes["fields"].IsObject()) {
+            return;
+        }
+
+        auto& allocator = changes.GetAllocator();
+        for (const auto& [field, operation] : form.externalArrayOperations) {
+            if (operation != "merge") {
+                continue;
+            }
+
+            const auto baselineMember = baseline.FindMember(field.c_str());
+            const auto resolvedMember = resolved.FindMember(field.c_str());
+            auto changeMember = changes["fields"].FindMember(field.c_str());
+            if (baselineMember == baseline.MemberEnd() ||
+                resolvedMember == resolved.MemberEnd() ||
+                changeMember == changes["fields"].MemberEnd() ||
+                !baselineMember->value.IsArray() ||
+                !resolvedMember->value.IsArray())
+            {
+                continue;
+            }
+
+            rapidjson::Value additions(rapidjson::kArrayType);
+            for (const auto& value : resolvedMember->value.GetArray()) {
+                const bool inherited = std::ranges::any_of(
+                    baselineMember->value.GetArray(),
+                    [&value](const rapidjson::Value& candidate) { return candidate == value; });
+                if (!inherited) {
+                    additions.PushBack(rapidjson::Value(value, allocator), allocator);
+                }
+            }
+
+            rapidjson::Value removals(rapidjson::kArrayType);
+            for (const auto& value : baselineMember->value.GetArray()) {
+                const bool retained = std::ranges::any_of(
+                    resolvedMember->value.GetArray(),
+                    [&value](const rapidjson::Value& candidate) { return candidate == value; });
+                if (!retained) {
+                    removals.PushBack(rapidjson::Value(value, allocator), allocator);
+                }
+            }
+
+            rapidjson::Value merge(rapidjson::kObjectType);
+            merge.AddMember("operation", "merge", allocator);
+            merge.AddMember("add", additions, allocator);
+            merge.AddMember("remove", removals, allocator);
+            changeMember->value = std::move(merge);
+        }
+    }
+
+    void AppendUniqueFields(std::vector<std::string>& target, const std::vector<std::string>& source) {
+        for (const auto& field : source) {
+            if (std::ranges::find(target, field) == target.end()) {
+                target.push_back(field);
+            }
+        }
+    }
+
+    bool RefreshExternalFieldProvenance(DynamicForms::DynamicForm& form) {
+        if (!form.externalPatch || form.externalBaselinePayload.empty()) {
+            return false;
+        }
+
+        rapidjson::Document baseline;
+        baseline.Parse(form.externalBaselinePayload.c_str());
+        rapidjson::Document resolved;
+        rapidjson::Document changes;
+        if (baseline.HasParseError() ||
+            !Manager::BuildFormDocument(form, resolved) ||
+            !BuildExternalChangesDocument(baseline, resolved, changes))
+        {
+            return false;
+        }
+
+        const auto layerFields = ExternalChangeFieldNames(changes);
+        form.externalChangedFields = form.externalInheritedChangedFields;
+        AppendUniqueFields(form.externalChangedFields, layerFields);
+        form.externalConflictingFields = form.externalInheritedConflictingFields;
+        for (const auto& field : layerFields) {
+            if (std::ranges::find(form.externalInheritedChangedFields, field) !=
+                    form.externalInheritedChangedFields.end() &&
+                std::ranges::find(form.externalConflictingFields, field) ==
+                    form.externalConflictingFields.end())
+            {
+                form.externalConflictingFields.push_back(field);
+            }
+        }
+        return true;
+    }
+
+    void RemoveMatchingArrayValues(rapidjson::Value& target, const rapidjson::Value& removals) {
+        if (!target.IsArray() || !removals.IsArray()) {
+            return;
+        }
+        for (auto removal = removals.Begin(); removal != removals.End(); ++removal) {
+            for (auto item = target.Begin(); item != target.End();) {
+                if (*item == *removal) {
+                    item = target.Erase(item);
+                } else {
+                    ++item;
+                }
+            }
+        }
+    }
+
+    void AddUniqueArrayValues(
+        rapidjson::Value& target,
+        const rapidjson::Value& additions,
+        rapidjson::Document::AllocatorType& allocator)
+    {
+        if (!target.IsArray() || !additions.IsArray()) {
+            return;
+        }
+        for (auto addition = additions.Begin(); addition != additions.End(); ++addition) {
+            const bool exists = std::ranges::any_of(target.GetArray(), [&addition](const rapidjson::Value& item) {
+                return item == *addition;
+            });
+            if (!exists) {
+                target.PushBack(rapidjson::Value(*addition, allocator), allocator);
+            }
+        }
+    }
+
+    bool ApplyExternalChangesDocument(
+        rapidjson::Document& resolved,
+        const rapidjson::Document& changes,
+        const std::string_view context)
+    {
+        if (!resolved.IsObject() || !changes.IsObject() ||
+            !changes.HasMember("fields") || !changes["fields"].IsObject())
+        {
+            logger::warn("External patch '{}' does not contain a valid fields object.", context);
+            return false;
+        }
+
+        auto& allocator = resolved.GetAllocator();
+        for (auto member = changes["fields"].MemberBegin(); member != changes["fields"].MemberEnd(); ++member) {
+            if (!member->value.IsObject() ||
+                !member->value.HasMember("operation") ||
+                !member->value["operation"].IsString())
+            {
+                logger::warn("External patch '{}' field '{}' has no valid operation.", context, member->name.GetString());
+                return false;
+            }
+
+            const std::string_view operation = member->value["operation"].GetString();
+            auto target = resolved.FindMember(member->name);
+            if (operation == "clear") {
+                if (target != resolved.MemberEnd()) {
+                    resolved.RemoveMember(target);
+                }
+                continue;
+            }
+
+            if (operation == "set" || operation == "replace") {
+                if (!member->value.HasMember("value")) {
+                    logger::warn("External patch '{}' field '{}' has no value.", context, member->name.GetString());
+                    return false;
+                }
+                if (target == resolved.MemberEnd()) {
+                    resolved.AddMember(
+                        rapidjson::Value(member->name, allocator),
+                        rapidjson::Value(member->value["value"], allocator),
+                        allocator);
+                } else {
+                    target->value.CopyFrom(member->value["value"], allocator);
+                }
+                continue;
+            }
+
+            if (operation == "merge" || operation == "add" || operation == "remove") {
+                if (target == resolved.MemberEnd()) {
+                    resolved.AddMember(
+                        rapidjson::Value(member->name, allocator),
+                        rapidjson::Value(rapidjson::kArrayType),
+                        allocator);
+                    target = resolved.FindMember(member->name);
+                }
+                if (!target->value.IsArray()) {
+                    logger::warn("External patch '{}' field '{}' cannot use '{}' on a non-array value.",
+                        context, member->name.GetString(), operation);
+                    return false;
+                }
+                if ((operation == "merge" || operation == "remove") &&
+                    member->value.HasMember("remove"))
+                {
+                    RemoveMatchingArrayValues(target->value, member->value["remove"]);
+                }
+                if ((operation == "merge" || operation == "add") &&
+                    member->value.HasMember("add"))
+                {
+                    AddUniqueArrayValues(target->value, member->value["add"], allocator);
+                }
+                continue;
+            }
+
+            logger::warn("External patch '{}' field '{}' uses unknown operation '{}'.",
+                context, member->name.GetString(), operation);
+            return false;
+        }
+        return true;
+    }
+
+    bool SupportsExternalRuntimePatch(const DynamicForms::FormKind kind) {
+        using FK = DynamicForms::FormKind;
+        switch (kind) {
+        case FK::Global:
+        case FK::FormList:
+        case FK::EquipSlot:
+        case FK::VoiceType:
+        case FK::Outfit:
+        case FK::ArmorType:
+        case FK::Armor:
+        case FK::Book:
+        case FK::Misc:
+        case FK::Key:
+        case FK::SoulGem:
+        case FK::MaterialType:
+        case FK::Ammo:
+        case FK::Weapon:
+        case FK::AlchemyItem:
+        case FK::Ingredient:
+        case FK::Spell:
+        case FK::MagicEffect:
+        case FK::Enchantment:
+        case FK::Scroll:
+        case FK::Projectile:
+        case FK::Color:
+        case FK::ArtObject:
+        case FK::Perk:
+        case FK::HeadPart:
+        case FK::SoundDescriptor:
+        case FK::Light:
+        case FK::Explosion:
+        case FK::Activator:
+        case FK::EffectShader:
+        case FK::NPC:
+        case FK::TextureSet:
+        case FK::Hazard:
+        case FK::ImpactData:
+        case FK::ReferenceEffect:
+        case FK::DualCastData:
+        case FK::Static:
+        case FK::MovableStatic:
+        case FK::Door:
+        case FK::CombatStyle:
+        case FK::SoundCategory:
+        case FK::Class:
+        case FK::Flora:
+        case FK::Tree:
+        case FK::ConstructibleObject:
+        case FK::Container:
+        case FK::ImpactDataSet:
+        case FK::Footstep:
+        case FK::FootstepSet:
+        case FK::ReverbParameters:
+        case FK::AcousticSpace:
+        case FK::Apparatus:
+        case FK::StaticCollection:
+        case FK::Grass:
+        case FK::IdleMarker:
+        case FK::EncounterZone:
+        case FK::Relationship:
+        case FK::AssociationType:
+        case FK::MovementType:
+        case FK::WordOfPower:
+        case FK::Water:
+        case FK::ImageSpace:
+        case FK::LightingTemplate:
+        case FK::Shout:
+        case FK::LeveledItem:
+        case FK::LeveledNPC:
+        case FK::LeveledSpell:
+        case FK::Action:
+        case FK::MenuIcon:
+        case FK::Eyes:
+        case FK::Note:
+        case FK::AnimatedObject:
+        case FK::LoadScreen:
+        case FK::ShaderParticleGeometry:
+        case FK::AddonNode:
+        case FK::Faction:
+        case FK::IdleAnimation:
+        case FK::MaterialObject:
+        case FK::Message:
+        case FK::LandTexture:
+        case FK::SoundOutputModel:
+        case FK::LensFlare:
+        case FK::Debris:
+        case FK::ImageSpaceModifier:
+        case FK::CameraShot:
+        case FK::CameraPath:
+        case FK::TalkingActivator:
+        case FK::Furniture:
+        case FK::Weather:
+        case FK::Climate:
+        case FK::Location:
+        case FK::MusicType:
+        case FK::MusicTrack:
+        case FK::BodyPartData:
+        case FK::VolumetricLighting:
+        case FK::Sound:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    RE::TESForm* LookupExternalPatchTarget(
+        const std::string_view sourcePlugin,
+        const std::uint32_t localFormId)
+    {
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler || sourcePlugin.empty() || localFormId == 0) {
+            return nullptr;
+        }
+        return dataHandler->LookupForm(localFormId, sourcePlugin);
+    }
+
+    std::string ExternalPatchIdentity(
+        const std::string_view sourcePlugin,
+        const std::uint32_t localFormId,
+        const DynamicForms::FormKind kind)
+    {
+        return std::format("{}|{:X}|{}", NormalizeEditorId(sourcePlugin), localFormId, ToString(kind));
+    }
+
+    auto FindExternalPatchForm(
+        const std::string_view sourcePlugin,
+        const std::uint32_t localFormId,
+        const DynamicForms::FormKind kind)
+    {
+        const auto identity = ExternalPatchIdentity(sourcePlugin, localFormId, kind);
+        return std::ranges::find_if(forms, [&identity](const DynamicForms::DynamicForm& form) {
+            return form.externalPatch &&
+                ExternalPatchIdentity(form.externalSourcePlugin, form.externalLocalId, form.kind) == identity;
+        });
+    }
+
+    bool HasExternalField(
+        const std::vector<std::string>& fields,
+        const std::string_view field)
+    {
+        return std::ranges::find(fields, field) != fields.end();
+    }
+
+    bool HasAnyExternalField(
+        const std::vector<std::string>& fields,
+        const std::initializer_list<std::string_view> candidates)
+    {
+        return std::ranges::any_of(candidates, [&fields](const std::string_view field) {
+            return HasExternalField(fields, field);
+        });
+    }
+
+    bool ConfigureExternalPerk(
+        RE::TESForm* tesForm,
+        const DynamicForms::DynamicForm& form,
+        const std::vector<std::string>& fields)
+    {
+        auto* perk = tesForm ? tesForm->As<RE::BGSPerk>() : nullptr;
+        if (!perk) {
+            return false;
+        }
+
+        std::vector<std::string> validationErrors;
+        if (!ValidatePerkForm(form, validationErrors)) {
+            logger::warn(
+                "External perk patch '{}' was not applied: {}",
+                form.editorId,
+                JoinValidationErrors(validationErrors));
+            return false;
+        }
+
+        if (HasExternalField(fields, "fullName")) perk->fullName = form.fullName.c_str();
+        if (HasExternalField(fields, "trait")) perk->data.trait = form.trait;
+        if (HasExternalField(fields, "level")) perk->data.level = form.level;
+        if (HasExternalField(fields, "numRanks")) perk->data.numRanks = form.numRanks;
+        if (HasExternalField(fields, "playable")) perk->data.playable = form.playable;
+        if (HasExternalField(fields, "hidden")) perk->data.hidden = form.hidden;
+        if (HasExternalField(fields, "nextPerk")) {
+            perk->nextPerk = ResolveAs<RE::BGSPerk>(form.nextPerk);
+        }
+        if (HasExternalField(fields, "conditions")) {
+            ApplyConditions(perk->perkConditions, form.conditions);
+        }
+        if (HasExternalField(fields, "entries")) {
+            const auto loadedActorSnapshots = RemoveAppliedAbilityEntries(*perk);
+            ClearPerkEntries(*perk);
+            for (const auto& entry : form.entries) {
+                if (auto* perkEntry = CreatePerkEntry(*perk, entry)) {
+                    perk->perkEntries.push_back(perkEntry);
+                }
+            }
+            ApplyUpdatedAbilityAndQuestEntries(*perk, loadedActorSnapshots);
+        }
+
+        logger::info(
+            "Applied {} sparse external PERK field(s) to '{}'.",
+            fields.size(),
+            form.editorId);
+        return true;
+    }
+
+    bool ConfigureExternalSoundDescriptor(
+        RE::TESForm* tesForm,
+        const DynamicForms::DynamicForm& form,
+        const std::vector<std::string>& fields)
+    {
+        auto* soundForm = tesForm ? tesForm->As<RE::BGSSoundDescriptorForm>() : nullptr;
+        if (!soundForm) {
+            return false;
+        }
+        auto* soundDef = soundForm->soundDescriptor ?
+            static_cast<RE::BGSStandardSoundDef*>(soundForm->soundDescriptor) :
+            CreateStandardSoundDefObject();
+        if (!soundDef) {
+            return false;
+        }
+        soundForm->soundDescriptor = soundDef;
+
+        if (HasExternalField(fields, "category")) {
+            soundDef->category = ResolveAs<RE::BGSSoundCategory>(form.category);
+        }
+        if (HasExternalField(fields, "alternateSound")) {
+            auto* alternate = ResolveConfigForm(form.alternateSound);
+            soundDef->alternateSoundFormID = alternate ? alternate->GetFormID() : 0;
+        }
+        if (HasExternalField(fields, "outputModel")) {
+            soundDef->outputModel = ResolveAs<RE::BGSSoundOutput>(form.outputModel);
+        }
+        if (HasExternalField(fields, "soundFiles")) {
+            soundDef->soundFiles.clear();
+            for (const auto& file : form.soundFiles) {
+                if (file.empty()) {
+                    continue;
+                }
+                RE::BSResource::ID fileId;
+                fileId.GenerateFromPath(file.c_str());
+                soundDef->soundFiles.push_back(fileId);
+            }
+        }
+        if (HasExternalField(fields, "frequencyShift")) {
+            soundDef->soundCharacteristics.frequencyShift = form.frequencyShift;
+        }
+        if (HasExternalField(fields, "frequencyVariance")) {
+            soundDef->soundCharacteristics.frequencyVariance = form.frequencyVariance;
+        }
+        if (HasExternalField(fields, "priority")) {
+            soundDef->soundCharacteristics.priority = form.priority;
+        }
+        if (HasExternalField(fields, "dbVariance")) {
+            soundDef->soundCharacteristics.dbVariance = form.dbVariance;
+        }
+        if (HasExternalField(fields, "staticAttenuation")) {
+            soundDef->soundCharacteristics.staticAttenuation =
+                static_cast<std::uint16_t>(
+                    std::clamp(form.staticAttenuation * 100.0F, 0.0F, 65535.0F));
+        }
+        if (HasExternalField(fields, "looping")) {
+            soundDef->lengthCharacteristics.looping =
+                static_cast<RE::BGSStandardSoundDef::LengthCharacteristics::Looping>(
+                    form.looping);
+        }
+        if (HasExternalField(fields, "rumbleSendValue")) {
+            soundDef->lengthCharacteristics.rumbleSendValue = form.rumbleSendValue;
+        }
+        if (HasExternalField(fields, "conditions")) {
+            if (!form.conditions.empty()) {
+                if (!soundDef->conditions) {
+                    soundDef->conditions = new RE::TESCondition();
+                }
+                ApplyConditions(*soundDef->conditions, form.conditions);
+            } else if (soundDef->conditions) {
+                ClearCondition(*soundDef->conditions);
+            }
+        }
+
+        logger::info(
+            "Applied {} sparse external SNDR field(s) to '{}'.",
+            fields.size(),
+            form.editorId);
+        return true;
+    }
+
+    bool ConfigureExternalNPC(
+        RE::TESForm* tesForm,
+        const DynamicForms::DynamicForm& form,
+        const std::vector<std::string>& fields)
+    {
+        auto* npc = tesForm ? tesForm->As<RE::TESNPC>() : nullptr;
+        if (!npc) {
+            return false;
+        }
+
+        if (HasExternalField(fields, "fullName")) npc->fullName = form.fullName.c_str();
+        if (HasExternalField(fields, "height")) npc->height = form.height;
+        if (HasExternalField(fields, "weight")) npc->weight = form.weight;
+        if (HasAnyExternalField(fields, { "red", "green", "blue", "alpha" })) {
+            auto color = npc->bodyTintColor;
+            if (HasExternalField(fields, "red")) color.red = form.red;
+            if (HasExternalField(fields, "green")) color.green = form.green;
+            if (HasExternalField(fields, "blue")) color.blue = form.blue;
+            if (HasExternalField(fields, "alpha")) color.alpha = form.alpha;
+            npc->bodyTintColor = color;
+        }
+
+        const std::array flagFields{
+            std::pair{ std::string_view("female"), RE::ACTOR_BASE_DATA::Flag::kFemale },
+            std::pair{ std::string_view("oppositeGenderAnim"), RE::ACTOR_BASE_DATA::Flag::kOppositeGenderAnims },
+            std::pair{ std::string_view("essential"), RE::ACTOR_BASE_DATA::Flag::kEssential },
+            std::pair{ std::string_view("protected"), RE::ACTOR_BASE_DATA::Flag::kProtected },
+            std::pair{ std::string_view("unique"), RE::ACTOR_BASE_DATA::Flag::kUnique },
+            std::pair{ std::string_view("calcStats"), RE::ACTOR_BASE_DATA::Flag::kPCLevelMult },
+            std::pair{ std::string_view("respawn"), RE::ACTOR_BASE_DATA::Flag::kRespawn },
+            std::pair{ std::string_view("doesntAffectStealthMeter"), RE::ACTOR_BASE_DATA::Flag::kDoesntAffectStealthMeter },
+            std::pair{ std::string_view("doesntBleed"), RE::ACTOR_BASE_DATA::Flag::kDoesntBleed },
+            std::pair{ std::string_view("bleedoutOverrideFlag"), RE::ACTOR_BASE_DATA::Flag::kBleedoutOverride },
+            std::pair{ std::string_view("simpleActor"), RE::ACTOR_BASE_DATA::Flag::kSimpleActor },
+            std::pair{ std::string_view("noActivation"), RE::ACTOR_BASE_DATA::Flag::kNoActivation },
+            std::pair{ std::string_view("ghost"), RE::ACTOR_BASE_DATA::Flag::kIsGhost },
+            std::pair{ std::string_view("invulnerable"), RE::ACTOR_BASE_DATA::Flag::kInvulnerable }
+        };
+        const std::array flagValues{
+            form.femaleNpc,
+            form.oppositeGenderAnim,
+            form.essential,
+            form.protectedNpc,
+            form.unique,
+            form.calcStats,
+            form.respawn,
+            form.doesntAffectStealthMeter,
+            form.doesntBleed,
+            form.bleedoutOverrideFlag,
+            form.simpleActor,
+            form.noActivation,
+            form.ghost,
+            form.invulnerable
+        };
+        for (std::size_t index = 0; index < flagFields.size(); ++index) {
+            if (HasExternalField(fields, flagFields[index].first)) {
+                SetActorBaseFlag(*npc, flagFields[index].second, flagValues[index]);
+            }
+        }
+
+        if (HasExternalField(fields, "health")) npc->playerSkills.health = form.health;
+        if (HasExternalField(fields, "magicka")) npc->playerSkills.magicka = form.magicka;
+        if (HasExternalField(fields, "stamina")) npc->playerSkills.stamina = form.stamina;
+        if (HasExternalField(fields, "healthOffset")) npc->actorData.healthOffset = form.healthOffset;
+        if (HasExternalField(fields, "magickaOffset")) npc->actorData.magickaOffset = form.magickaOffset;
+        if (HasExternalField(fields, "staminaOffset")) npc->actorData.staminaOffset = form.staminaOffset;
+        if (HasExternalField(fields, "calcMinLevel")) npc->actorData.calcLevelMin = form.calcMinLevel;
+        if (HasExternalField(fields, "calcMaxLevel")) npc->actorData.calcLevelMax = form.calcMaxLevel;
+        if (HasExternalField(fields, "npcLevel")) npc->actorData.level = form.npcLevel;
+        if (HasExternalField(fields, "speedMult")) npc->actorData.speedMult = form.speedMult;
+        if (HasExternalField(fields, "dispositionBase")) npc->actorData.baseDisposition = form.dispositionBase;
+        if (HasExternalField(fields, "bleedoutOverride")) npc->actorData.bleedoutOverride = form.bleedoutOverride;
+        if (HasExternalField(fields, "soundLevel")) npc->soundLevel = static_cast<RE::SOUND_LEVEL>(form.soundLevel);
+        if (HasExternalField(fields, "skills")) {
+            std::copy(form.skills.begin(), form.skills.end(), npc->playerSkills.values);
+        }
+        if (HasExternalField(fields, "skillOffsets")) {
+            std::copy(form.skillOffsets.begin(), form.skillOffsets.end(), npc->playerSkills.offsets);
+        }
+
+        if (HasExternalField(fields, "race")) {
+            npc->race = ResolveAs<RE::TESRace>(form.race);
+            npc->originalRace = npc->race;
+        }
+        if (HasExternalField(fields, "skin")) npc->farSkin = ResolveAs<RE::TESObjectARMO>(form.skin);
+        if (HasExternalField(fields, "defaultOutfit")) npc->defaultOutfit = ResolveAs<RE::BGSOutfit>(form.defaultOutfit);
+        if (HasExternalField(fields, "sleepOutfit")) npc->sleepOutfit = ResolveAs<RE::BGSOutfit>(form.sleepOutfit);
+        if (HasExternalField(fields, "voice")) npc->voiceType = ResolveAs<RE::BGSVoiceType>(form.voice);
+        if (HasExternalField(fields, "class")) npc->npcClass = ResolveAs<RE::TESClass>(form.npcClass);
+        if (HasExternalField(fields, "combatStyle")) npc->combatStyle = ResolveAs<RE::TESCombatStyle>(form.combatStyle);
+        if (HasExternalField(fields, "giftFilter")) npc->giftFilter = ResolveAs<RE::BGSListForm>(form.giftFilter);
+        if (HasExternalField(fields, "deathItem")) npc->deathItem = ResolveAs<RE::TESLevItem>(form.deathItem);
+        if (HasExternalField(fields, "defaultPackageList")) npc->defaultPackList = ResolveAs<RE::BGSListForm>(form.defaultPackageList);
+        if (HasExternalField(fields, "crimeFaction")) npc->crimeFaction = ResolveAs<RE::TESFaction>(form.crimeFaction);
+
+        if (HasAnyExternalField(fields, {
+                "aiAggression", "aiConfidence", "aiEnergyLevel", "aiMorality", "aiMood",
+                "aiAssistance", "aiAggroRadiusBehavior", "aiAggroRadiusWarn",
+                "aiAggroRadiusWarnAndAttack", "aiAggroRadiusAttack", "aiNoSlowApproach" }))
+        {
+            SetAIDataBits(*npc, form);
+        }
+
+        if (HasAnyExternalField(fields, { "hairColor", "faceTexture" })) {
+            if (!npc->headRelatedData) {
+                npc->headRelatedData = new RE::TESNPC::HeadRelatedData();
+            }
+            if (HasExternalField(fields, "hairColor")) {
+                npc->headRelatedData->hairColor = ResolveAs<RE::BGSColorForm>(form.hairColor);
+            }
+            if (HasExternalField(fields, "faceTexture")) {
+                npc->headRelatedData->faceDetails = ResolveAs<RE::BGSTextureSet>(form.faceTexture);
+            }
+        }
+
+        if (HasExternalField(fields, "packages")) {
+            npc->aiPackages.packages.clear();
+            RE::BSSimpleList<RE::TESPackage*>::size_type index = 0;
+            for (const auto& ref : form.packages) {
+                if (auto* package = ResolveAs<RE::TESPackage>(ref)) {
+                    npc->aiPackages.packages.insert_at(index++, package);
+                }
+            }
+        }
+
+        if (HasExternalField(fields, "factions")) {
+            npc->factions.clear();
+            for (const auto& source : form.npcFactions) {
+                if (auto* faction = ResolveAs<RE::TESFaction>(source.form)) {
+                    RE::FACTION_RANK rank;
+                    rank.faction = faction;
+                    rank.rank = static_cast<std::int8_t>(std::clamp(source.rank, -128, 127));
+                    npc->factions.push_back(rank);
+                }
+            }
+        }
+
+        if (HasExternalField(fields, "perks")) {
+            std::vector<RE::BGSPerk*> oldPerks;
+            for (std::uint32_t index = 0; index < npc->perkCount; ++index) {
+                if (npc->perks && npc->perks[index].perk) {
+                    oldPerks.push_back(npc->perks[index].perk);
+                }
+            }
+            if (!oldPerks.empty()) {
+                npc->RemovePerks(oldPerks);
+            }
+            for (const auto& source : form.npcPerks) {
+                if (auto* perk = ResolveAs<RE::BGSPerk>(source.form)) {
+                    npc->AddPerk(
+                        perk,
+                        static_cast<std::int8_t>(std::clamp(source.rank, -128, 127)));
+                }
+            }
+        }
+
+        if (HasExternalField(fields, "spells")) {
+            auto* spellList = static_cast<RE::TESSpellList*>(npc);
+            if (spellList->actorEffects) {
+                std::vector<RE::SpellItem*> oldSpells;
+                for (std::uint32_t index = 0; index < spellList->actorEffects->numSpells; ++index) {
+                    if (spellList->actorEffects->spells &&
+                        spellList->actorEffects->spells[index])
+                    {
+                        oldSpells.push_back(spellList->actorEffects->spells[index]);
+                    }
+                }
+                if (!oldSpells.empty()) {
+                    spellList->actorEffects->RemoveSpells(oldSpells);
+                }
+            }
+            if (!form.spells.empty() && !spellList->actorEffects) {
+                spellList->actorEffects = new RE::TESSpellList::SpellData();
+            }
+            if (spellList->actorEffects) {
+                for (const auto& ref : form.spells) {
+                    if (auto* spell = ResolveAs<RE::SpellItem>(ref)) {
+                        spellList->actorEffects->AddSpell(spell);
+                    }
+                }
+            }
+        }
+
+        if (HasExternalField(fields, "headParts")) {
+            std::vector<RE::BGSHeadPart*> parts;
+            std::set<RE::BGSHeadPart*> visited;
+            std::function<void(RE::BGSHeadPart*)> addPart = [&](RE::BGSHeadPart* part) {
+                if (!part || !visited.insert(part).second) {
+                    return;
+                }
+                parts.push_back(part);
+                for (auto* extra : part->extraParts) {
+                    addPart(extra);
+                }
+            };
+            for (const auto& ref : form.headParts) {
+                addPart(ResolveAs<RE::BGSHeadPart>(ref));
+            }
+            const auto count = std::min<std::size_t>(parts.size(), 127);
+            auto** values = count > 0 ? RE::calloc<RE::BGSHeadPart*>(count) : nullptr;
+            for (std::size_t index = 0; index < count; ++index) {
+                values[index] = parts[index];
+            }
+            npc->headParts = values;
+            npc->numHeadParts = static_cast<std::int8_t>(count);
+        }
+
+        if (HasExternalField(fields, "tintLayers")) {
+            if (!npc->tintLayers) {
+                npc->tintLayers = new RE::BSTArray<RE::TESNPC::Layer*>();
+            } else {
+                npc->tintLayers->clear();
+            }
+            for (const auto& source : form.tintLayers) {
+                auto* layer = new RE::TESNPC::Layer();
+                layer->tintIndex = source.index;
+                layer->preset = source.preset;
+                layer->interpolationValue = static_cast<std::uint16_t>(
+                    std::clamp(source.interpolation * 100.0F, 0.0F, 65535.0F));
+                layer->tintColor =
+                    RE::Color(source.red, source.green, source.blue, source.alpha);
+                npc->tintLayers->push_back(layer);
+            }
+        }
+
+        if (HasAnyExternalField(fields, { "faceMorphs", "faceParts" })) {
+            auto* faceData = new RE::TESNPC::FaceData();
+            if (npc->faceData) {
+                *faceData = *npc->faceData;
+            }
+            npc->faceData = faceData;
+            if (HasExternalField(fields, "faceMorphs")) {
+                std::copy(form.faceMorphs.begin(), form.faceMorphs.end(), npc->faceData->morphs);
+            }
+            if (HasExternalField(fields, "faceParts")) {
+                std::copy(form.faceParts.begin(), form.faceParts.end(), npc->faceData->parts);
+            }
+        }
+
+        logger::info(
+            "Applied {} sparse external NPC_ field(s) to '{}'.",
+            fields.size(),
+            form.editorId);
+        return true;
+    }
+
+    bool ParseNormalizedExternalFormId(
+        const std::string_view normalized,
+        std::string& sourcePlugin,
+        std::uint32_t& localFormId)
+    {
+        const auto separator = normalized.rfind('|');
+        if (separator == std::string_view::npos || separator == 0 || separator + 1 >= normalized.size()) {
+            return false;
+        }
+
+        sourcePlugin.assign(normalized.substr(0, separator));
+        try {
+            localFormId = static_cast<std::uint32_t>(
+                std::stoul(std::string(normalized.substr(separator + 1)), nullptr, 16));
+        } catch (...) {
+            localFormId = 0;
+        }
+        return !sourcePlugin.empty() && localFormId != 0;
+    }
+
+    bool BuildExternalBaseline(
+        RE::TESForm& target,
+        const DynamicForms::FormKind kind,
+        const std::string_view packageName,
+        DynamicForms::DynamicForm& form,
+        std::string& baselinePayload)
+    {
+        if (!SupportsExternalRuntimePatch(kind) ||
+            target.GetFormType() != static_cast<RE::FormType>(FormTypeForKind(kind)))
+        {
+            return false;
+        }
+
+        const auto normalizedId = FormUtil::NormalizeFormID(std::addressof(target));
+        std::string sourcePlugin;
+        std::uint32_t localFormId = 0;
+        if (!ParseNormalizedExternalFormId(normalizedId, sourcePlugin, localFormId)) {
+            logger::warn("External patch target {:08X} has no stable plugin-local identity.", target.GetFormID());
+            return false;
+        }
+
+        auto editorId = FormUtil::GetEditorIDSafe(std::addressof(target));
+        if (editorId.empty()) {
+            editorId = std::format("{}_{:X}", ToSignature(kind), localFormId);
+        }
+
+        DynamicForms::DynamicForm captured;
+        captured.kind = kind;
+        captured.editorId = editorId;
+        DynamicForms::FormRef targetRef;
+        targetRef.editorID = FormUtil::GetEditorIDSafe(std::addressof(target));
+        targetRef.formID = normalizedId;
+        if (!Manager::PopulateFormFromGameTemplate(captured, targetRef)) {
+            return false;
+        }
+
+        captured.externalPatch = true;
+        captured.externalSourcePlugin = sourcePlugin;
+        captured.externalLocalId = localFormId;
+        captured.externalWinningPlugin =
+            target.GetFile() ? std::string(target.GetFile()->GetFilename()) : sourcePlugin;
+        captured.externalEditPackage = std::string(packageName);
+        captured.packageName = std::string(packageName);
+        captured.basePackageName = sourcePlugin;
+        captured.patchPackageNames = { std::string(packageName) };
+        captured.pluginNumber = 0;
+        captured.localId = 0;
+        captured.dirty = false;
+
+        rapidjson::Document baseline;
+        if (!Manager::BuildFormDocument(captured, baseline)) {
+            return false;
+        }
+        baselinePayload = JsonString(baseline);
+        captured.externalBaselinePayload = baselinePayload;
+        form = std::move(captured);
+        return true;
+    }
+
+    bool ApplyExternalResolvedForm(DynamicForms::DynamicForm& form) {
+        if (!form.externalPatch || !SupportsExternalRuntimePatch(form.kind)) {
+            return false;
+        }
+
+        auto* target = LookupExternalPatchTarget(form.externalSourcePlugin, form.externalLocalId);
+        if (!target ||
+            target->GetFormType() != static_cast<RE::FormType>(FormTypeForKind(form.kind)))
+        {
+            logger::warn(
+                "External patch target '{}|{:X}' is missing or no longer has type {}.",
+                form.externalSourcePlugin,
+                form.externalLocalId,
+                ToString(form.kind));
+            return false;
+        }
+
+        const auto originalEditorId = FormUtil::GetEditorIDSafe(target);
+        const auto& fieldsToApply = form.externalPendingApplyFields.empty() ?
+            form.externalChangedFields :
+            form.externalPendingApplyFields;
+        if (fieldsToApply.empty()) {
+            logger::debug(
+                "External patch '{}|{:X}' has no field changes to apply.",
+                form.externalSourcePlugin,
+                form.externalLocalId);
+            return true;
+        }
+
+        DynamicForms::DynamicForm currentValues;
+        currentValues.kind = form.kind;
+        currentValues.editorId = originalEditorId.empty() ?
+            std::format("{}_{:X}", ToSignature(form.kind), form.externalLocalId) :
+            originalEditorId;
+        DynamicForms::FormRef targetRef;
+        targetRef.editorID = originalEditorId;
+        targetRef.formID = std::format("{}|{:X}", form.externalSourcePlugin, form.externalLocalId);
+        if (!Manager::PopulateFormFromGameTemplate(currentValues, targetRef)) {
+            logger::warn(
+                "Could not recapture external patch target '{}|{:X}' before applying sparse fields.",
+                form.externalSourcePlugin,
+                form.externalLocalId);
+            return false;
+        }
+
+        rapidjson::Document currentDocument;
+        rapidjson::Document resolvedDocument;
+        if (!Manager::BuildFormDocument(currentValues, currentDocument) ||
+            !Manager::BuildFormDocument(form, resolvedDocument)) {
+            return false;
+        }
+
+        auto& allocator = currentDocument.GetAllocator();
+        for (const auto& field : fieldsToApply) {
+            const auto resolvedMember = resolvedDocument.FindMember(field.c_str());
+            auto currentMember = currentDocument.FindMember(field.c_str());
+            if (resolvedMember == resolvedDocument.MemberEnd()) {
+                if (currentMember != currentDocument.MemberEnd()) {
+                    currentDocument.RemoveMember(currentMember);
+                }
+                continue;
+            }
+            if (currentMember == currentDocument.MemberEnd()) {
+                currentDocument.AddMember(
+                    rapidjson::Value(field.c_str(), allocator),
+                    rapidjson::Value(resolvedMember->value, allocator),
+                    allocator);
+            } else {
+                currentMember->value.CopyFrom(resolvedMember->value, allocator);
+            }
+        }
+
+        DynamicForms::DynamicForm runtimeValues;
+        if (!ReadFormDocument(
+                currentDocument,
+                std::format("external runtime apply {}|{:X}", form.externalSourcePlugin, form.externalLocalId),
+                currentValues.editorId,
+                runtimeValues))
+        {
+            return false;
+        }
+        runtimeValues.editorId = originalEditorId;
+        bool configured = false;
+        if (runtimeValues.kind == DynamicForms::FormKind::Perk) {
+            configured = ConfigureExternalPerk(target, runtimeValues, fieldsToApply);
+        } else if (runtimeValues.kind == DynamicForms::FormKind::NPC) {
+            configured = ConfigureExternalNPC(target, runtimeValues, fieldsToApply);
+        } else if (runtimeValues.kind == DynamicForms::FormKind::SoundDescriptor) {
+            configured =
+                ConfigureExternalSoundDescriptor(target, runtimeValues, fieldsToApply);
+        } else {
+            configured = ConfigureForm(target, runtimeValues);
+        }
+        if (!configured) {
+            logger::warn(
+                "Could not apply external runtime patch '{}' to {}|{:X}.",
+                form.editorId,
+                form.externalSourcePlugin,
+                form.externalLocalId);
+            return false;
+        }
+        form.externalPendingApplyFields.clear();
+
+        std::string layers;
+        for (const auto& package : form.patchPackageNames) {
+            if (!layers.empty()) {
+                layers += ", ";
+            }
+            layers += package;
+        }
+        logger::info(
+            "Applied external runtime patch '{}' to {}|{:X} ({}) through packages [{}].",
+            form.editorId,
+            form.externalSourcePlugin,
+            form.externalLocalId,
+            ToString(form.kind),
+            layers);
+        return true;
     }
 
     struct SqliteDb
@@ -7551,18 +8723,75 @@ namespace {
         }
 
         const auto manifestPath = PackageManifestPath(packageName);
+        rapidjson::Document doc;
+        bool changed = false;
         if (std::filesystem::exists(manifestPath)) {
-            return true;
+            std::ifstream stream(manifestPath);
+            if (!stream.is_open()) {
+                logger::warn("Could not read package manifest '{}'.", manifestPath.string());
+                return false;
+            }
+            rapidjson::IStreamWrapper wrapper(stream);
+            doc.ParseStream(wrapper);
+            if (doc.HasParseError() || !doc.IsObject()) {
+                logger::warn("Invalid package manifest '{}'.", manifestPath.string());
+                return false;
+            }
+        } else {
+            doc.SetObject();
+            changed = true;
         }
 
-        rapidjson::Document doc;
-        doc.SetObject();
         auto& allocator = doc.GetAllocator();
-        doc.AddMember("schemaVersion", 1, allocator);
-        doc.AddMember("displayName", rapidjson::Value(std::string(packageName).c_str(), allocator), allocator);
-        doc.AddMember("enabled", true, allocator);
-        doc.AddMember("priority", 0, allocator);
-        doc.AddMember("database", "package.db", allocator);
+        const auto ensureString = [&doc, &allocator, &changed](
+                                      const char* key,
+                                      const std::string_view value) {
+            if (doc.HasMember(key)) {
+                return;
+            }
+            doc.AddMember(
+                rapidjson::Value(key, allocator),
+                rapidjson::Value(
+                    value.data(),
+                    static_cast<rapidjson::SizeType>(value.size()),
+                    allocator),
+                allocator);
+            changed = true;
+        };
+        const auto ensureArray = [&doc, &allocator, &changed](const char* key) {
+            if (doc.HasMember(key)) {
+                return;
+            }
+            doc.AddMember(
+                rapidjson::Value(key, allocator),
+                rapidjson::Value(rapidjson::kArrayType),
+                allocator);
+            changed = true;
+        };
+
+        if (!doc.HasMember("schemaVersion")) {
+            doc.AddMember("schemaVersion", 1, allocator);
+            changed = true;
+        }
+        const auto packageId = PackageIdFromName(packageName);
+        ensureString("packageId", packageId);
+        ensureString("displayName", packageName);
+        ensureString("version", "1.0.0");
+        if (!doc.HasMember("enabled")) {
+            doc.AddMember("enabled", true, allocator);
+            changed = true;
+        }
+        if (!doc.HasMember("priority")) {
+            doc.AddMember("priority", 0, allocator);
+            changed = true;
+        }
+        ensureString("database", "package.db");
+        ensureArray("dependencies");
+        ensureArray("pluginDependencies");
+
+        if (!changed) {
+            return true;
+        }
 
         std::ofstream stream(manifestPath);
         if (!stream.is_open()) {
@@ -7607,6 +8836,18 @@ namespace {
                 "form_kind TEXT NOT NULL,"
                 "payload TEXT NOT NULL,"
                 "updated_at INTEGER NOT NULL DEFAULT (unixepoch())"
+                ");",
+                packageName) ||
+            !ExecSql(db.handle,
+                "CREATE TABLE IF NOT EXISTS external_patches ("
+                "source_plugin TEXT NOT NULL COLLATE NOCASE,"
+                "local_form_id INTEGER NOT NULL,"
+                "form_kind TEXT NOT NULL,"
+                "editor_id TEXT NOT NULL DEFAULT '',"
+                "winning_plugin TEXT NOT NULL DEFAULT '',"
+                "changes_json TEXT NOT NULL,"
+                "updated_at INTEGER NOT NULL DEFAULT (unixepoch()),"
+                "PRIMARY KEY(source_plugin, local_form_id, form_kind)"
                 ");",
                 packageName)) {
             return false;
@@ -7663,41 +8904,68 @@ namespace {
         return false;
     }
 
-    void ImportPackageJsonQueue(const std::string& packageName, sqlite3* db) {
+    struct PackageImportStats
+    {
+        std::size_t discovered{ 0 };
+        std::size_t imported{ 0 };
+        std::size_t invalid{ 0 };
+        std::size_t persistenceFailures{ 0 };
+    };
+
+    PackageImportStats ImportPackageJsonQueue(const std::string& packageName, sqlite3* db) {
+        PackageImportStats stats;
         const auto importDir = PackageImportDirectory(packageName);
         if (!std::filesystem::exists(importDir)) {
-            return;
+            return stats;
         }
 
         std::error_code ec;
         for (const auto& entry : std::filesystem::directory_iterator(importDir, ec)) {
             if (ec) {
                 logger::warn("Could not enumerate package import directory '{}': {}", importDir.string(), ec.message());
-                return;
+                return stats;
             }
             if (!entry.is_regular_file() || entry.path().extension() != ".json") {
                 continue;
             }
+            ++stats.discovered;
 
-            std::ifstream stream(entry.path());
-            if (!stream.is_open()) {
-                logger::warn("Could not open package import file '{}'.", entry.path().string());
-                continue;
+            std::string payload;
+            {
+                std::ifstream stream(entry.path());
+                if (!stream.is_open()) {
+                    logger::warn("Could not open package import file '{}'.", entry.path().string());
+                    ++stats.invalid;
+                    continue;
+                }
+
+                payload.assign(
+                    std::istreambuf_iterator<char>(stream),
+                    std::istreambuf_iterator<char>());
             }
-
-            std::string payload{
-                std::istreambuf_iterator<char>(stream),
-                std::istreambuf_iterator<char>() };
 
             rapidjson::Document doc;
             doc.Parse(payload.c_str());
-            if (doc.HasParseError() || !doc.IsObject()) {
-                logger::warn("Invalid package import JSON '{}'.", entry.path().string());
+            if (doc.HasParseError()) {
+                logger::warn(
+                    "Invalid package import JSON '{}': {} at offset {}. The file was left in imports for correction.",
+                    entry.path().string(),
+                    rapidjson::GetParseError_En(doc.GetParseError()),
+                    doc.GetErrorOffset());
+                ++stats.invalid;
+                continue;
+            }
+            if (!doc.IsObject()) {
+                logger::warn(
+                    "Invalid package import JSON '{}': the root value must be an object. The file was left in imports for correction.",
+                    entry.path().string());
+                ++stats.invalid;
                 continue;
             }
 
             DynamicForms::DynamicForm form;
             if (!ReadFormDocument(doc, entry.path().string(), entry.path().stem().string(), form)) {
+                ++stats.invalid;
                 continue;
             }
 
@@ -7708,8 +8976,10 @@ namespace {
             const auto normalizedPayload = JsonString(doc);
 
             if (!UpsertPackageFormPayload(db, packageName, form, normalizedPayload)) {
+                ++stats.persistenceFailures;
                 continue;
             }
+            ++stats.imported;
 
             std::error_code removeEc;
             std::filesystem::remove(entry.path(), removeEc);
@@ -7719,6 +8989,17 @@ namespace {
                 logger::info("Imported dynamic form '{}' into package '{}'.", form.editorId, packageName);
             }
         }
+
+        if (stats.discovered > 0) {
+            logger::info(
+                "Package '{}' import queue: {} discovered, {} stored in package.db, {} invalid, {} persistence failures.",
+                packageName,
+                stats.discovered,
+                stats.imported,
+                stats.invalid,
+                stats.persistenceFailures);
+        }
+        return stats;
     }
 
     bool PersistFormDocument(const DynamicForms::DynamicForm& form, const rapidjson::Document& doc) {
@@ -7774,6 +9055,103 @@ namespace {
         return false;
     }
 
+    bool PersistExternalPatch(const DynamicForms::DynamicForm& form) {
+        if (!form.externalPatch ||
+            form.externalSourcePlugin.empty() ||
+            form.externalLocalId == 0 ||
+            form.externalEditPackage.empty() ||
+            form.externalBaselinePayload.empty())
+        {
+            logger::warn("External patch '{}' has incomplete target or baseline metadata.", form.editorId);
+            return false;
+        }
+
+        rapidjson::Document baseline;
+        baseline.Parse(form.externalBaselinePayload.c_str());
+        rapidjson::Document resolved;
+        if (baseline.HasParseError() || !Manager::BuildFormDocument(form, resolved)) {
+            logger::warn("Could not build sparse external patch '{}'.", form.editorId);
+            return false;
+        }
+
+        rapidjson::Document changes;
+        if (!BuildExternalChangesDocument(baseline, resolved, changes)) {
+            return false;
+        }
+        ApplyExternalArrayOperationChoices(form, baseline, resolved, changes);
+
+        SqliteDb db;
+        if (!OpenPackageDb(form.externalEditPackage, db)) {
+            return false;
+        }
+
+        SqliteStatement statement;
+        if (!PrepareSql(db.handle,
+                "INSERT INTO external_patches("
+                "source_plugin, local_form_id, form_kind, editor_id, winning_plugin, changes_json, updated_at"
+                ") VALUES(?1, ?2, ?3, ?4, ?5, ?6, unixepoch()) "
+                "ON CONFLICT(source_plugin, local_form_id, form_kind) DO UPDATE SET "
+                "editor_id=excluded.editor_id, winning_plugin=excluded.winning_plugin, "
+                "changes_json=excluded.changes_json, updated_at=excluded.updated_at;",
+                statement,
+                form.externalEditPackage)) {
+            return false;
+        }
+
+        const auto formKind = ToString(form.kind);
+        const auto changesPayload = JsonString(changes);
+        sqlite3_bind_text(statement.handle, 1, form.externalSourcePlugin.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(statement.handle, 2, form.externalLocalId);
+        sqlite3_bind_text(statement.handle, 3, formKind.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement.handle, 4, form.editorId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement.handle, 5, form.externalWinningPlugin.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(statement.handle, 6, changesPayload.c_str(), -1, SQLITE_TRANSIENT);
+
+        if (sqlite3_step(statement.handle) != SQLITE_DONE) {
+            logger::warn(
+                "Could not save external patch '{}|{:X}' in package '{}': {}",
+                form.externalSourcePlugin,
+                form.externalLocalId,
+                form.externalEditPackage,
+                sqlite3_errmsg(db.handle));
+            return false;
+        }
+
+        logger::info(
+            "Saved sparse external patch '{}|{:X}' ({}) in package '{}'.",
+            form.externalSourcePlugin,
+            form.externalLocalId,
+            formKind,
+            form.externalEditPackage);
+        return true;
+    }
+
+    bool DeleteStoredExternalPatch(const DynamicForms::DynamicForm& form) {
+        if (!form.externalPatch || form.externalEditPackage.empty()) {
+            return false;
+        }
+
+        SqliteDb db;
+        if (!OpenPackageDb(form.externalEditPackage, db)) {
+            return false;
+        }
+
+        SqliteStatement statement;
+        if (!PrepareSql(db.handle,
+                "DELETE FROM external_patches "
+                "WHERE source_plugin=?1 COLLATE NOCASE AND local_form_id=?2 AND form_kind=?3;",
+                statement,
+                form.externalEditPackage)) {
+            return false;
+        }
+
+        const auto kind = ToString(form.kind);
+        sqlite3_bind_text(statement.handle, 1, form.externalSourcePlugin.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(statement.handle, 2, form.externalLocalId);
+        sqlite3_bind_text(statement.handle, 3, kind.c_str(), -1, SQLITE_TRANSIENT);
+        return sqlite3_step(statement.handle) == SQLITE_DONE && sqlite3_changes(db.handle) > 0;
+    }
+
     bool DeleteStoredForm(const DynamicForms::DynamicForm& form) {
         bool ok = true;
         std::vector<std::string> packages{ EffectivePackageName(form) };
@@ -7803,14 +9181,20 @@ namespace {
     }
 
     std::vector<std::string> DiscoverPackageNames() {
-        std::vector<std::string> packages;
-        packages.emplace_back(Manager::DEFAULT_PACKAGE_NAME);
+        struct PackageOrderEntry
+        {
+            std::string name;
+            std::int32_t priority{ 0 };
+        };
+
+        std::vector<PackageOrderEntry> discovered;
+        discovered.push_back({ Manager::DEFAULT_PACKAGE_NAME, std::numeric_limits<std::int32_t>::min() });
 
         std::error_code ec;
         std::filesystem::create_directories(Manager::PACKAGES_DIR, ec);
         if (ec) {
             logger::warn("Could not create packages directory '{}': {}", Manager::PACKAGES_DIR, ec.message());
-            return packages;
+            return { Manager::DEFAULT_PACKAGE_NAME };
         }
 
         for (const auto& entry : std::filesystem::directory_iterator(Manager::PACKAGES_DIR, ec)) {
@@ -7839,16 +9223,40 @@ namespace {
             }
             if (doc.HasMember("displayName") && doc["displayName"].IsString()) {
                 const std::string displayName = doc["displayName"].GetString();
-                if (!displayName.empty() && std::ranges::find(packages, displayName) == packages.end()) {
-                    packages.push_back(displayName);
+                if (!displayName.empty() &&
+                    std::ranges::none_of(discovered, [&displayName](const PackageOrderEntry& package) {
+                        return package.name == displayName;
+                    }))
+                {
+                    std::int32_t priority = 0;
+                    if (doc.HasMember("priority") && doc["priority"].IsInt()) {
+                        priority = doc["priority"].GetInt();
+                    }
+                    discovered.push_back({ displayName, priority });
                 }
             }
         }
 
+        std::ranges::stable_sort(discovered, [](const PackageOrderEntry& left, const PackageOrderEntry& right) {
+            if (left.priority != right.priority) {
+                return left.priority < right.priority;
+            }
+            return left.name < right.name;
+        });
+
+        std::vector<std::string> packages;
+        packages.reserve(discovered.size());
+        for (auto& package : discovered) {
+            packages.push_back(std::move(package.name));
+        }
         return packages;
     }
 
     bool IsEditorIdReservedForStoredForm(const DynamicForms::DynamicForm& form) {
+        if (const auto* indexed = FindExternalFormsByEditorId(form.editorId); indexed && !indexed->empty()) {
+            return true;
+        }
+
         auto* existing = RE::TESForm::LookupByEditorID(form.editorId);
         if (!existing) {
             return false;
@@ -7867,7 +9275,14 @@ namespace {
         return true;
     }
 
-    void AddOrReplaceBaseForm(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
+    enum class BaseFormLoadResult
+    {
+        Added,
+        Replaced,
+        Deferred
+    };
+
+    BaseFormLoadResult AddOrReplaceBaseForm(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
         if (form.packageName.empty()) {
             form.packageName = sourcePackage;
         }
@@ -7875,18 +9290,19 @@ namespace {
         form.patchPackageNames.clear();
 
         const auto existing = std::ranges::find_if(forms, [&form](const DynamicForms::DynamicForm& current) {
-            return current.editorId == form.editorId;
+            return !current.externalPatch && current.editorId == form.editorId;
         });
         if (existing == forms.end()) {
             if (IsEditorIdReservedForStoredForm(form)) {
                 logger::warn(
-                    "Dynamic form '{}' from package '{}' was skipped because that EditorID belongs to an existing game form.",
+                    "Dynamic form '{}' from package '{}' was stored but deferred because CLibUtil found that EditorID in a loaded non-DPF form. "
+                    "Disable the source plugin or export under a unique EditorID before the next load.",
                     form.editorId,
                     sourcePackage);
-                return;
+                return BaseFormLoadResult::Deferred;
             }
             forms.push_back(std::move(form));
-            return;
+            return BaseFormLoadResult::Added;
         }
 
         const auto pluginNumber = existing->pluginNumber;
@@ -7907,11 +9323,12 @@ namespace {
         form.basePackageName.clear();
         form.patchPackageNames.clear();
         *existing = std::move(form);
+        return BaseFormLoadResult::Replaced;
     }
 
     void ApplyResolvedPatch(DynamicForms::DynamicForm form, const std::string& sourcePackage) {
         const auto existing = std::ranges::find_if(forms, [&form](const DynamicForms::DynamicForm& current) {
-            return current.editorId == form.editorId;
+            return !current.externalPatch && current.editorId == form.editorId;
         });
         if (existing == forms.end()) {
             logger::warn("Patch '{}' in package '{}' was skipped because the target form does not exist.", form.editorId, sourcePackage);
@@ -7937,20 +9354,152 @@ namespace {
         *existing = std::move(form);
     }
 
+    void LoadExternalPackagePatches(const std::string& packageName, sqlite3* db) {
+        SqliteStatement statement;
+        if (!PrepareSql(db,
+                "SELECT source_plugin, local_form_id, form_kind, editor_id, winning_plugin, changes_json "
+                "FROM external_patches ORDER BY source_plugin, local_form_id, form_kind;",
+                statement,
+                packageName)) {
+            return;
+        }
+
+        while (sqlite3_step(statement.handle) == SQLITE_ROW) {
+            const auto* pluginText = reinterpret_cast<const char*>(sqlite3_column_text(statement.handle, 0));
+            const auto localIdValue = sqlite3_column_int64(statement.handle, 1);
+            const auto* kindText = reinterpret_cast<const char*>(sqlite3_column_text(statement.handle, 2));
+            const auto* editorText = reinterpret_cast<const char*>(sqlite3_column_text(statement.handle, 3));
+            const auto* winningText = reinterpret_cast<const char*>(sqlite3_column_text(statement.handle, 4));
+            const auto* changesText = reinterpret_cast<const char*>(sqlite3_column_text(statement.handle, 5));
+            if (!pluginText || !kindText || !changesText || localIdValue <= 0) {
+                continue;
+            }
+
+            const auto parsedKind = TryFormKindFromString(kindText);
+            if (!parsedKind || !SupportsExternalRuntimePatch(*parsedKind)) {
+                logger::warn(
+                    "External patch '{}|{:X}' in package '{}' uses unsupported kind '{}'.",
+                    pluginText,
+                    static_cast<std::uint32_t>(localIdValue),
+                    packageName,
+                    kindText);
+                continue;
+            }
+
+            const auto localFormId = static_cast<std::uint32_t>(localIdValue);
+            auto existing = FindExternalPatchForm(pluginText, localFormId, *parsedKind);
+            DynamicForms::DynamicForm previousResolved;
+            std::string layerBaseline;
+            if (existing == forms.end()) {
+                auto* target = LookupExternalPatchTarget(pluginText, localFormId);
+                if (!target ||
+                    !BuildExternalBaseline(*target, *parsedKind, packageName, previousResolved, layerBaseline))
+                {
+                    logger::warn(
+                        "External patch '{}|{:X}' in package '{}' was skipped because its target is unavailable.",
+                        pluginText,
+                        localFormId,
+                        packageName);
+                    continue;
+                }
+            } else {
+                previousResolved = *existing;
+                rapidjson::Document baseline;
+                if (!Manager::BuildFormDocument(previousResolved, baseline)) {
+                    continue;
+                }
+                layerBaseline = JsonString(baseline);
+            }
+
+            rapidjson::Document resolvedDocument;
+            resolvedDocument.Parse(layerBaseline.c_str());
+            rapidjson::Document changesDocument;
+            changesDocument.Parse(changesText);
+            const auto context = std::format("{}:{}|{:X}", packageName, pluginText, localFormId);
+            if (resolvedDocument.HasParseError() || changesDocument.HasParseError() ||
+                !ApplyExternalChangesDocument(resolvedDocument, changesDocument, context))
+            {
+                continue;
+            }
+
+            DynamicForms::DynamicForm resolved;
+            const auto fallbackEditorId =
+                editorText && editorText[0] != '\0' ? editorText : previousResolved.editorId.c_str();
+            if (!ReadFormDocument(resolvedDocument, context, fallbackEditorId, resolved)) {
+                continue;
+            }
+
+            auto layers = previousResolved.patchPackageNames;
+            if (std::ranges::find(layers, packageName) == layers.end()) {
+                layers.push_back(packageName);
+            }
+            resolved.externalPatch = true;
+            resolved.externalSourcePlugin = pluginText;
+            resolved.externalLocalId = localFormId;
+            resolved.externalWinningPlugin =
+                !previousResolved.externalWinningPlugin.empty() ?
+                    previousResolved.externalWinningPlugin :
+                    (winningText && winningText[0] != '\0' ? winningText : pluginText);
+            resolved.externalEditPackage = packageName;
+            resolved.externalBaselinePayload = std::move(layerBaseline);
+            resolved.externalInheritedChangedFields = previousResolved.externalChangedFields;
+            resolved.externalInheritedConflictingFields = previousResolved.externalConflictingFields;
+            resolved.externalArrayOperations.clear();
+            for (auto member = changesDocument["fields"].MemberBegin();
+                 member != changesDocument["fields"].MemberEnd();
+                 ++member)
+            {
+                if (!member->value.IsObject() ||
+                    !member->value.HasMember("operation") ||
+                    !member->value["operation"].IsString()) {
+                    continue;
+                }
+                const std::string_view operation = member->value["operation"].GetString();
+                if (operation == "merge" || operation == "add" || operation == "remove") {
+                    resolved.externalArrayOperations[member->name.GetString()] = "merge";
+                } else if (operation == "replace") {
+                    resolved.externalArrayOperations[member->name.GetString()] = "replace";
+                }
+            }
+            resolved.packageName = previousResolved.packageName.empty() ? packageName : previousResolved.packageName;
+            resolved.basePackageName = pluginText;
+            resolved.patchPackageNames = std::move(layers);
+            resolved.pluginNumber = 0;
+            resolved.localId = 0;
+            resolved.externalPersisted = true;
+            resolved.dirty = false;
+            RefreshExternalFieldProvenance(resolved);
+
+            if (existing == forms.end()) {
+                forms.push_back(std::move(resolved));
+            } else {
+                *existing = std::move(resolved);
+            }
+        }
+    }
+
     void LoadPackageForms(const std::string& packageName) {
         SqliteDb db;
         if (!OpenPackageDb(packageName, db)) {
             return;
         }
 
-        ImportPackageJsonQueue(packageName, db.handle);
+        const auto importStats = ImportPackageJsonQueue(packageName, db.handle);
+        static_cast<void>(importStats);
+
+        std::size_t storedRows = 0;
+        std::size_t acceptedRows = 0;
+        std::size_t deferredRows = 0;
+        std::size_t invalidRows = 0;
 
         SqliteStatement formsStatement;
         if (PrepareSql(db.handle, "SELECT editor_id, plugin_number, local_id, payload FROM forms ORDER BY editor_id;", formsStatement, packageName)) {
             while (sqlite3_step(formsStatement.handle) == SQLITE_ROW) {
+                ++storedRows;
                 const auto* editorText = reinterpret_cast<const char*>(sqlite3_column_text(formsStatement.handle, 0));
                 const auto* payloadText = reinterpret_cast<const char*>(sqlite3_column_text(formsStatement.handle, 3));
                 if (!editorText || !payloadText) {
+                    ++invalidRows;
                     continue;
                 }
 
@@ -7961,10 +9510,25 @@ namespace {
                     if (storedPluginNumber > 0) form.pluginNumber = static_cast<std::uint32_t>(storedPluginNumber);
                     if (storedLocalId > 0) form.localId = static_cast<std::uint32_t>(storedLocalId);
                     form.packageName = form.packageName.empty() ? packageName : form.packageName;
-                    AddOrReplaceBaseForm(std::move(form), packageName);
+                    const auto loadResult = AddOrReplaceBaseForm(std::move(form), packageName);
+                    if (loadResult == BaseFormLoadResult::Deferred) {
+                        ++deferredRows;
+                    } else {
+                        ++acceptedRows;
+                    }
+                } else {
+                    ++invalidRows;
                 }
             }
         }
+
+        logger::info(
+            "Package '{}' database: {} stored forms, {} accepted for runtime activation, {} deferred by EditorID collision, {} invalid rows.",
+            packageName,
+            storedRows,
+            acceptedRows,
+            deferredRows,
+            invalidRows);
 
         if (!ExecSql(
                 db.handle,
@@ -7985,7 +9549,7 @@ namespace {
                 }
 
                 const auto existing = std::ranges::find_if(forms, [editorText](const DynamicForms::DynamicForm& current) {
-                    return current.editorId == editorText;
+                    return !current.externalPatch && current.editorId == editorText;
                 });
                 if (existing == forms.end()) {
                     logger::warn("Patch '{}' in package '{}' was skipped because the target form does not exist.", editorText, packageName);
@@ -7999,22 +9563,59 @@ namespace {
                 }
             }
         }
+
+        LoadExternalPackagePatches(packageName, db.handle);
     }
 }
 
 namespace Manager {
     void InstallHooks() {
+        bool expected = false;
+        if (!responseListHookInstallationAttempted.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_acq_rel)) {
+            logger::debug("TESTopicInfo::GetResponseList hook installation was already attempted (installed={}).",
+                responseListHookInstalled.load(std::memory_order_acquire));
+            return;
+        }
+
         REL::Relocation<std::uintptr_t> target{ RELOCATION_ID(25083, 25626) };
         originalGetResponseList = reinterpret_cast<GetResponseListFn>(target.address());
+        const auto* targetBytes = reinterpret_cast<const std::uint8_t*>(target.address());
+        const bool dynamicStringDistributorLoaded = GetModuleHandleW(L"DynamicStringDistributor.dll") != nullptr;
+        logger::info(
+            "Preparing late TESTopicInfo::GetResponseList detour: DSD loaded={}, target={}, bytes={:02X} {:02X} {:02X} {:02X} {:02X} {:02X}.",
+            dynamicStringDistributorLoaded,
+            fmt::ptr(reinterpret_cast<const void*>(target.address())),
+            targetBytes[0],
+            targetBytes[1],
+            targetBytes[2],
+            targetBytes[3],
+            targetBytes[4],
+            targetBytes[5]);
 
         if (const auto error = DetourTransactionBegin(); error != NO_ERROR) {
             logger::error("Could not begin TESTopicInfo::GetResponseList detour: {}.", error);
+            originalGetResponseList = nullptr;
             return;
         }
-        DetourUpdateThread(GetCurrentThread());
-        if (const auto error = DetourAttach(
+        if (const auto error = DetourUpdateThread(GetCurrentThread()); error != NO_ERROR) {
+            logger::error("Could not enlist the current thread for TESTopicInfo::GetResponseList detour: {}.", error);
+            DetourTransactionAbort();
+            originalGetResponseList = nullptr;
+            return;
+        }
+
+        PDETOUR_TRAMPOLINE realTrampoline = nullptr;
+        PVOID realTarget = nullptr;
+        PVOID realDetour = nullptr;
+        if (const auto error = DetourAttachEx(
                 reinterpret_cast<PVOID*>(&originalGetResponseList),
-                reinterpret_cast<PVOID>(GetDynamicResponseList));
+                reinterpret_cast<PVOID>(GetDynamicResponseList),
+                &realTrampoline,
+                &realTarget,
+                &realDetour);
             error != NO_ERROR) {
             logger::error("Could not attach TESTopicInfo::GetResponseList detour: {}.", error);
             DetourTransactionAbort();
@@ -8026,7 +9627,13 @@ namespace Manager {
             originalGetResponseList = nullptr;
             return;
         }
-        logger::info("Installed TESTopicInfo::GetResponseList hook for DFG dialogue responses.");
+        responseListHookInstalled.store(true, std::memory_order_release);
+        logger::info(
+            "Installed late TESTopicInfo::GetResponseList detour: target={}, trampoline={}, detour={}, chained entry={}.",
+            fmt::ptr(realTarget),
+            fmt::ptr(reinterpret_cast<void*>(realTrampoline)),
+            fmt::ptr(realDetour),
+            fmt::ptr(reinterpret_cast<void*>(originalGetResponseList)));
     }
 
     std::vector<DynamicForms::DynamicForm>& GetForms() {
@@ -8048,6 +9655,7 @@ namespace Manager {
         apiReady.store(false, std::memory_order_release);
         forms.clear();
         dynamicDialogueResponses.clear();
+        BuildExternalEditorIdIndex();
         ValidatePerkEntryRuntimeLayouts();
 
         const auto packageNames = DiscoverPackageNames();
@@ -8965,6 +10573,10 @@ namespace Manager {
     }
 
     bool SaveForm(const DynamicForms::DynamicForm& form) {
+        if (form.externalPatch) {
+            return PersistExternalPatch(form);
+        }
+
         std::error_code ec;
         std::filesystem::create_directories(FORMS_DIR, ec);
         if (ec) {
@@ -8987,6 +10599,31 @@ namespace Manager {
     bool SaveForm(const std::size_t index, const bool dispatchUpdate) {
         if (index >= forms.size()) {
             return false;
+        }
+
+        if (forms[index].externalPatch) {
+            const auto previouslyAppliedFields = forms[index].externalChangedFields;
+            if (!RefreshExternalFieldProvenance(forms[index])) {
+                return false;
+            }
+            forms[index].externalPendingApplyFields = previouslyAppliedFields;
+            AppendUniqueFields(forms[index].externalPendingApplyFields, forms[index].externalChangedFields);
+            if (!PersistExternalPatch(forms[index])) {
+                return false;
+            }
+            forms[index].externalPersisted = true;
+            if (!ApplyExternalResolvedForm(forms[index])) {
+                return false;
+            }
+            forms[index].dirty = false;
+            ListManager::GetSingleton()->PopulateAllLists(true);
+            if (dispatchUpdate) {
+                DispatchEvent(
+                    UPDATED_EVENT,
+                    ToSignature(forms[index].kind),
+                    static_cast<float>(forms[index].externalLocalId));
+            }
+            return true;
         }
 
         NormalizePerkForm(forms[index]);
@@ -9019,6 +10656,29 @@ namespace Manager {
         std::size_t savedCount = 0;
         for (std::size_t i = 0; i < forms.size(); ++i) {
             const bool wasDirty = forms[i].dirty;
+            if (forms[i].externalPatch) {
+                if (!forms[i].dirty) {
+                    continue;
+                }
+                const auto previouslyAppliedFields = forms[i].externalChangedFields;
+                const bool refreshed = RefreshExternalFieldProvenance(forms[i]);
+                if (refreshed) {
+                    forms[i].externalPendingApplyFields = previouslyAppliedFields;
+                    AppendUniqueFields(forms[i].externalPendingApplyFields, forms[i].externalChangedFields);
+                }
+                const bool persisted = refreshed && PersistExternalPatch(forms[i]);
+                if (persisted) {
+                    forms[i].externalPersisted = true;
+                }
+                if (persisted && ApplyExternalResolvedForm(forms[i])) {
+                    forms[i].dirty = dispatchUpdate ? false : wasDirty;
+                    updatedSignatures.insert(ToSignature(forms[i].kind));
+                    ++savedCount;
+                } else {
+                    saved = false;
+                }
+                continue;
+            }
             NormalizePerkForm(forms[i]);
             std::vector<std::string> validationErrors;
             if (!ValidateForm(forms[i], validationErrors)) {
@@ -9048,6 +10708,150 @@ namespace Manager {
 
     const char* GetListTypeName(const DynamicForms::FormKind kind) {
         return ListTypeName(kind);
+    }
+
+    const char* GetStoredFormKindName(
+        const DynamicForms::FormKind kind)
+    {
+        static thread_local std::string name;
+        name = ToString(kind);
+        return name.c_str();
+    }
+
+    bool SupportsExternalPatch(const DynamicForms::FormKind kind) {
+        return SupportsExternalRuntimePatch(kind);
+    }
+
+    std::int32_t GetPackagePriority(const std::string_view packageName) {
+        if (packageName.empty() || !WritePackageManifest(packageName)) {
+            return 0;
+        }
+
+        std::ifstream stream(PackageManifestPath(packageName));
+        rapidjson::IStreamWrapper wrapper(stream);
+        rapidjson::Document doc;
+        doc.ParseStream(wrapper);
+        return !doc.HasParseError() && doc.IsObject() &&
+                doc.HasMember("priority") && doc["priority"].IsInt() ?
+            doc["priority"].GetInt() :
+            0;
+    }
+
+    bool SetPackagePriority(const std::string_view packageName, const std::int32_t priority) {
+        if (packageName.empty() || !WritePackageManifest(packageName)) {
+            return false;
+        }
+
+        const auto path = PackageManifestPath(packageName);
+        rapidjson::Document doc;
+        {
+            std::ifstream stream(path);
+            rapidjson::IStreamWrapper wrapper(stream);
+            doc.ParseStream(wrapper);
+        }
+        if (doc.HasParseError() || !doc.IsObject()) {
+            return false;
+        }
+
+        if (doc.HasMember("priority")) {
+            doc["priority"].SetInt(priority);
+        } else {
+            doc.AddMember("priority", priority, doc.GetAllocator());
+        }
+
+        std::ofstream stream(path, std::ios::trunc);
+        if (!stream.is_open()) {
+            return false;
+        }
+        rapidjson::OStreamWrapper wrapper(stream);
+        rapidjson::PrettyWriter writer(wrapper);
+        doc.Accept(writer);
+        return true;
+    }
+
+    std::vector<ExternalPatchFieldView> GetExternalPatchFieldViews(const std::size_t index) {
+        std::vector<ExternalPatchFieldView> result;
+        if (index >= forms.size() || !forms[index].externalPatch ||
+            forms[index].externalBaselinePayload.empty()) {
+            return result;
+        }
+
+        rapidjson::Document baseline;
+        baseline.Parse(forms[index].externalBaselinePayload.c_str());
+        rapidjson::Document resolved;
+        if (baseline.HasParseError() || !BuildFormDocument(forms[index], resolved)) {
+            return result;
+        }
+
+        const auto stringify = [](const rapidjson::Value* value) {
+            if (!value) {
+                return std::string("<unset>");
+            }
+            if (value->IsString()) {
+                return std::string(value->GetString(), value->GetStringLength());
+            }
+            rapidjson::StringBuffer buffer;
+            rapidjson::Writer writer(buffer);
+            value->Accept(writer);
+            return std::string(buffer.GetString());
+        };
+
+        std::set<std::string> fields;
+        for (auto member = baseline.MemberBegin(); member != baseline.MemberEnd(); ++member) {
+            const std::string_view key(member->name.GetString(), member->name.GetStringLength());
+            if (!IsExternalPatchMetadataKey(key)) {
+                fields.emplace(key);
+            }
+        }
+        for (auto member = resolved.MemberBegin(); member != resolved.MemberEnd(); ++member) {
+            const std::string_view key(member->name.GetString(), member->name.GetStringLength());
+            if (!IsExternalPatchMetadataKey(key)) {
+                fields.emplace(key);
+            }
+        }
+
+        for (const auto& field : fields) {
+            const auto inherited = baseline.FindMember(field.c_str());
+            const auto finalValue = resolved.FindMember(field.c_str());
+            const rapidjson::Value* inheritedValue =
+                inherited == baseline.MemberEnd() ? nullptr : std::addressof(inherited->value);
+            const rapidjson::Value* resolvedValue =
+                finalValue == resolved.MemberEnd() ? nullptr : std::addressof(finalValue->value);
+            if (inheritedValue && resolvedValue && *inheritedValue == *resolvedValue) {
+                continue;
+            }
+            result.push_back({
+                field,
+                stringify(inheritedValue),
+                resolvedValue ? stringify(resolvedValue) : std::string("<cleared>"),
+                std::ranges::find(forms[index].externalConflictingFields, field) !=
+                    forms[index].externalConflictingFields.end(),
+                (inheritedValue && inheritedValue->IsArray()) ||
+                    (resolvedValue && resolvedValue->IsArray()),
+                forms[index].externalArrayOperations.contains(field) ?
+                    forms[index].externalArrayOperations.at(field) :
+                    std::string("replace")
+            });
+        }
+        return result;
+    }
+
+    bool SetExternalPatchArrayOperation(
+        const std::size_t index,
+        const std::string_view field,
+        const std::string_view operation)
+    {
+        if (index >= forms.size() ||
+            !forms[index].externalPatch ||
+            field.empty() ||
+            (operation != "replace" && operation != "merge"))
+        {
+            return false;
+        }
+
+        forms[index].externalArrayOperations[std::string(field)] = operation;
+        forms[index].dirty = true;
+        return true;
     }
 
     bool PopulateFormFromGameTemplate(DynamicForms::DynamicForm& form, const DynamicForms::FormRef& templateRef) {
@@ -9169,6 +10973,98 @@ namespace Manager {
         return saved;
     }
 
+    bool AddExternalPatch(
+        const DynamicForms::FormRef& targetRef,
+        const DynamicForms::FormKind kind,
+        const std::string_view packageName)
+    {
+        if (packageName.empty() || !SupportsExternalRuntimePatch(kind)) {
+            logger::warn(
+                "Could not create external patch: package is empty or {} is not enabled for safe runtime patching.",
+                ToString(kind));
+            return false;
+        }
+
+        auto* target = ResolveConfigForm(targetRef);
+        if (!target ||
+            target->GetFormType() != static_cast<RE::FormType>(FormTypeForKind(kind)))
+        {
+            logger::warn(
+                "Could not create external {} patch: target '{}' is missing or has another type.",
+                ToString(kind),
+                targetRef.Display());
+            return false;
+        }
+
+        const auto normalizedId = FormUtil::NormalizeFormID(target);
+        std::string sourcePlugin;
+        std::uint32_t localFormId = 0;
+        if (!ParseNormalizedExternalFormId(normalizedId, sourcePlugin, localFormId)) {
+            logger::warn(
+                "Could not patch {:08X}: temporary/dynamic forms do not have a stable plugin-local identity.",
+                target->GetFormID());
+            return false;
+        }
+
+        const auto existing = FindExternalPatchForm(sourcePlugin, localFormId, kind);
+        if (existing != forms.end()) {
+            return AddExternalPatchLayer(
+                static_cast<std::size_t>(std::distance(forms.begin(), existing)),
+                packageName);
+        }
+
+        DynamicForms::DynamicForm patch;
+        std::string baseline;
+        if (!BuildExternalBaseline(*target, kind, packageName, patch, baseline)) {
+            return false;
+        }
+
+        patch.externalBaselinePayload = std::move(baseline);
+        patch.dirty = true;
+        forms.push_back(std::move(patch));
+        logger::info(
+            "Created external patch draft for {}|{:X} ({}) in package '{}'.",
+            sourcePlugin,
+            localFormId,
+            ToString(kind),
+            packageName);
+        return true;
+    }
+
+    bool AddExternalPatchLayer(const std::size_t index, const std::string_view packageName) {
+        if (index >= forms.size() || !forms[index].externalPatch || packageName.empty()) {
+            return false;
+        }
+
+        auto& form = forms[index];
+        if (form.externalEditPackage == packageName) {
+            return true;
+        }
+        if (std::ranges::find(form.patchPackageNames, packageName) != form.patchPackageNames.end()) {
+            logger::warn(
+                "External patch '{}|{:X}' package '{}' is not the final resolved layer and cannot be edited in place.",
+                form.externalSourcePlugin,
+                form.externalLocalId,
+                packageName);
+            return false;
+        }
+
+        rapidjson::Document baseline;
+        if (!BuildFormDocument(form, baseline)) {
+            return false;
+        }
+
+        form.externalBaselinePayload = JsonString(baseline);
+        form.externalInheritedChangedFields = form.externalChangedFields;
+        form.externalInheritedConflictingFields = form.externalConflictingFields;
+        form.externalArrayOperations.clear();
+        form.externalEditPackage = std::string(packageName);
+        form.patchPackageNames.emplace_back(packageName);
+        form.externalPersisted = false;
+        form.dirty = true;
+        return true;
+    }
+
     bool UpdateForm(const std::size_t index, const DynamicForms::DynamicForm& form) {
         if (index >= forms.size() || form.editorId.empty() || forms[index].editorId != form.editorId) {
             return false;
@@ -9183,6 +11079,59 @@ namespace Manager {
     bool DeleteForm(const std::size_t index) {
         if (index >= forms.size()) {
             return false;
+        }
+
+        if (forms[index].externalPatch) {
+            const auto removed = forms[index];
+            DynamicForms::DynamicForm previous;
+            if (!ReadFormPayload(
+                    removed.externalBaselinePayload,
+                    std::format("external patch rollback {}|{:X}", removed.externalSourcePlugin, removed.externalLocalId),
+                    removed.editorId,
+                    previous))
+            {
+                logger::warn("External patch baseline is invalid; the stored layer was not deleted.");
+                return false;
+            }
+
+            if (removed.externalPersisted && !DeleteStoredExternalPatch(removed)) {
+                logger::warn(
+                    "Could not delete external patch '{}|{:X}' from package '{}'.",
+                    removed.externalSourcePlugin,
+                    removed.externalLocalId,
+                    removed.externalEditPackage);
+                return false;
+            }
+
+            previous.externalPatch = true;
+            previous.externalSourcePlugin = removed.externalSourcePlugin;
+            previous.externalLocalId = removed.externalLocalId;
+            previous.externalWinningPlugin = removed.externalWinningPlugin;
+            previous.packageName = removed.packageName;
+            previous.basePackageName = removed.externalSourcePlugin;
+            previous.patchPackageNames = removed.patchPackageNames;
+            std::erase(previous.patchPackageNames, removed.externalEditPackage);
+            previous.externalEditPackage.clear();
+            previous.externalBaselinePayload.clear();
+            previous.externalChangedFields = removed.externalChangedFields;
+            previous.externalConflictingFields = removed.externalInheritedConflictingFields;
+            previous.dirty = false;
+
+            if (removed.externalPersisted && !ApplyExternalResolvedForm(previous)) {
+                logger::warn("External patch was deleted but its previous runtime state could not be reapplied.");
+            }
+            previous.externalChangedFields = removed.externalInheritedChangedFields;
+            previous.externalPersisted = true;
+
+            const auto signature = ToSignature(removed.kind);
+            if (previous.patchPackageNames.empty()) {
+                forms.erase(forms.begin() + static_cast<std::ptrdiff_t>(index));
+            } else {
+                forms[index] = std::move(previous);
+            }
+            ListManager::GetSingleton()->PopulateAllLists(true);
+            DispatchEvent(UPDATED_EVENT, signature, static_cast<float>(removed.externalLocalId));
+            return true;
         }
 
         auto* api = DPF::GetAPI();
@@ -9257,7 +11206,7 @@ namespace Manager {
         }
 
         const auto found = std::ranges::find_if(forms, [editorId](const DynamicForms::DynamicForm& form) {
-            return form.editorId == editorId;
+            return !form.externalPatch && form.editorId == editorId;
         });
         if (found == forms.end()) {
             return false;
@@ -9282,7 +11231,7 @@ namespace Manager {
         }
 
         const auto found = std::ranges::find_if(forms, [editorId](const DynamicForms::DynamicForm& form) {
-            return form.editorId == editorId;
+            return !form.externalPatch && form.editorId == editorId;
         });
         if (found == forms.end() || EffectivePackageName(*found) == packageName) {
             return false;
@@ -9294,6 +11243,128 @@ namespace Manager {
         found->basePackageName = EffectivePackageName(*found);
         found->dirty = true;
         return !save || SaveForm(static_cast<std::size_t>(std::distance(forms.begin(), found)));
+    }
+
+    bool StopSoundPreview() {
+        if (!soundPreviewHandle.IsValid()) {
+            soundPreviewHandle = RE::BSSoundHandle{};
+            soundPreviewEditorId.clear();
+            return true;
+        }
+
+        const bool stopped = soundPreviewHandle.Stop();
+        soundPreviewHandle = RE::BSSoundHandle{};
+        soundPreviewEditorId.clear();
+        return stopped;
+    }
+
+    bool IsSoundPreviewPlaying(const std::string_view editorId) {
+        return !editorId.empty() &&
+               soundPreviewEditorId == editorId &&
+               soundPreviewHandle.IsValid() &&
+               soundPreviewHandle.IsPlaying();
+    }
+
+    RE::BGSSoundDescriptorForm* PrepareSoundPreview(const std::size_t index) {
+        if (index >= forms.size()) {
+            return nullptr;
+        }
+
+        auto& form = forms[index];
+        if (form.kind != DynamicForms::FormKind::SoundDescriptor &&
+            form.kind != DynamicForms::FormKind::Sound) {
+            logger::warn("Could not preview '{}': {} is not a playable sound form.", form.editorId, ToString(form.kind));
+            return nullptr;
+        }
+
+        auto* runtimeForm = ResolveDPFFormObject(form, false);
+        if (!runtimeForm || !ConfigureForm(runtimeForm, form)) {
+            logger::warn("Could not preview '{}': the runtime sound form could not be configured.", form.editorId);
+            return nullptr;
+        }
+
+        RE::BGSSoundDescriptorForm* descriptor = nullptr;
+        if (form.kind == DynamicForms::FormKind::SoundDescriptor) {
+            descriptor = runtimeForm->As<RE::BGSSoundDescriptorForm>();
+        } else if (auto* sound = runtimeForm->As<RE::TESSound>()) {
+            descriptor = sound->descriptor;
+        }
+        if (!descriptor) {
+            logger::warn("Could not preview '{}': no sound descriptor is assigned.", form.editorId);
+            return nullptr;
+        }
+        return descriptor;
+    }
+
+    bool PlaySoundPreview(const std::size_t index) {
+        auto* descriptor = PrepareSoundPreview(index);
+        if (!descriptor) {
+            return false;
+        }
+
+        if (soundPreviewHandle.IsValid()) {
+            soundPreviewHandle.Stop();
+        }
+        soundPreviewHandle = RE::BSSoundHandle{};
+        soundPreviewEditorId.clear();
+
+        std::string descriptorEditorId;
+        if (forms[index].kind == DynamicForms::FormKind::SoundDescriptor) {
+            descriptorEditorId = forms[index].editorId;
+        } else if (!forms[index].legacySoundDescriptor.editorID.empty()) {
+            descriptorEditorId = forms[index].legacySoundDescriptor.editorID;
+        } else {
+            descriptorEditorId = FormUtil::GetEditorIDSafe(descriptor);
+        }
+        if (descriptorEditorId.empty()) {
+            logger::warn("Could not play universal preview for '{}': the descriptor has no EditorID.", forms[index].editorId);
+            return false;
+        }
+
+        RE::PlaySound(descriptorEditorId.c_str());
+        logger::info(
+            "Requested universal sound preview for '{}' through RE::PlaySound('{}').",
+            forms[index].editorId,
+            descriptorEditorId);
+        return true;
+    }
+
+    bool PlaySoundPreviewOnPlayer(const std::size_t index) {
+        auto* descriptor = PrepareSoundPreview(index);
+        if (!descriptor) {
+            return false;
+        }
+
+        if (soundPreviewHandle.IsValid()) {
+            soundPreviewHandle.Stop();
+        }
+        soundPreviewHandle = RE::BSSoundHandle{};
+        soundPreviewEditorId.clear();
+
+        auto* audio = RE::BSAudioManager::GetSingleton();
+        if (!audio || !audio->GetSoundHandle(soundPreviewHandle, descriptor)) {
+            logger::warn("Could not preview '{}': the audio manager could not resolve the descriptor.", forms[index].editorId);
+            soundPreviewHandle = RE::BSSoundHandle{};
+            return false;
+        }
+
+        if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+            if (auto* node = player->Get3D()) {
+                soundPreviewHandle.SetObjectToFollow(node);
+            } else {
+                soundPreviewHandle.SetPosition(player->GetPosition());
+            }
+        }
+
+        if (!soundPreviewHandle.Play()) {
+            logger::warn("Could not preview '{}': the sound handle failed to play.", forms[index].editorId);
+            soundPreviewHandle = RE::BSSoundHandle{};
+            return false;
+        }
+
+        soundPreviewEditorId = forms[index].editorId;
+        logger::info("Playing sound preview for '{}' on the player.", forms[index].editorId);
+        return true;
     }
 
     bool AddFormToPlayerInventory(const std::size_t index) {
@@ -9373,11 +11444,11 @@ namespace Manager {
             LogNPCSnapshot("DFG dynamic before spawn", npc);
             logger::info("Spawn debug for NPC '{}': race={} class={} voice={} skin={} defaultOutfit={} headParts={} headPartsPtr={} faceData={} tintLayersPtr={} flags={:08X} level={} health={} magicka={} stamina={}",
                 forms[index].editorId,
-                npc->race ? clib_util::editorID::get_editorID(npc->race) : "<null>",
-                npc->npcClass ? clib_util::editorID::get_editorID(npc->npcClass) : "<null>",
-                npc->voiceType ? clib_util::editorID::get_editorID(npc->voiceType) : "<null>",
-                npc->farSkin ? clib_util::editorID::get_editorID(npc->farSkin) : "<null>",
-                npc->defaultOutfit ? clib_util::editorID::get_editorID(npc->defaultOutfit) : "<null>",
+                npc->race ? FormUtil::GetEditorIDSafe(npc->race) : "<null>",
+                npc->npcClass ? FormUtil::GetEditorIDSafe(npc->npcClass) : "<null>",
+                npc->voiceType ? FormUtil::GetEditorIDSafe(npc->voiceType) : "<null>",
+                npc->farSkin ? FormUtil::GetEditorIDSafe(npc->farSkin) : "<null>",
+                npc->defaultOutfit ? FormUtil::GetEditorIDSafe(npc->defaultOutfit) : "<null>",
                 static_cast<std::uint32_t>(npc->numHeadParts),
                 fmt::ptr(npc->headParts),
                 fmt::ptr(npc->faceData),
@@ -9431,13 +11502,20 @@ namespace Manager {
     }
 
     bool HasEditorId(const std::string_view editorId) {
-        return std::ranges::any_of(forms, [editorId](const DynamicForms::DynamicForm& form) {
-            return form.editorId == editorId;
+        const auto key = NormalizeEditorId(editorId);
+        return std::ranges::any_of(forms, [&key](const DynamicForms::DynamicForm& form) {
+            return NormalizeEditorId(form.editorId) == key;
         });
     }
 
     bool IsEditorIdReserved(const std::string_view editorId) {
-        return !editorId.empty() && RE::TESForm::LookupByEditorID(editorId) != nullptr;
+        if (editorId.empty()) {
+            return false;
+        }
+        if (const auto* indexed = FindExternalFormsByEditorId(editorId); indexed && !indexed->empty()) {
+            return true;
+        }
+        return RE::TESForm::LookupByEditorID(editorId) != nullptr;
     }
 
     bool IsDirty(const std::size_t index) {
@@ -9462,6 +11540,9 @@ namespace Manager {
         // Create/register every dynamic form first so references between forms in the
         // same package do not depend on database or import ordering.
         for (auto& form : forms) {
+            if (form.externalPatch) {
+                continue;
+            }
             const auto oldPluginNumber = form.pluginNumber;
             const auto oldLocalId = form.localId;
             if (ResolveDPFFormObject(form, false)) {
@@ -9475,6 +11556,15 @@ namespace Manager {
 
         if (allApplied) {
             for (auto& form : forms) {
+                if (form.externalPatch) {
+                    if (!ApplyExternalResolvedForm(form)) {
+                        logger::warn(
+                            "External patch '{}|{:X}' was skipped; DFG-owned forms will continue loading.",
+                            form.externalSourcePlugin,
+                            form.externalLocalId);
+                    }
+                    continue;
+                }
                 auto* runtimeForm = ResolveDPFFormObject(form, false);
                 if (!runtimeForm || !ConfigureForm(runtimeForm, form)) {
                     allApplied = false;
@@ -9857,7 +11947,7 @@ namespace
         }
 
         const auto found = std::ranges::find_if(forms, [&editorId](const DynamicForms::DynamicForm& form) {
-            return form.editorId == editorId;
+            return !form.externalPatch && form.editorId == editorId;
         });
         if (found == forms.end()) {
             return Fail(result,
@@ -9978,7 +12068,7 @@ namespace
         }
 
         const auto found = std::ranges::find_if(forms, [&editorId](const DynamicForms::DynamicForm& form) {
-            return form.editorId == editorId;
+            return !form.externalPatch && form.editorId == editorId;
         });
         if (found == forms.end()) {
             return Fail(result,
@@ -10150,7 +12240,7 @@ namespace
                 std::string deleteSignature;
                 if (operation.operation == DFG::Operation::Delete && operation.valid) {
                     const auto found = std::ranges::find_if(forms, [&operation](const DynamicForms::DynamicForm& form) {
-                        return form.editorId == operation.editorId;
+                        return !form.externalPatch && form.editorId == operation.editorId;
                     });
                     if (found != forms.end()) {
                         deleteSignature = ToSignature(found->kind);
@@ -10164,7 +12254,7 @@ namespace
                         updatedSignatures.insert(std::move(deleteSignature));
                     } else {
                         const auto found = std::ranges::find_if(forms, [&itemResult](const DynamicForms::DynamicForm& form) {
-                            return form.editorId == itemResult.editorId;
+                            return !form.externalPatch && form.editorId == itemResult.editorId;
                         });
                         if (found != forms.end()) {
                             updatedSignatures.insert(ToSignature(found->kind));
@@ -10357,7 +12447,7 @@ namespace
 
         try {
             const auto found = std::ranges::find_if(forms, [&lookup](const DynamicForms::DynamicForm& form) {
-                return form.editorId == lookup.editorId;
+                return !form.externalPatch && form.editorId == lookup.editorId;
             });
             result.status = DFG::Status::Success;
             if (found == forms.end()) {

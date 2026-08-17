@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace DynamicForms {
@@ -1298,6 +1299,19 @@ namespace DynamicForms {
         std::vector<FormRef> packages;
         std::uint32_t pluginNumber{ 0 };
         std::uint32_t localId{ 0 };
+        bool externalPatch{ false };
+        std::string externalSourcePlugin;
+        std::uint32_t externalLocalId{ 0 };
+        std::string externalWinningPlugin;
+        std::string externalEditPackage;
+        std::string externalBaselinePayload;
+        std::vector<std::string> externalChangedFields;
+        std::vector<std::string> externalInheritedChangedFields;
+        std::vector<std::string> externalInheritedConflictingFields;
+        std::vector<std::string> externalConflictingFields;
+        std::vector<std::string> externalPendingApplyFields;
+        std::unordered_map<std::string, std::string> externalArrayOperations;
+        bool externalPersisted{ false };
         bool dirty{ false };
     };
 }

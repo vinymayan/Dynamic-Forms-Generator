@@ -16,11 +16,15 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <miniz.h>
 #include <optional>
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
+#include <rapidjson/ostreamwrapper.h>
+#include <rapidjson/prettywriter.h>
 #include <set>
+#include <sqlite3.h>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -58,8 +62,6 @@ namespace {
     int outfitPieceTypeIndex = 0;
     std::string createFormKindFilter;
     std::string conditionFunctionFilter;
-    std::array<char, 128> exportFilterEditorIdBuffer{};
-    int selectedExportFilterKind = 0;
     std::string createError;
     std::string deleteError;
     std::string saveMessage;
@@ -73,16 +75,26 @@ namespace {
     bool createWithTemplate = false;
     DynamicForms::FormRef createGameTemplate;
     bool requestCreatePatchPopup = false;
+    int patchSourceMode = 0;
     std::set<std::string> selectedDeleteForms;
     std::set<std::string> selectedExportForms;
     std::set<std::string> selectedPatchForms;
-    std::array<char, 128> exportPackageName{ 'D', 'F', 'G', '_', 'E', 'x', 'p', 'o', 'r', 't', '\0' };
+    std::set<std::string> selectedExternalPatchForms;
+    std::array<char, 128> exportArchiveName{
+        'D', 'F', 'G', '_', 'E', 'x', 'p', 'o', 'r', 't', '\0'
+    };
+    std::array<char, 128> exportPackageFilter{};
+    std::array<char, 128> exportEditorIdFilter{};
+    int exportKindFilter = 0;
     std::array<char, 128> workingPackageName{ 'D', 'F', 'G', '_', 'O', 'v', 'e', 'r', 'r', 'i', 'd', 'e', 's', '\0' };
+    std::string priorityPackageName;
+    int workingPackagePriority = 0;
     std::array<char, 128> newPackageName{};
     std::array<char, 128> filterPackageNameBuffer{};
     std::array<char, 128> patchFilterPackageNameBuffer{};
     std::array<char, 128> patchFilterEditorIdBuffer{};
     int selectedPatchFilterKind = 0;
+    std::string patchCreateMessage;
     std::vector<std::string> previewPackages{ "Local Forms", "DFG_Overrides" };
     std::unordered_map<std::string, std::string> previewFormPackages;
     std::unordered_map<std::string, std::vector<std::string>> previewPatchPackages;
@@ -91,6 +103,14 @@ namespace {
     bool lastExportSucceeded = true;
     bool showSourceDetails = true;
     bool showOnlyOverrideDrafts = false;
+
+    struct ExportPackageOptions
+    {
+        std::array<char, 32> version{ '1', '.', '0', '.', '0', '\0' };
+        bool initialized{ false };
+    };
+
+    std::unordered_map<std::string, ExportPackageOptions> exportPackageOptions;
 
     struct PickerType
     {
@@ -113,6 +133,17 @@ namespace {
     };
 
     std::unordered_map<std::string, PickerRowCache> pickerRowCaches;
+
+    struct ExternalPatchRowCache
+    {
+        std::uint64_t generation{ 0 };
+        int kindIndex{ -1 };
+        std::string pluginFilter;
+        std::string editorFilter;
+        std::vector<std::size_t> rows;
+    };
+
+    ExternalPatchRowCache externalPatchRowCache;
 
     constexpr auto DELETE_POPUP_ID = "Delete Form##dynamic_forms_delete_popup";
     constexpr auto BATCH_DELETE_POPUP_ID = "Delete Selected Forms##dynamic_forms_batch_delete_popup";
@@ -779,10 +810,6 @@ namespace {
         return name.empty() ? "Local_Forms" : name;
     }
 
-    std::filesystem::path FormJsonPath(const std::string& editorId) {
-        return std::filesystem::path(Manager::FORMS_DIR) / std::format("{}.json", editorId);
-    }
-
     bool AddFileToZipOnce(
         mz_zip_archive& zip,
         std::set<std::string>& addedPaths,
@@ -803,68 +830,976 @@ namespace {
         return true;
     }
 
-    std::optional<std::filesystem::path> ExportSelectedFormsAsZip(const std::string& packageName, const std::set<std::string>& editorIds) {
-        if (editorIds.empty()) {
-            logger::warn("Export: no forms selected.");
-            return std::nullopt;
+    std::string PackageIdFromName(const std::string_view name) {
+        std::string result;
+        result.reserve(name.size());
+        bool pendingSeparator = false;
+        for (const unsigned char ch : name) {
+            if (std::isalnum(ch)) {
+                if (pendingSeparator && !result.empty()) {
+                    result.push_back('-');
+                }
+                result.push_back(static_cast<char>(std::tolower(ch)));
+                pendingSeparator = false;
+            } else {
+                pendingSeparator = true;
+            }
+        }
+        return result.empty() ? "dfg-package" : result;
+    }
+
+    std::filesystem::path PackageSourceDirectory(const std::string_view packageName) {
+        return std::filesystem::path(Manager::PACKAGES_DIR) /
+            SanitizePackageFolder(std::string(packageName));
+    }
+
+    bool FormHasDatabaseRowInPackage(
+        const DynamicForms::DynamicForm& form,
+        const std::string_view packageName)
+    {
+        if (form.externalPatch) {
+            return form.externalEditPackage == packageName;
+        }
+        const auto basePackage = form.packageName.empty() ?
+            std::string_view(Manager::DEFAULT_PACKAGE_NAME) :
+            std::string_view(form.packageName);
+        return basePackage == packageName ||
+            std::ranges::find(
+                form.patchPackageNames,
+                packageName) != form.patchPackageNames.end();
+    }
+
+    std::string ExportFormIdentity(
+        const DynamicForms::DynamicForm& form)
+    {
+        if (!form.externalPatch) {
+            return form.editorId;
+        }
+        std::string plugin = form.externalSourcePlugin;
+        std::ranges::transform(
+            plugin,
+            plugin.begin(),
+            [](const unsigned char ch) {
+                return static_cast<char>(std::tolower(ch));
+            });
+        return std::format(
+            "external:{}|{:X}|{}",
+            plugin,
+            form.externalLocalId,
+            static_cast<int>(form.kind));
+    }
+
+    std::string ExportSelectionKey(
+        const std::string_view packageName,
+        const DynamicForms::DynamicForm& form)
+    {
+        return std::format(
+            "{}\x1F{}",
+            packageName,
+            ExportFormIdentity(form));
+    }
+
+    std::string_view FormPersistencePackage(
+        const DynamicForms::DynamicForm& form)
+    {
+        if (form.externalPatch) {
+            return form.externalEditPackage;
+        }
+        if (!form.patchPackageNames.empty()) {
+            return form.patchPackageNames.back();
+        }
+        return form.packageName.empty() ?
+            std::string_view(Manager::DEFAULT_PACKAGE_NAME) :
+            std::string_view(form.packageName);
+    }
+
+    std::string ReadManifestString(
+        const std::filesystem::path& path,
+        const char* key,
+        const std::string_view fallback)
+    {
+        std::ifstream stream(path);
+        if (!stream.is_open()) {
+            return std::string(fallback);
+        }
+        rapidjson::IStreamWrapper wrapper(stream);
+        rapidjson::Document doc;
+        doc.ParseStream(wrapper);
+        if (doc.HasParseError() || !doc.IsObject() ||
+            !doc.HasMember(key) || !doc[key].IsString())
+        {
+            return std::string(fallback);
+        }
+        return doc[key].GetString();
+    }
+
+    ExportPackageOptions& GetExportPackageOptions(const std::string& packageName) {
+        auto& options = exportPackageOptions[packageName];
+        if (!options.initialized) {
+            const auto version = ReadManifestString(
+                PackageSourceDirectory(packageName) / "manifest.json",
+                "version",
+                "1.0.0");
+            std::snprintf(options.version.data(), options.version.size(), "%s", version.c_str());
+            options.initialized = true;
+        }
+        return options;
+    }
+
+    struct PackageDependencies
+    {
+        std::set<std::string> packages;
+        std::set<std::string> plugins;
+    };
+
+    bool TryAddPluginDependency(
+        const std::string_view value,
+        std::set<std::string>& plugins)
+    {
+        const auto separator = value.find('|');
+        if (separator == std::string_view::npos || separator == 0) {
+            return false;
+        }
+        const auto plugin = value.substr(0, separator);
+        std::string lowerPlugin(plugin);
+        std::ranges::transform(
+            lowerPlugin,
+            lowerPlugin.begin(),
+            [](const unsigned char ch) {
+                return static_cast<char>(std::tolower(ch));
+            });
+        if (!lowerPlugin.ends_with(".esm") &&
+            !lowerPlugin.ends_with(".esp") &&
+            !lowerPlugin.ends_with(".esl"))
+        {
+            return false;
+        }
+        plugins.emplace(plugin);
+        return true;
+    }
+
+    bool TryAddPackageDependency(
+        const std::string_view editorId,
+        const std::string_view sourcePackage,
+        std::set<std::string>& packages)
+    {
+        const auto& forms = Manager::GetForms();
+        const auto found = std::ranges::find_if(
+            forms,
+            [editorId](const DynamicForms::DynamicForm& form) {
+                return form.editorId == editorId;
+            });
+        if (found == forms.end()) {
+            return false;
+        }
+
+        const auto& targetPackage =
+            found->basePackageName.empty() ?
+                found->packageName :
+                found->basePackageName;
+        if (!targetPackage.empty() && targetPackage != sourcePackage) {
+            packages.emplace(targetPackage);
+        }
+        return true;
+    }
+
+    void CollectPayloadDependencies(
+        const rapidjson::Value& value,
+        const std::string_view sourcePackage,
+        PackageDependencies& result)
+    {
+        if (value.IsString()) {
+            const std::string_view text(
+                value.GetString(),
+                value.GetStringLength());
+            if (!TryAddPackageDependency(
+                    text,
+                    sourcePackage,
+                    result.packages))
+            {
+                TryAddPluginDependency(text, result.plugins);
+            }
+            return;
+        }
+        if (value.IsArray()) {
+            for (const auto& entry : value.GetArray()) {
+                CollectPayloadDependencies(
+                    entry,
+                    sourcePackage,
+                    result);
+            }
+            return;
+        }
+        if (!value.IsObject()) {
+            return;
+        }
+
+        bool dynamicReference = false;
+        for (const auto key : { "editorID", "editorId" }) {
+            const auto editorId = value.FindMember(key);
+            if (editorId != value.MemberEnd() &&
+                editorId->value.IsString() &&
+                TryAddPackageDependency(
+                    std::string_view(
+                        editorId->value.GetString(),
+                        editorId->value.GetStringLength()),
+                    sourcePackage,
+                    result.packages))
+            {
+                dynamicReference = true;
+                break;
+            }
+        }
+
+        for (auto member = value.MemberBegin();
+             member != value.MemberEnd();
+             ++member)
+        {
+            const std::string_view key(
+                member->name.GetString(),
+                member->name.GetStringLength());
+            if (dynamicReference &&
+                (key == "formID" ||
+                 key == "formId" ||
+                 key == "form"))
+            {
+                continue;
+            }
+            CollectPayloadDependencies(
+                member->value,
+                sourcePackage,
+                result);
+        }
+    }
+
+    PackageDependencies ReadPackageDependencies(
+        const std::filesystem::path& databasePath,
+        const std::string_view packageName)
+    {
+        PackageDependencies result;
+        sqlite3* db = nullptr;
+        if (sqlite3_open_v2(
+                databasePath.string().c_str(),
+                &db,
+                SQLITE_OPEN_READONLY,
+                nullptr) != SQLITE_OK)
+        {
+            if (db) {
+                sqlite3_close(db);
+            }
+            return result;
+        }
+
+        const auto readColumn = [&result, db](
+                                    const char* sql,
+                                    std::set<std::string>& target) {
+            sqlite3_stmt* statement = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK) {
+                return;
+            }
+            while (sqlite3_step(statement) == SQLITE_ROW) {
+                const auto* text =
+                    reinterpret_cast<const char*>(sqlite3_column_text(statement, 0));
+                if (text && text[0] != '\0') {
+                    target.emplace(text);
+                }
+            }
+            sqlite3_finalize(statement);
+        };
+
+        const auto readPayloads = [&result, db, packageName](
+                                      const char* sql) {
+            sqlite3_stmt* statement = nullptr;
+            if (sqlite3_prepare_v2(
+                    db,
+                    sql,
+                    -1,
+                    &statement,
+                    nullptr) != SQLITE_OK)
+            {
+                return;
+            }
+            while (sqlite3_step(statement) == SQLITE_ROW) {
+                const auto* text =
+                    reinterpret_cast<const char*>(
+                        sqlite3_column_text(statement, 0));
+                if (!text || text[0] == '\0') {
+                    continue;
+                }
+                rapidjson::Document payload;
+                payload.Parse(text);
+                if (!payload.HasParseError()) {
+                    CollectPayloadDependencies(
+                        payload,
+                        packageName,
+                        result);
+                }
+            }
+            sqlite3_finalize(statement);
+        };
+
+        readColumn(
+            "SELECT DISTINCT target_package FROM patches "
+            "WHERE target_package <> '';",
+            result.packages);
+        readColumn(
+            "SELECT DISTINCT source_plugin FROM external_patches "
+            "WHERE source_plugin <> '';",
+            result.plugins);
+        readPayloads("SELECT payload FROM forms;");
+        readPayloads("SELECT payload FROM patches;");
+        readPayloads("SELECT changes_json FROM external_patches;");
+        result.packages.erase(std::string(packageName));
+        sqlite3_close(db);
+        return result;
+    }
+
+    bool CreateDatabaseSnapshot(
+        const std::filesystem::path& sourcePath,
+        const std::filesystem::path& destinationPath)
+    {
+        std::error_code ec;
+        std::filesystem::remove(destinationPath, ec);
+
+        sqlite3* source = nullptr;
+        sqlite3* destination = nullptr;
+        if (sqlite3_open_v2(
+                sourcePath.string().c_str(),
+                &source,
+                SQLITE_OPEN_READONLY,
+                nullptr) != SQLITE_OK)
+        {
+            logger::error("Export: could not open source database '{}'.", sourcePath.string());
+            if (source) sqlite3_close(source);
+            return false;
+        }
+        if (sqlite3_open_v2(
+                destinationPath.string().c_str(),
+                &destination,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                nullptr) != SQLITE_OK)
+        {
+            logger::error("Export: could not create database snapshot '{}'.", destinationPath.string());
+            sqlite3_close(source);
+            if (destination) sqlite3_close(destination);
+            return false;
+        }
+
+        auto* backup = sqlite3_backup_init(destination, "main", source, "main");
+        const int stepResult = backup ? sqlite3_backup_step(backup, -1) : SQLITE_ERROR;
+        const int finishResult = backup ? sqlite3_backup_finish(backup) : SQLITE_ERROR;
+        const bool copied =
+            stepResult == SQLITE_DONE && finishResult == SQLITE_OK;
+        if (!copied) {
+            logger::error(
+                "Export: SQLite snapshot failed for '{}': {}.",
+                sourcePath.string(),
+                sqlite3_errmsg(destination));
+        }
+        sqlite3_close(destination);
+        sqlite3_close(source);
+        return copied;
+    }
+
+    struct ExternalPatchSelection
+    {
+        std::string sourcePlugin;
+        std::uint32_t localFormId{ 0 };
+        std::string formKind;
+
+        auto operator<=>(const ExternalPatchSelection&) const = default;
+    };
+
+    struct PackageRowSelection
+    {
+        std::set<std::string> forms;
+        std::set<std::string> patches;
+        std::set<ExternalPatchSelection> externalPatches;
+
+        [[nodiscard]] std::size_t size() const noexcept {
+            return forms.size() +
+                patches.size() +
+                externalPatches.size();
+        }
+    };
+
+    bool ExecuteSql(sqlite3* db, const char* sql) {
+        char* error = nullptr;
+        const int result = sqlite3_exec(
+            db,
+            sql,
+            nullptr,
+            nullptr,
+            &error);
+        if (result == SQLITE_OK) {
+            return true;
+        }
+        logger::error(
+            "Export: SQLite filter failed: {}.",
+            error ? error : sqlite3_errmsg(db));
+        sqlite3_free(error);
+        return false;
+    }
+
+    bool FilterDatabaseSnapshot(
+        const std::filesystem::path& databasePath,
+        const PackageRowSelection& selection)
+    {
+        sqlite3* db = nullptr;
+        if (sqlite3_open_v2(
+                databasePath.string().c_str(),
+                &db,
+                SQLITE_OPEN_READWRITE,
+                nullptr) != SQLITE_OK)
+        {
+            if (db) sqlite3_close(db);
+            return false;
+        }
+
+        bool ok = ExecuteSql(
+            db,
+            "BEGIN IMMEDIATE;"
+            "CREATE TEMP TABLE selected_forms("
+            "editor_id TEXT PRIMARY KEY COLLATE NOCASE);"
+            "CREATE TEMP TABLE selected_patches("
+            "target_editor_id TEXT PRIMARY KEY COLLATE NOCASE);"
+            "CREATE TEMP TABLE selected_external_patches("
+            "source_plugin TEXT COLLATE NOCASE,"
+            "local_form_id INTEGER,"
+            "form_kind TEXT,"
+            "PRIMARY KEY(source_plugin, local_form_id, form_kind));");
+
+        const auto insertTextValues =
+            [db, &ok](
+                const char* sql,
+                const std::set<std::string>& values) {
+                sqlite3_stmt* statement = nullptr;
+                if (!ok ||
+                    sqlite3_prepare_v2(
+                        db,
+                        sql,
+                        -1,
+                        &statement,
+                        nullptr) != SQLITE_OK)
+                {
+                    ok = false;
+                    return;
+                }
+                for (const auto& value : values) {
+                    sqlite3_reset(statement);
+                    sqlite3_clear_bindings(statement);
+                    sqlite3_bind_text(
+                        statement,
+                        1,
+                        value.c_str(),
+                        -1,
+                        SQLITE_TRANSIENT);
+                    if (sqlite3_step(statement) != SQLITE_DONE) {
+                        ok = false;
+                        break;
+                    }
+                }
+                sqlite3_finalize(statement);
+            };
+
+        insertTextValues(
+            "INSERT OR IGNORE INTO selected_forms(editor_id) VALUES(?1);",
+            selection.forms);
+        insertTextValues(
+            "INSERT OR IGNORE INTO selected_patches(target_editor_id) VALUES(?1);",
+            selection.patches);
+
+        sqlite3_stmt* externalStatement = nullptr;
+        if (ok &&
+            sqlite3_prepare_v2(
+                db,
+                "INSERT OR IGNORE INTO selected_external_patches("
+                "source_plugin, local_form_id, form_kind"
+                ") VALUES(?1, ?2, ?3);",
+                -1,
+                &externalStatement,
+                nullptr) == SQLITE_OK)
+        {
+            for (const auto& value : selection.externalPatches) {
+                sqlite3_reset(externalStatement);
+                sqlite3_clear_bindings(externalStatement);
+                sqlite3_bind_text(
+                    externalStatement,
+                    1,
+                    value.sourcePlugin.c_str(),
+                    -1,
+                    SQLITE_TRANSIENT);
+                sqlite3_bind_int64(
+                    externalStatement,
+                    2,
+                    value.localFormId);
+                sqlite3_bind_text(
+                    externalStatement,
+                    3,
+                    value.formKind.c_str(),
+                    -1,
+                    SQLITE_TRANSIENT);
+                if (sqlite3_step(externalStatement) != SQLITE_DONE) {
+                    ok = false;
+                    break;
+                }
+            }
+        } else {
+            ok = false;
+        }
+        if (externalStatement) {
+            sqlite3_finalize(externalStatement);
+        }
+
+        if (ok) {
+            ok = ExecuteSql(
+                db,
+                "DELETE FROM forms WHERE NOT EXISTS("
+                "SELECT 1 FROM selected_forms selected "
+                "WHERE selected.editor_id = forms.editor_id);"
+                "DELETE FROM patches WHERE NOT EXISTS("
+                "SELECT 1 FROM selected_patches selected "
+                "WHERE selected.target_editor_id = patches.target_editor_id);"
+                "DELETE FROM external_patches WHERE NOT EXISTS("
+                "SELECT 1 FROM selected_external_patches selected "
+                "WHERE selected.source_plugin = external_patches.source_plugin "
+                "AND selected.local_form_id = external_patches.local_form_id "
+                "AND selected.form_kind = external_patches.form_kind);"
+                "COMMIT;");
+        }
+        if (!ok) {
+            ExecuteSql(db, "ROLLBACK;");
+        }
+        sqlite3_close(db);
+        return ok;
+    }
+
+    PackageRowSelection BuildPackageRowSelection(
+        const std::string_view packageName,
+        const std::set<std::string>& selectedKeys)
+    {
+        PackageRowSelection result;
+        for (const auto& form : Manager::GetForms()) {
+            if (!FormHasDatabaseRowInPackage(form, packageName) ||
+                !selectedKeys.contains(
+                    ExportSelectionKey(packageName, form)))
+            {
+                continue;
+            }
+
+            if (form.externalPatch) {
+                result.externalPatches.insert({
+                    form.externalSourcePlugin,
+                    form.externalLocalId,
+                    Manager::GetStoredFormKindName(form.kind)
+                });
+                continue;
+            }
+
+            const auto basePackage = form.packageName.empty() ?
+                std::string_view(Manager::DEFAULT_PACKAGE_NAME) :
+                std::string_view(form.packageName);
+            if (basePackage == packageName) {
+                result.forms.insert(form.editorId);
+            }
+            if (std::ranges::find(
+                    form.patchPackageNames,
+                    packageName) != form.patchPackageNames.end())
+            {
+                result.patches.insert(form.editorId);
+            }
+        }
+        return result;
+    }
+
+    void SetManifestString(
+        rapidjson::Document& doc,
+        const char* key,
+        const std::string_view value)
+    {
+        auto& allocator = doc.GetAllocator();
+        const auto found = doc.FindMember(key);
+        if (found != doc.MemberEnd()) {
+            found->value.SetString(value.data(), static_cast<rapidjson::SizeType>(value.size()), allocator);
+        } else {
+            doc.AddMember(
+                rapidjson::Value(key, allocator),
+                rapidjson::Value(value.data(), static_cast<rapidjson::SizeType>(value.size()), allocator),
+                allocator);
+        }
+    }
+
+    std::string PackageIdForDependency(const std::string_view packageName) {
+        const auto manifestPath =
+            PackageSourceDirectory(packageName) / "manifest.json";
+        return ReadManifestString(
+            manifestPath,
+            "packageId",
+            PackageIdFromName(packageName));
+    }
+
+    bool WriteDistributionManifest(
+        const std::string& packageName,
+        const std::string_view version,
+        const PackageDependencies& inferredDependencies,
+        const std::filesystem::path& destinationPath)
+    {
+        const auto sourcePath =
+            PackageSourceDirectory(packageName) / "manifest.json";
+        rapidjson::Document doc;
+        {
+            std::ifstream stream(sourcePath);
+            if (stream.is_open()) {
+                rapidjson::IStreamWrapper wrapper(stream);
+                doc.ParseStream(wrapper);
+            }
+        }
+        if (doc.HasParseError() || !doc.IsObject()) {
+            doc.SetObject();
+        }
+
+        auto& allocator = doc.GetAllocator();
+        if (doc.HasMember("schemaVersion")) {
+            doc["schemaVersion"].SetInt(1);
+        } else {
+            doc.AddMember("schemaVersion", 1, allocator);
+        }
+        SetManifestString(doc, "packageId", PackageIdForDependency(packageName));
+        SetManifestString(doc, "displayName", packageName);
+        SetManifestString(doc, "version", version.empty() ? "1.0.0" : version);
+        SetManifestString(doc, "database", "package.db");
+
+        std::map<std::string, std::string> packageDependencies;
+        if (doc.HasMember("dependencies") && doc["dependencies"].IsArray()) {
+            for (const auto& dependency : doc["dependencies"].GetArray()) {
+                if (!dependency.IsObject() ||
+                    !dependency.HasMember("packageId") ||
+                    !dependency["packageId"].IsString())
+                {
+                    continue;
+                }
+                const std::string id = dependency["packageId"].GetString();
+                const std::string displayName =
+                    dependency.HasMember("displayName") &&
+                    dependency["displayName"].IsString() ?
+                        dependency["displayName"].GetString() :
+                        id;
+                packageDependencies[id] = displayName;
+            }
+            doc.RemoveMember("dependencies");
+        }
+        for (const auto& dependency : inferredDependencies.packages) {
+            packageDependencies[PackageIdForDependency(dependency)] = dependency;
+        }
+
+        rapidjson::Value dependencies(rapidjson::kArrayType);
+        for (const auto& [id, displayName] : packageDependencies) {
+            rapidjson::Value dependency(rapidjson::kObjectType);
+            dependency.AddMember(
+                "packageId",
+                rapidjson::Value(id.c_str(), allocator),
+                allocator);
+            dependency.AddMember(
+                "displayName",
+                rapidjson::Value(displayName.c_str(), allocator),
+                allocator);
+            dependency.AddMember("required", true, allocator);
+            dependencies.PushBack(dependency, allocator);
+        }
+        doc.AddMember("dependencies", dependencies, allocator);
+
+        std::set<std::string> pluginDependencies = inferredDependencies.plugins;
+        if (doc.HasMember("pluginDependencies") &&
+            doc["pluginDependencies"].IsArray())
+        {
+            for (const auto& dependency : doc["pluginDependencies"].GetArray()) {
+                if (dependency.IsString()) {
+                    pluginDependencies.emplace(dependency.GetString());
+                } else if (
+                    dependency.IsObject() &&
+                    dependency.HasMember("plugin") &&
+                    dependency["plugin"].IsString())
+                {
+                    pluginDependencies.emplace(dependency["plugin"].GetString());
+                }
+            }
+            doc.RemoveMember("pluginDependencies");
+        }
+
+        rapidjson::Value plugins(rapidjson::kArrayType);
+        for (const auto& plugin : pluginDependencies) {
+            rapidjson::Value dependency(rapidjson::kObjectType);
+            dependency.AddMember(
+                "plugin",
+                rapidjson::Value(plugin.c_str(), allocator),
+                allocator);
+            dependency.AddMember("required", true, allocator);
+            plugins.PushBack(dependency, allocator);
+        }
+        doc.AddMember("pluginDependencies", plugins, allocator);
+
+        std::ofstream stream(destinationPath, std::ios::trunc);
+        if (!stream.is_open()) {
+            logger::error(
+                "Export: could not write distribution manifest '{}'.",
+                destinationPath.string());
+            return false;
+        }
+        rapidjson::OStreamWrapper wrapper(stream);
+        rapidjson::PrettyWriter writer(wrapper);
+        doc.Accept(writer);
+        return true;
+    }
+
+    struct PackageExportResult
+    {
+        std::vector<std::filesystem::path> files;
+        std::vector<std::string> failures;
+        std::size_t packageCount{ 0 };
+        std::size_t formCount{ 0 };
+    };
+
+    bool PersistPackageVersion(
+        const std::string& packageName,
+        const std::string_view version)
+    {
+        const auto manifestPath =
+            PackageSourceDirectory(packageName) / "manifest.json";
+        rapidjson::Document doc;
+        {
+            std::ifstream stream(manifestPath);
+            if (!stream.is_open()) {
+                return false;
+            }
+            rapidjson::IStreamWrapper wrapper(stream);
+            doc.ParseStream(wrapper);
+        }
+        if (doc.HasParseError() || !doc.IsObject()) {
+            return false;
+        }
+        SetManifestString(
+            doc,
+            "version",
+            version.empty() ? "1.0.0" : version);
+        std::ofstream stream(manifestPath, std::ios::trunc);
+        if (!stream.is_open()) {
+            return false;
+        }
+        rapidjson::OStreamWrapper wrapper(stream);
+        rapidjson::PrettyWriter writer(wrapper);
+        doc.Accept(writer);
+        return true;
+    }
+
+    PackageExportResult ExportSelectedPackages(
+        const std::string_view archiveName,
+        const std::set<std::string>& selectedKeys)
+    {
+        PackageExportResult result;
+        if (selectedKeys.empty()) {
+            return result;
         }
 
         auto& forms = Manager::GetForms();
-        for (std::size_t i = 0; i < forms.size(); ++i) {
-            if (editorIds.contains(forms[i].editorId) && Manager::IsDirty(i) && !Manager::SaveForm(i)) {
-                logger::warn("Export: could not save dirty form '{}' before exporting.", forms[i].editorId);
-                return std::nullopt;
+        std::set<std::string> packageNames;
+        for (const auto& form : forms) {
+            const auto addPackage = [&](const std::string_view package) {
+                if (!package.empty() &&
+                    FormHasDatabaseRowInPackage(form, package) &&
+                    selectedKeys.contains(
+                        ExportSelectionKey(package, form)))
+                {
+                    packageNames.emplace(package);
+                }
+            };
+            if (form.externalPatch) {
+                addPackage(form.externalEditPackage);
+            } else {
+                addPackage(form.packageName.empty() ?
+                    Manager::DEFAULT_PACKAGE_NAME :
+                    form.packageName);
+                for (const auto& package : form.patchPackageNames) {
+                    addPackage(package);
+                }
+            }
+        }
+        if (packageNames.empty()) {
+            result.failures.emplace_back(
+                "no valid package rows were selected");
+            return result;
+        }
+
+        for (std::size_t index = 0; index < forms.size(); ++index) {
+            if (!Manager::IsDirty(index)) {
+                continue;
+            }
+            const auto persistencePackage =
+                FormPersistencePackage(forms[index]);
+            const bool belongsToSelection =
+                selectedKeys.contains(
+                    ExportSelectionKey(
+                        persistencePackage,
+                        forms[index]));
+            if (belongsToSelection && !Manager::SaveForm(index)) {
+                result.failures.push_back(std::format(
+                    "{}: could not save '{}'",
+                    forms[index].packageName,
+                    forms[index].editorId));
+                return result;
             }
         }
 
         namespace fs = std::filesystem;
         fs::create_directories(EXPORT_DIR);
-        const auto zipPath = fs::path(EXPORT_DIR) / (SanitizeFilename(packageName.empty() ? "DFG_Export" : packageName) + ".zip");
+        const auto safeArchiveName = SanitizeFilename(
+            archiveName.empty() ? "DFG_Export" :
+                                  std::string(archiveName));
+        const auto stagingParent = fs::path(EXPORT_DIR) / ".staging";
+        const auto stagingRoot = stagingParent / safeArchiveName;
+        std::error_code ec;
+        fs::remove_all(stagingRoot, ec);
+        fs::create_directories(stagingRoot);
+        const auto zipPath =
+            fs::path(EXPORT_DIR) / (safeArchiveName + ".zip");
+        fs::remove(zipPath, ec);
 
         mz_zip_archive zip{};
-        if (!mz_zip_writer_init_file(&zip, zipPath.string().c_str(), 0)) {
-            logger::error("Export: failed to initialize ZIP file at '{}'.", zipPath.string());
-            return std::nullopt;
+        if (!mz_zip_writer_init_file(
+                &zip,
+                zipPath.string().c_str(),
+                0))
+        {
+            result.failures.emplace_back(
+                "could not initialize ZIP");
+            fs::remove_all(stagingRoot, ec);
+            return result;
         }
-
-        bool ok = true;
         std::set<std::string> addedPaths;
-        std::set<std::string> packageNames;
-        for (const auto& form : forms) {
-            if (!editorIds.contains(form.editorId)) {
-                continue;
+
+        for (const auto& packageName : packageNames) {
+            const auto rowSelection =
+                BuildPackageRowSelection(
+                    packageName,
+                    selectedKeys);
+            if (rowSelection.size() == 0) {
+                result.failures.push_back(std::format(
+                    "{}: no database rows matched the selected forms",
+                    packageName));
+                break;
             }
-            packageNames.insert(form.packageName.empty() ? Manager::DEFAULT_PACKAGE_NAME : form.packageName);
-            packageNames.insert(form.patchPackageNames.begin(), form.patchPackageNames.end());
+
+            const auto folder = SanitizePackageFolder(packageName);
+            const auto sourceDir = PackageSourceDirectory(packageName);
+            const auto sourceDatabase = sourceDir / "package.db";
+            const auto sourceManifest = sourceDir / "manifest.json";
+            if (!fs::exists(sourceDatabase) || !fs::exists(sourceManifest)) {
+                result.failures.push_back(std::format(
+                    "{}: manifest.json or package.db is missing",
+                    packageName));
+                break;
+            }
+
+            const auto stagingDir = stagingRoot / folder;
+            fs::remove_all(stagingDir, ec);
+            fs::create_directories(stagingDir, ec);
+            if (ec) {
+                result.failures.push_back(std::format(
+                    "{}: could not create staging directory",
+                    packageName));
+                break;
+            }
+
+            const auto snapshotPath = stagingDir / "package.db";
+            const auto manifestPath = stagingDir / "manifest.json";
+            auto& options = GetExportPackageOptions(packageName);
+            if (!CreateDatabaseSnapshot(sourceDatabase, snapshotPath) ||
+                !FilterDatabaseSnapshot(
+                    snapshotPath,
+                    rowSelection))
+            {
+                result.failures.push_back(std::format(
+                    "{}: could not create filtered database snapshot",
+                    packageName));
+                break;
+            }
+
+            const auto dependencies =
+                ReadPackageDependencies(snapshotPath, packageName);
+            if (
+                !WriteDistributionManifest(
+                    packageName,
+                    options.version.data(),
+                    dependencies,
+                    manifestPath))
+            {
+                result.failures.push_back(std::format(
+                    "{}: could not create export manifest",
+                    packageName));
+                break;
+            }
+
+            const auto internalRoot = std::format(
+                "Viny Mods/Dynamic Forms Generator/Packages/{}",
+                folder);
+            if (
+                !AddFileToZipOnce(
+                    zip,
+                    addedPaths,
+                    manifestPath,
+                    internalRoot + "/manifest.json") ||
+                !AddFileToZipOnce(
+                    zip,
+                    addedPaths,
+                    snapshotPath,
+                    internalRoot + "/package.db"))
+            {
+                result.failures.push_back(std::format(
+                    "{}: could not add package files to ZIP",
+                    packageName));
+                break;
+            }
+            result.formCount += rowSelection.size();
+            ++result.packageCount;
         }
 
-        for (const auto& package : packageNames) {
-            const auto folder = SanitizePackageFolder(package);
-            const auto sourceDir = std::filesystem::path(Manager::PACKAGES_DIR) / folder;
-            ok = AddFileToZipOnce(
-                zip,
-                addedPaths,
-                sourceDir / "manifest.json",
-                std::format("Viny Mods/Dynamic Forms Generator/Packages/{}/manifest.json", folder)) && ok;
-            ok = AddFileToZipOnce(
-                zip,
-                addedPaths,
-                sourceDir / "package.db",
-                std::format("Viny Mods/Dynamic Forms Generator/Packages/{}/package.db", folder)) && ok;
-        }
-
-        if (!mz_zip_writer_finalize_archive(&zip)) {
-            logger::error("Export: failed to finalize ZIP '{}'.", zipPath.string());
-            ok = false;
-        }
+        const bool finalized =
+            result.failures.empty() &&
+            mz_zip_writer_finalize_archive(&zip);
         mz_zip_writer_end(&zip);
+        fs::remove_all(stagingRoot, ec);
+        fs::remove(stagingParent, ec);
 
-        if (!ok) {
-            return std::nullopt;
+        if (!finalized) {
+            if (result.failures.empty()) {
+                result.failures.emplace_back(
+                    "could not finalize ZIP");
+            }
+            fs::remove(zipPath, ec);
+            result.packageCount = 0;
+            result.formCount = 0;
+            return result;
         }
 
-        logger::info("Export package successfully written to '{}'.", zipPath.string());
-        return zipPath;
+        for (const auto& packageName : packageNames) {
+            auto& options = GetExportPackageOptions(packageName);
+            if (!PersistPackageVersion(
+                    packageName,
+                    options.version.data()))
+            {
+                logger::warn(
+                    "Export: bundle was created, but version '{}' could not be persisted for package '{}'.",
+                    options.version.data(),
+                    packageName);
+            }
+        }
+        result.files.push_back(zipPath);
+        logger::info(
+            "Exported bundle '{}' with {} package(s) and {} selected row(s) to '{}'.",
+            safeArchiveName,
+            result.packageCount,
+            result.formCount,
+            zipPath.string());
+        return result;
     }
 
     int ArtTypeIndex(const DynamicForms::ArtObjectType type) {
@@ -1097,10 +2032,6 @@ namespace {
         return MatchesFilterValues(form, selectedFilterKind, filterEditorIdBuffer.data());
     }
 
-    bool MatchesExportFilters(const DynamicForms::DynamicForm& form) {
-        return MatchesFilterValues(form, selectedExportFilterKind, exportFilterEditorIdBuffer.data());
-    }
-
     bool CanAddToInventory(const DynamicForms::FormKind kind) {
         return kind == DynamicForms::FormKind::Armor ||
             kind == DynamicForms::FormKind::Book ||
@@ -1200,6 +2131,17 @@ namespace {
     const char* ActiveWorkingPackageName() {
         const auto* name = workingPackageName.data();
         return name[0] != '\0' ? name : "DFG_Overrides";
+    }
+
+    std::string FormSelectionKey(const DynamicForms::DynamicForm& form) {
+        if (!form.externalPatch) {
+            return form.editorId;
+        }
+        return std::format(
+            "external:{}|{:X}|{}",
+            ToLower(form.externalSourcePlugin),
+            form.externalLocalId,
+            static_cast<int>(form.kind));
     }
 
     const char* SourcePackageLabel(const DynamicForms::DynamicForm& form) {
@@ -1341,13 +2283,23 @@ namespace {
         return rows;
     }
 
+    bool CanDeleteFormLayer(const DynamicForms::DynamicForm& form) {
+        return !form.externalPatch ||
+            (!form.externalEditPackage.empty() && !form.externalBaselinePayload.empty());
+    }
+
     bool AllRowsSelectedForDelete(const std::vector<std::size_t>& rows) {
-        if (rows.empty()) {
+        const auto& forms = Manager::GetForms();
+        const bool hasDeletableRow = std::ranges::any_of(rows, [&forms](const std::size_t row) {
+            return row < forms.size() && CanDeleteFormLayer(forms[row]);
+        });
+        if (!hasDeletableRow) {
             return false;
         }
-        const auto& forms = Manager::GetForms();
         return std::ranges::all_of(rows, [&forms](const std::size_t row) {
-            return row < forms.size() && selectedDeleteForms.contains(forms[row].editorId);
+            return row >= forms.size() ||
+                !CanDeleteFormLayer(forms[row]) ||
+                selectedDeleteForms.contains(FormSelectionKey(forms[row]));
         });
     }
 
@@ -1357,10 +2309,14 @@ namespace {
             if (row >= forms.size()) {
                 continue;
             }
+            if (!CanDeleteFormLayer(forms[row])) {
+                continue;
+            }
+            const auto key = FormSelectionKey(forms[row]);
             if (selected) {
-                selectedDeleteForms.insert(forms[row].editorId);
+                selectedDeleteForms.insert(key);
             } else {
-                selectedDeleteForms.erase(forms[row].editorId);
+                selectedDeleteForms.erase(key);
             }
         }
     }
@@ -1458,8 +2414,30 @@ namespace {
         ImGui::SameLine();
         if (ImGui::Button(Configuration::GetLoc("menu.create_patch", "Create patch"))) {
             selectedPatchForms.clear();
+            selectedExternalPatchForms.clear();
+            patchCreateMessage.clear();
             requestCreatePatchPopup = true;
         }
+
+        if (priorityPackageName != ActiveWorkingPackageName()) {
+            priorityPackageName = ActiveWorkingPackageName();
+            workingPackagePriority = Manager::GetPackagePriority(priorityPackageName);
+        }
+        ImGui::SetNextItemWidth(120.0F);
+        ImGui::InputInt(
+            Configuration::GetLoc("menu.package_priority", "Package priority"),
+            &workingPackagePriority);
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.apply_priority", "Apply priority"))) {
+            lastSaveSucceeded = Manager::SetPackagePriority(ActiveWorkingPackageName(), workingPackagePriority);
+            saveMessage = lastSaveSucceeded ?
+                Configuration::GetLoc("menu.priority_saved", "Package priority saved. It takes effect on the next game load.") :
+                Configuration::GetLoc("menu.priority_save_failed", "Could not save package priority.");
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", Configuration::GetLoc(
+            "menu.package_priority_hint",
+            "Lower priorities apply first; the last patch changing a field wins."));
 
         ImGui::Text("%s: %s", Configuration::GetLoc("menu.edit_target", "Edit target"), ActiveWorkingPackageName());
         ImGui::TextDisabled("%s", Configuration::GetLoc(
@@ -1478,15 +2456,29 @@ namespace {
         }
 
         ImGui::Indent();
-        ImGui::Text("%s: %s", Configuration::GetLoc("menu.source_package", "Source package"), SourcePackageLabel(form));
+        if (form.externalPatch) {
+            ImGui::Text(
+                "%s: %s|%X",
+                Configuration::GetLoc("menu.external_target", "External target"),
+                form.externalSourcePlugin.c_str(),
+                form.externalLocalId);
+            ImGui::Text(
+                "%s: %s",
+                Configuration::GetLoc("menu.winning_plugin", "Winning plugin"),
+                form.externalWinningPlugin.empty() ? form.externalSourcePlugin.c_str() : form.externalWinningPlugin.c_str());
+        } else {
+            ImGui::Text("%s: %s", Configuration::GetLoc("menu.source_package", "Source package"), SourcePackageLabel(form));
+        }
         ImGui::Text("%s: %s%s%s",
             Configuration::GetLoc("menu.final_layers", "Final layers"),
-            SourcePackageLabel(form),
-            overrideDraft ? " + " : "",
-            overrideDraft ? PatchPackageLabel(form).c_str() : "");
+            form.externalPatch ? form.externalSourcePlugin.c_str() : SourcePackageLabel(form),
+            HasAnyPatchLayer(form) ? " + " : "",
+            HasAnyPatchLayer(form) ? PatchPackageLabel(form).c_str() : "");
         ImGui::Text("%s: ", Configuration::GetLoc("menu.form_state", "State"));
         ImGui::SameLine();
-        if (overrideDraft) {
+        if (form.externalPatch) {
+            DrawStatusBadge(Configuration::GetLoc("menu.external_runtime_patch", "external runtime patch"), OVERRIDE_COLOR);
+        } else if (overrideDraft) {
             DrawStatusBadge(Configuration::GetLoc("menu.override_draft", "override draft"), OVERRIDE_COLOR);
         } else if (form.localId == 0) {
             DrawStatusBadge(Configuration::GetLoc("menu.new_local", "new local"), LOCAL_COLOR);
@@ -1494,7 +2486,50 @@ namespace {
             DrawStatusBadge(Configuration::GetLoc("menu.inherited_clean", "inherited clean"), INHERITED_COLOR);
         }
 
-        if (overrideDraft) {
+        if (form.externalPatch) {
+            const auto fields = Manager::GetExternalPatchFieldViews(index);
+            if (ImGui::CollapsingHeader(Configuration::GetLoc("menu.current_layer_changes", "Current layer changes"))) {
+                ImGui::Indent();
+                if (fields.empty()) {
+                    ImGui::TextDisabled("%s", Configuration::GetLoc(
+                        "menu.no_external_field_changes",
+                        "No fields differ from the inherited state yet."));
+                }
+                for (const auto& field : fields) {
+                    ImGui::PushID(field.field.c_str());
+                    ImGui::TextColored(field.conflict ? ERROR_COLOR : INHERITED_COLOR, "%s%s",
+                        field.field.c_str(),
+                        field.conflict ? " [conflict]" : "");
+                    ImGui::TextWrapped(
+                        "%s: %s",
+                        Configuration::GetLoc("menu.inherited_value", "Inherited"),
+                        field.inheritedValue.c_str());
+                    ImGui::TextWrapped(
+                        "%s: %s",
+                        Configuration::GetLoc("menu.resolved_value", "Resolved"),
+                        field.resolvedValue.c_str());
+                    if (field.arrayValue) {
+                        constexpr std::array arrayOperations{ "Replace", "Merge (add/remove)" };
+                        int operationIndex = field.operation == "merge" ? 1 : 0;
+                        ImGui::SetNextItemWidth(220.0F);
+                        if (ImGui::Combo(
+                                Configuration::GetLoc("menu.array_patch_operation", "Array operation"),
+                                &operationIndex,
+                                arrayOperations.data(),
+                                static_cast<int>(arrayOperations.size())))
+                        {
+                            Manager::SetExternalPatchArrayOperation(
+                                index,
+                                field.field,
+                                operationIndex == 1 ? "merge" : "replace");
+                        }
+                    }
+                    ImGui::Separator();
+                    ImGui::PopID();
+                }
+                ImGui::Unindent();
+            }
+        } else if (overrideDraft) {
             ImGui::TextDisabled("%s", Configuration::GetLoc(
                 "menu.override_draft_hint",
                 "Saving now writes the whole JSON form; future patch storage would persist only the changed fields in the working package."));
@@ -1504,28 +2539,34 @@ namespace {
         const char* moveButtonLabel = isInWorkingPackage ?
             Configuration::GetLoc("menu.form_in_working_package", "In working package") :
             Configuration::GetLoc("menu.move_to_working_package", "Move to working package");
-        if (isInWorkingPackage) {
+        if (isInWorkingPackage || form.externalPatch) {
             ImGui::BeginDisabled();
         }
         if (ImGui::Button(moveButtonLabel)) {
             AssignFormToWorkingPackage(form);
         }
-        if (isInWorkingPackage) {
+        if (isInWorkingPackage || form.externalPatch) {
             ImGui::EndDisabled();
         }
         ImGui::SameLine();
-        const bool canCreatePatchLayer = SourcePackageLabel(form) != ActiveWorkingPackageName() && !HasPatchLayer(form, ActiveWorkingPackageName());
+        const bool canCreatePatchLayer =
+            !HasPatchLayer(form, ActiveWorkingPackageName()) &&
+            (form.externalPatch || SourcePackageLabel(form) != ActiveWorkingPackageName());
         if (!canCreatePatchLayer) {
             ImGui::BeginDisabled();
         }
         if (ImGui::Button(Configuration::GetLoc("menu.create_patch_layer", "Create patch layer"))) {
-            MarkFormAsPatchInWorkingPackage(form);
+            if (form.externalPatch) {
+                Manager::AddExternalPatchLayer(index, ActiveWorkingPackageName());
+            } else {
+                MarkFormAsPatchInWorkingPackage(form);
+            }
         }
         if (!canCreatePatchLayer) {
             ImGui::EndDisabled();
         }
         ImGui::SameLine();
-        const bool canRemoveFromPackage = previewFormPackages.contains(form.editorId);
+        const bool canRemoveFromPackage = !form.externalPatch && previewFormPackages.contains(form.editorId);
         if (!canRemoveFromPackage) {
             ImGui::BeginDisabled();
         }
@@ -1572,6 +2613,7 @@ namespace {
     bool RenderPerkEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderHeadPartEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderSoundDescriptorEditor(std::size_t index, DynamicForms::DynamicForm& form);
+    void DrawSoundPreviewControls(std::size_t index, const DynamicForms::DynamicForm& form);
     bool RenderLightEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderExplosionEditor(std::size_t index, DynamicForms::DynamicForm& form);
     bool RenderActivatorEditor(std::size_t index, DynamicForms::DynamicForm& form);
@@ -1581,22 +2623,32 @@ namespace {
     bool FlagCheckbox(const char* label, std::uint32_t& flags, std::uint32_t bit);
 
     void RenderFormTreeItem(const std::size_t index, DynamicForms::DynamicForm& form) {
-        ImGui::PushID(form.editorId.c_str());
+        ImGui::PushID(static_cast<int>(index));
         const bool isDirty = Manager::IsDirty(index);
         if (deleteSelectionMode) {
-            bool selected = selectedDeleteForms.contains(form.editorId);
+            const auto selectionKey = FormSelectionKey(form);
+            bool selected = selectedDeleteForms.contains(selectionKey);
+            if (!CanDeleteFormLayer(form)) {
+                ImGui::BeginDisabled();
+            }
             if (ImGui::Checkbox("##selectDelete", &selected)) {
                 if (selected) {
-                    selectedDeleteForms.insert(form.editorId);
+                    selectedDeleteForms.insert(selectionKey);
                 } else {
-                    selectedDeleteForms.erase(form.editorId);
+                    selectedDeleteForms.erase(selectionKey);
                 }
+            }
+            if (!CanDeleteFormLayer(form)) {
+                ImGui::EndDisabled();
             }
             ImGui::SameLine();
         }
 
         std::string headerLabel = form.editorId;
-        if (isDirty || HasAnyPatchLayer(form)) {
+        if (form.externalPatch) {
+            headerLabel += " [External runtime patch]";
+            ImGui::PushStyleColor(ImGui::ImGuiCol_Header, { 0.4F, 0.3F, 0.1F, 1.0F });
+        } else if (isDirty || HasAnyPatchLayer(form)) {
             headerLabel += " [Override draft]";
             ImGui::PushStyleColor(ImGui::ImGuiCol_Header, { 0.4F, 0.3F, 0.1F, 1.0F });
         } else if (form.localId != 0) {
@@ -1606,9 +2658,12 @@ namespace {
         }
         headerLabel += "###";
         headerLabel += form.editorId;
+        if (form.externalPatch) {
+            headerLabel += std::format("_{}_{}", form.externalSourcePlugin, form.externalLocalId);
+        }
 
         if (ImGui::CollapsingHeader(headerLabel.c_str())) {
-            if (isDirty || HasAnyPatchLayer(form)) {
+            if (form.externalPatch || isDirty || HasAnyPatchLayer(form)) {
                 ImGui::PopStyleColor();
             }
             ImGui::Indent();
@@ -1616,12 +2671,20 @@ namespace {
                 ImGui::TextColored(DIRTY_COLOR, "%s", Configuration::GetLoc("menu.unsaved_form", "Unsaved changes"));
             }
             ImGui::Text("%s: %s", Configuration::GetLoc("menu.form_type", "Form type"), FormKindLabel(form.kind));
-            ImGui::Text("%s: %u:%06X", Configuration::GetLoc("menu.dpf_slot", "DPF slot"), form.pluginNumber, form.localId);
-            if (form.pluginNumber != 0) {
-                ImGui::Text("%s: %s", Configuration::GetLoc("menu.dpf_plugin", "DPF plugin"), DPF::PluginNameForNumber(form.pluginNumber).c_str());
+            if (form.externalPatch) {
+                ImGui::Text(
+                    "%s: %s|%X",
+                    Configuration::GetLoc("menu.external_identity", "Plugin-local identity"),
+                    form.externalSourcePlugin.c_str(),
+                    form.externalLocalId);
+            } else {
+                ImGui::Text("%s: %u:%06X", Configuration::GetLoc("menu.dpf_slot", "DPF slot"), form.pluginNumber, form.localId);
+                if (form.pluginNumber != 0) {
+                    ImGui::Text("%s: %s", Configuration::GetLoc("menu.dpf_plugin", "DPF plugin"), DPF::PluginNameForNumber(form.pluginNumber).c_str());
+                }
             }
             RenderResolvedFormPanel(form, index);
-            if (CanAddToInventory(form.kind)) {
+            if (!form.externalPatch && CanAddToInventory(form.kind)) {
                 if (ImGui::Button(Configuration::GetLoc("menu.add_to_inventory", "Add to inventory"))) {
                     if (Manager::AddFormToPlayerInventory(index)) {
                         lastTestActionSucceeded = true;
@@ -1632,7 +2695,7 @@ namespace {
                     }
                 }
             }
-            if (CanSpawnInWorld(form.kind)) {
+            if (!form.externalPatch && CanSpawnInWorld(form.kind)) {
                 if (CanAddToInventory(form.kind)) {
                     ImGui::SameLine();
                 }
@@ -1735,6 +2798,12 @@ namespace {
             const char* saveButtonLabel = isDirty ?
                 Configuration::GetLoc("menu.save_override_draft", "Save override draft") :
                 Configuration::GetLoc("menu.save", "Save");
+            const bool externalReadOnlyLayer =
+                form.externalPatch &&
+                (form.externalEditPackage.empty() || form.externalBaselinePayload.empty());
+            if (externalReadOnlyLayer) {
+                ImGui::BeginDisabled();
+            }
             if (ImGui::Button(saveButtonLabel)) {
                 if (Manager::SaveForm(index)) {
                     lastSaveSucceeded = true;
@@ -1744,17 +2813,28 @@ namespace {
                     saveMessage = std::format("{} {}", Configuration::GetLoc("menu.save_failed_prefix", "Could not save"), form.editorId);
                 }
             }
+            if (externalReadOnlyLayer) {
+                ImGui::EndDisabled();
+            }
             if (isDirty) {
                 ImGui::PopStyleColor(3);
             }
             ImGui::SameLine();
-            if (ImGui::Button(Configuration::GetLoc("menu.delete", "Delete"))) {
+            if (externalReadOnlyLayer) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(form.externalPatch ?
+                    Configuration::GetLoc("menu.delete_patch_layer", "Delete patch layer") :
+                    Configuration::GetLoc("menu.delete", "Delete"))) {
                 pendingDeleteIndex = static_cast<int>(index);
                 deleteError.clear();
                 requestDeletePopup = true;
             }
+            if (externalReadOnlyLayer) {
+                ImGui::EndDisabled();
+            }
             ImGui::Unindent();
-        } else if (isDirty || HasAnyPatchLayer(form)) {
+        } else if (form.externalPatch || isDirty || HasAnyPatchLayer(form)) {
             ImGui::PopStyleColor();
         }
         ImGui::PopID();
@@ -2100,18 +3180,34 @@ namespace {
         }
 
         ImGui::Text("%s: %s", Configuration::GetLoc("menu.patch_target_package", "Patch target package"), ActiveWorkingPackageName());
+        constexpr std::array patchSourceItems{ "DFG forms", "Game / plugin forms" };
+        ImGui::SetNextItemWidth(260.0F);
+        if (ImGui::Combo("Source", &patchSourceMode, patchSourceItems.data(), static_cast<int>(patchSourceItems.size()))) {
+            selectedPatchForms.clear();
+            selectedExternalPatchForms.clear();
+            patchCreateMessage.clear();
+        }
 
         ImGui::SetNextItemWidth(220.0F);
-        ImGui::InputText(Configuration::GetLoc("menu.filter_package_name", "Package name"), patchFilterPackageNameBuffer.data(), patchFilterPackageNameBuffer.size());
+        ImGui::InputText(
+            patchSourceMode == 0 ?
+                Configuration::GetLoc("menu.filter_package_name", "Package name") :
+                Configuration::GetLoc("menu.filter_plugin_name", "Plugin name"),
+            patchFilterPackageNameBuffer.data(),
+            patchFilterPackageNameBuffer.size());
         ImGui::SameLine();
-        DrawSearchableCombo(
-            Configuration::GetLoc("menu.filter_type", "Type"),
-            "patch_type_filter",
-            selectedPatchFilterKind,
-            FILTER_KIND_ITEMS.data(),
-            static_cast<int>(FILTER_KIND_ITEMS.size()),
-            180.0F,
-            300.0F);
+        if (DrawSearchableCombo(
+                Configuration::GetLoc("menu.filter_type", "Type"),
+                "patch_type_filter",
+                selectedPatchFilterKind,
+                FILTER_KIND_ITEMS.data(),
+                static_cast<int>(FILTER_KIND_ITEMS.size()),
+                180.0F,
+                300.0F) &&
+            patchSourceMode == 1)
+        {
+            selectedExternalPatchForms.clear();
+        }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(240.0F);
         ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "EditorID"), patchFilterEditorIdBuffer.data(), patchFilterEditorIdBuffer.size());
@@ -2119,93 +3215,205 @@ namespace {
         auto& forms = Manager::GetForms();
         ImGui::BeginChild("##createPatchForms", { 760.0F, 460.0F }, true);
         std::size_t visibleCount = 0;
-        for (const auto& package : previewPackages) {
-            std::vector<std::size_t> packageRows;
-            for (std::size_t i = 0; i < forms.size(); ++i) {
-                if (FormBelongsToPackage(forms[i], package) && MatchesPatchPopupFilters(forms[i], package)) {
-                    packageRows.push_back(i);
-                }
-            }
-            if (packageRows.empty()) {
-                continue;
-            }
-
-            visibleCount += packageRows.size();
-            const auto packageHeader = std::format("{} ({})###patch_package_{}", package, packageRows.size(), package);
-            if (!ImGui::CollapsingHeader(packageHeader.c_str())) {
-                continue;
-            }
-
-            ImGui::Indent();
-            for (const auto kind : FORM_KIND_TREE_ORDER) {
-                std::vector<std::size_t> kindRows;
-                for (const auto row : packageRows) {
-                    if (forms[row].kind == kind) {
-                        kindRows.push_back(row);
+        if (patchSourceMode == 0) {
+            for (const auto& package : previewPackages) {
+                std::vector<std::size_t> packageRows;
+                for (std::size_t i = 0; i < forms.size(); ++i) {
+                    if (!forms[i].externalPatch &&
+                        FormBelongsToPackage(forms[i], package) &&
+                        MatchesPatchPopupFilters(forms[i], package))
+                    {
+                        packageRows.push_back(i);
                     }
                 }
-                if (kindRows.empty()) {
+                if (packageRows.empty()) {
                     continue;
                 }
 
-                const auto kindHeader = std::format("{} ({})###patch_package_{}_kind_{}", FormKindLabel(kind), kindRows.size(), package, static_cast<int>(kind));
-                if (!ImGui::CollapsingHeader(kindHeader.c_str())) {
+                visibleCount += packageRows.size();
+                const auto packageHeader = std::format("{} ({})###patch_package_{}", package, packageRows.size(), package);
+                if (!ImGui::CollapsingHeader(packageHeader.c_str())) {
                     continue;
                 }
 
                 ImGui::Indent();
-                for (const auto row : kindRows) {
-                    auto& form = forms[row];
-                    ImGui::PushID(form.editorId.c_str());
-                    bool selected = selectedPatchForms.contains(form.editorId);
-                    if (ImGui::Checkbox("##patchSelect", &selected)) {
-                        if (selected) {
-                            selectedPatchForms.insert(form.editorId);
-                        } else {
-                            selectedPatchForms.erase(form.editorId);
+                for (const auto kind : FORM_KIND_TREE_ORDER) {
+                    std::vector<std::size_t> kindRows;
+                    for (const auto row : packageRows) {
+                        if (forms[row].kind == kind) {
+                            kindRows.push_back(row);
                         }
                     }
-                    ImGui::SameLine();
-                    ImGui::Text("%s", form.editorId.c_str());
-                    if (HasAnyPatchLayer(form)) {
-                        ImGui::SameLine();
-                        ImGui::TextColored(OVERRIDE_COLOR, "[%s]", PatchPackageLabel(form).c_str());
+                    if (kindRows.empty()) {
+                        continue;
                     }
-                    ImGui::PopID();
+
+                    const auto kindHeader = std::format("{} ({})###patch_package_{}_kind_{}", FormKindLabel(kind), kindRows.size(), package, static_cast<int>(kind));
+                    if (!ImGui::CollapsingHeader(kindHeader.c_str())) {
+                        continue;
+                    }
+
+                    ImGui::Indent();
+                    for (const auto row : kindRows) {
+                        auto& form = forms[row];
+                        ImGui::PushID(static_cast<int>(row));
+                        bool selected = selectedPatchForms.contains(form.editorId);
+                        if (ImGui::Checkbox("##patchSelect", &selected)) {
+                            if (selected) {
+                                selectedPatchForms.insert(form.editorId);
+                            } else {
+                                selectedPatchForms.erase(form.editorId);
+                            }
+                        }
+                        ImGui::SameLine();
+                        ImGui::Text("%s", form.editorId.c_str());
+                        if (HasAnyPatchLayer(form)) {
+                            ImGui::SameLine();
+                            ImGui::TextColored(OVERRIDE_COLOR, "[%s]", PatchPackageLabel(form).c_str());
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::Unindent();
                 }
                 ImGui::Unindent();
             }
-            ImGui::Unindent();
+        } else {
+            const auto selectedKind = FormKindFromFilterIndex(selectedPatchFilterKind);
+            if (!selectedKind) {
+                ImGui::TextDisabled("%s", Configuration::GetLoc(
+                    "menu.external_patch_select_type",
+                    "Select one form type to browse game and plugin forms."));
+            } else if (!Manager::SupportsExternalPatch(*selectedKind)) {
+                ImGui::TextColored(ERROR_COLOR, "%s", Configuration::GetLoc(
+                    "menu.external_patch_unsupported_type",
+                    "This type is not enabled for safe external runtime patching yet."));
+            } else {
+                const auto& candidates = ListManager::GetSingleton()->GetList(Manager::GetListTypeName(*selectedKind));
+                const auto pluginFilter = ToLower(std::string(patchFilterPackageNameBuffer.data()));
+                const auto editorFilter = ToLower(std::string(patchFilterEditorIdBuffer.data()));
+                const auto generation = ListManager::GetSingleton()->GetGeneration();
+                if (externalPatchRowCache.generation != generation ||
+                    externalPatchRowCache.kindIndex != selectedPatchFilterKind ||
+                    externalPatchRowCache.pluginFilter != pluginFilter ||
+                    externalPatchRowCache.editorFilter != editorFilter)
+                {
+                    externalPatchRowCache.generation = generation;
+                    externalPatchRowCache.kindIndex = selectedPatchFilterKind;
+                    externalPatchRowCache.pluginFilter = pluginFilter;
+                    externalPatchRowCache.editorFilter = editorFilter;
+                    externalPatchRowCache.rows.clear();
+                    externalPatchRowCache.rows.reserve(candidates.size());
+                    for (std::size_t i = 0; i < candidates.size(); ++i) {
+                        const auto& candidate = candidates[i];
+                        const bool dpfForm = candidate.pluginName == "DPF.esp" ||
+                            (candidate.pluginName.starts_with("DPF ") && candidate.pluginName.ends_with(".esp"));
+                        if (dpfForm || candidate.pluginName == "Dynamic" || candidate.normalizedFormID.find('|') == std::string::npos) {
+                            continue;
+                        }
+                        if (!pluginFilter.empty() && ToLower(candidate.pluginName).find(pluginFilter) == std::string::npos) {
+                            continue;
+                        }
+                        const auto searchable = ToLower(candidate.editorID + " " + candidate.name);
+                        if (!editorFilter.empty() && searchable.find(editorFilter) == std::string::npos) {
+                            continue;
+                        }
+                        externalPatchRowCache.rows.push_back(i);
+                    }
+                }
+                const auto& rows = externalPatchRowCache.rows;
+
+                visibleCount = rows.size();
+                auto* clipper = ImGui::ImGuiListClipperManager::Create();
+                ImGui::ImGuiListClipperManager::Begin(clipper, static_cast<int>(rows.size()), 0.0F);
+                while (ImGui::ImGuiListClipperManager::Step(clipper)) {
+                    for (int row = clipper->DisplayStart; row < clipper->DisplayEnd; ++row) {
+                        const auto& candidate = candidates[rows[static_cast<std::size_t>(row)]];
+                        const auto key = std::format("{}|{}", static_cast<int>(*selectedKind), candidate.normalizedFormID);
+                        ImGui::PushID(key.c_str());
+                        bool selected = selectedExternalPatchForms.contains(key);
+                        if (ImGui::Checkbox("##externalPatchSelect", &selected)) {
+                            if (selected) {
+                                selectedExternalPatchForms.insert(key);
+                            } else {
+                                selectedExternalPatchForms.erase(key);
+                            }
+                        }
+                        ImGui::SameLine();
+                        ImGui::Text(
+                            "%s (%s) [%s]",
+                            candidate.editorID.empty() ? candidate.GetDisplayName().c_str() : candidate.editorID.c_str(),
+                            candidate.pluginName.c_str(),
+                            candidate.normalizedFormID.c_str());
+                        ImGui::PopID();
+                    }
+                }
+                ImGui::ImGuiListClipperManager::End(clipper);
+                ImGui::ImGuiListClipperManager::Destroy(clipper);
+            }
         }
-        if (visibleCount == 0) {
+
+        if (visibleCount == 0 && (patchSourceMode == 0 || selectedPatchFilterKind != 0)) {
             ImGui::TextDisabled("%s", Configuration::GetLoc("menu.no_forms_match_filters", "No forms match the current filters."));
         }
         ImGui::EndChild();
 
-        ImGui::Text(Configuration::GetLoc("menu.forms_selected_count", "%zu form(s) selected."), selectedPatchForms.size());
-        if (selectedPatchForms.empty()) {
+        const auto selectedCount =
+            patchSourceMode == 0 ? selectedPatchForms.size() : selectedExternalPatchForms.size();
+        ImGui::Text(Configuration::GetLoc("menu.forms_selected_count", "%zu form(s) selected."), selectedCount);
+        if (selectedCount == 0) {
             ImGui::BeginDisabled();
         }
         if (ImGui::Button(Configuration::GetLoc("menu.create_patch", "Create patch"))) {
-            for (const auto& editorId : selectedPatchForms) {
-                const auto found = std::ranges::find_if(forms, [&editorId](const DynamicForms::DynamicForm& form) {
-                    return form.editorId == editorId;
-                });
-                if (found != forms.end()) {
-                    MarkFormAsPatchInWorkingPackage(*found);
+            std::size_t createdCount = 0;
+            if (patchSourceMode == 0) {
+                for (const auto& editorId : selectedPatchForms) {
+                    const auto found = std::ranges::find_if(forms, [&editorId](const DynamicForms::DynamicForm& form) {
+                        return !form.externalPatch && form.editorId == editorId;
+                    });
+                    if (found != forms.end()) {
+                        MarkFormAsPatchInWorkingPackage(*found);
+                        ++createdCount;
+                    }
+                }
+            } else if (const auto selectedKind = FormKindFromFilterIndex(selectedPatchFilterKind)) {
+                const auto& candidates = ListManager::GetSingleton()->GetList(Manager::GetListTypeName(*selectedKind));
+                for (const auto& candidate : candidates) {
+                    const auto key = std::format("{}|{}", static_cast<int>(*selectedKind), candidate.normalizedFormID);
+                    if (!selectedExternalPatchForms.contains(key)) {
+                        continue;
+                    }
+                    DynamicForms::FormRef ref;
+                    ref.editorID = candidate.editorID;
+                    ref.formID = candidate.normalizedFormID;
+                    if (Manager::AddExternalPatch(ref, *selectedKind, ActiveWorkingPackageName())) {
+                        ++createdCount;
+                    }
                 }
             }
-            selectedPatchForms.clear();
-            ImGui::CloseCurrentPopup();
-            patched = true;
+
+            patchCreateMessage = std::format(
+                "{} / {} {}",
+                createdCount,
+                selectedCount,
+                Configuration::GetLoc("menu.external_patches_created", "patch draft(s) created."));
+            patched = createdCount > 0;
+            if (createdCount == selectedCount) {
+                selectedPatchForms.clear();
+                selectedExternalPatchForms.clear();
+                ImGui::CloseCurrentPopup();
+            }
         }
-        if (selectedPatchForms.empty()) {
+        if (selectedCount == 0) {
             ImGui::EndDisabled();
         }
         ImGui::SameLine();
         if (ImGui::Button(Configuration::GetLoc("menu.cancel", "Cancel"))) {
             selectedPatchForms.clear();
+            selectedExternalPatchForms.clear();
             ImGui::CloseCurrentPopup();
+        }
+        if (!patchCreateMessage.empty()) {
+            ImGui::TextColored(patched ? SUCCESS_COLOR : ERROR_COLOR, "%s", patchCreateMessage.c_str());
         }
 
         ImGui::EndPopup();
@@ -3458,6 +4666,7 @@ namespace {
         } else if (form.kind == FK::VolumetricLighting) {
             constexpr std::array labels{ "Intensity", "Custom color contribution", "Color red", "Color green", "Color blue", "Density contribution", "Density size", "Wind speed", "Falling speed", "Phase contribution" }; changed |= inputFloatArray("volumetric", edited.volumetricLightingData, labels);
         } else if (form.kind == FK::Sound) {
+            DrawSoundPreviewControls(index, form);
             changed |= DrawFormReferencePicker("Sound descriptor", "SoundDescriptor", edited.legacySoundDescriptor);
         } else if (form.kind == FK::ActorValueInfo) {
             changed |= InputString("Name", edited.fullName); changed |= InputString("Description", edited.description, 520.0F); changed |= InputString("Icon path", edited.inventoryIcon, 520.0F); changed |= InputString("Abbreviation", edited.actorValueAbbreviation); constexpr std::array types{ "Attribute", "Skill", "AI Temperament", "Damage Resistance", "Limb Condition", "Status", "Miscellaneous" }; int type = static_cast<int>(std::min(edited.actorValueType, 6u)); SetStableComboWidth(types, 240.0F); if (ImGui::Combo("Actor value type", &type, types.data(), static_cast<int>(types.size()))) { edited.actorValueType = type; changed = true; } constexpr std::array avFlags{ "Hostile Effects Scale With Difficulty", "Special Stat Clamps Nonzero", "Clamp As Special Stat", "Clamp As Skill", "Can Have Modifiers", "Dynamic Base Plus Current", "Base Computed From Actor", "Enumeration", "Inverted", "Base Computed From Race", "Cannot Be Altered By Scripts", "Base Always Zero", "Base Always One", "Base Always One Hundred", "Cache Current Value", "Cache Maximum Value", "Protected By God Mode", "Display Effect Magnitude x100" }; constexpr std::array<std::uint32_t, avFlags.size()> avBits{ 1u << 1, 1u << 2, 1u << 3, 1u << 4, 1u << 5, 1u << 6, 1u << 7, 1u << 8, 1u << 9, 1u << 11, 1u << 14, 1u << 15, 1u << 16, 1u << 17, 1u << 18, 1u << 19, 1u << 20, 1u << 21 }; for (std::size_t i = 0; i < avFlags.size(); ++i) changed |= FlagCheckbox(avFlags[i], edited.actorValueFlags, avBits[i]); if ((edited.actorValueFlags & (1u << 8)) != 0) { changed |= InputString("Enum name", edited.actorValueEnumName); for (std::size_t i = 0; i < edited.actorValueEnumValues.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= InputString("Enum value", edited.actorValueEnumValues[i]); if (ImGui::SmallButton("Remove enum value")) { edited.actorValueEnumValues.erase(edited.actorValueEnumValues.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (edited.actorValueEnumValues.size() < 10 && ImGui::Button("Add enum value")) { edited.actorValueEnumValues.emplace_back(); changed = true; } } changed |= ImGui::Checkbox("Has skill data", &edited.actorValueHasSkillData); if (edited.actorValueHasSkillData) { constexpr std::array skillLabels{ "Use multiplier", "Offset multiplier", "Improve multiplier", "Improve offset" }; changed |= inputFloatArray("av-skill", edited.actorValueSkillData, skillLabels); }
@@ -4655,12 +5864,72 @@ namespace {
 
     bool DrawPerkConditions(std::vector<DynamicForms::PerkCondition>& conditions);
 
+    void DrawSoundPreviewControls(const std::size_t index, const DynamicForms::DynamicForm& form) {
+        if (ImGui::Button(Configuration::GetLoc("menu.play_sound_universal", "Play universal"))) {
+            if (Manager::PlaySoundPreview(index)) {
+                lastTestActionSucceeded = true;
+                testActionMessage = std::format(
+                    "{} {}",
+                    form.editorId,
+                    Configuration::GetLoc("menu.sound_preview_universal_playing", "universal sound preview requested."));
+            } else {
+                lastTestActionSucceeded = false;
+                testActionMessage = std::format(
+                    "{} {}",
+                    Configuration::GetLoc("menu.sound_preview_failed", "Could not play sound preview:"),
+                    form.editorId);
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button(Configuration::GetLoc("menu.play_sound_on_player", "Play on player"))) {
+            if (Manager::PlaySoundPreviewOnPlayer(index)) {
+                lastTestActionSucceeded = true;
+                testActionMessage = std::format(
+                    "{} {}",
+                    form.editorId,
+                    Configuration::GetLoc("menu.sound_preview_player_playing", "sound preview playing on player."));
+            } else {
+                lastTestActionSucceeded = false;
+                testActionMessage = std::format(
+                    "{} {}",
+                    Configuration::GetLoc("menu.sound_preview_failed", "Could not play sound preview:"),
+                    form.editorId);
+            }
+        }
+
+        ImGui::SameLine();
+        const bool isPlaying = Manager::IsSoundPreviewPlaying(form.editorId);
+        if (!isPlaying) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(Configuration::GetLoc("menu.stop_sound", "Stop sound"))) {
+            if (Manager::StopSoundPreview()) {
+                lastTestActionSucceeded = true;
+                testActionMessage = std::format(
+                    "{} {}",
+                    form.editorId,
+                    Configuration::GetLoc("menu.sound_preview_stopped", "sound preview stopped."));
+            } else {
+                lastTestActionSucceeded = false;
+                testActionMessage = std::format(
+                    "{} {}",
+                    Configuration::GetLoc("menu.sound_preview_stop_failed", "Could not stop sound preview:"),
+                    form.editorId);
+            }
+        }
+        if (!isPlaying) {
+            ImGui::EndDisabled();
+        }
+    }
+
     bool RenderSoundDescriptorEditor(std::size_t index, DynamicForms::DynamicForm& form) {
         bool changed = false;
         auto edited = form;
 
         if (ImGui::BeginTabBar("##soundDescriptorTabs")) {
             if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
+                DrawSoundPreviewControls(index, form);
                 changed |= DrawStringListEditor("Sound files", edited.soundFiles, "Add sound file", "File");
                 changed |= DrawFormReferencePicker("Category", "SoundCategory", edited.category);
                 changed |= DrawFormReferencePicker("Alternate sound", "SoundDescriptor", edited.alternateSound);
@@ -6368,13 +7637,26 @@ namespace {
             const auto& form = forms[static_cast<std::size_t>(pendingDeleteIndex)];
             ImGui::Text("%s", Configuration::GetLoc("menu.delete_confirm", "Are you sure you want to delete this form?"));
             ImGui::Text("%s", form.editorId.c_str());
-            ImGui::Text("%s: %u:%06X", Configuration::GetLoc("menu.dpf_slot", "DPF slot"), form.pluginNumber, form.localId);
+            if (form.externalPatch) {
+                ImGui::Text(
+                    "%s: %s|%X",
+                    Configuration::GetLoc("menu.external_identity", "Plugin-local identity"),
+                    form.externalSourcePlugin.c_str(),
+                    form.externalLocalId);
+                ImGui::Text(
+                    "%s: %s",
+                    Configuration::GetLoc("menu.patch_package", "Patch package"),
+                    form.externalEditPackage.c_str());
+            } else {
+                ImGui::Text("%s: %u:%06X", Configuration::GetLoc("menu.dpf_slot", "DPF slot"), form.pluginNumber, form.localId);
+            }
 
-            if (ImGui::Button(Configuration::GetLoc("menu.delete", "Delete"))) {
-                const auto editorId = form.editorId;
+            if (ImGui::Button(form.externalPatch ?
+                    Configuration::GetLoc("menu.delete_patch_layer", "Delete patch layer") :
+                    Configuration::GetLoc("menu.delete", "Delete"))) {
+                const auto selectionKey = FormSelectionKey(form);
                 if (Manager::DeleteForm(static_cast<std::size_t>(pendingDeleteIndex))) {
-                    selectedDeleteForms.erase(editorId);
-                    selectedExportForms.erase(editorId);
+                    selectedDeleteForms.erase(selectionKey);
                     pendingDeleteIndex = -1;
                     requestDeletePopup = false;
                     deleteError.clear();
@@ -6426,7 +7708,7 @@ namespace {
             auto& forms = Manager::GetForms();
             std::vector<std::size_t> indices;
             for (std::size_t i = 0; i < forms.size(); ++i) {
-                if (selectedDeleteForms.contains(forms[i].editorId)) {
+                if (selectedDeleteForms.contains(FormSelectionKey(forms[i]))) {
                     indices.push_back(i);
                 }
             }
@@ -6440,9 +7722,6 @@ namespace {
             }
 
             if (ok) {
-                for (const auto& editorId : selectedDeleteForms) {
-                    selectedExportForms.erase(editorId);
-                }
                 selectedDeleteForms.clear();
                 deleteSelectionMode = false;
                 requestBatchDeletePopup = false;
@@ -6526,29 +7805,130 @@ namespace Configuration {
 
     void RenderExportMenu() {
         auto& forms = Manager::GetForms();
-        std::set<std::string> existingEditorIds;
-        for (const auto& form : forms) {
-            existingEditorIds.insert(form.editorId);
+
+        static_cast<void>(PackageComboItems(false));
+        std::error_code ec;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(Manager::PACKAGES_DIR, ec))
+        {
+            if (ec || !entry.is_directory()) {
+                continue;
+            }
+            const auto manifestPath = entry.path() / "manifest.json";
+            if (!std::filesystem::exists(manifestPath)) {
+                continue;
+            }
+            const auto displayName = ReadManifestString(
+                manifestPath,
+                "displayName",
+                entry.path().filename().string());
+            if (!displayName.empty() && !HasPreviewPackage(displayName)) {
+                previewPackages.push_back(displayName);
+            }
         }
-        for (auto it = selectedExportForms.begin(); it != selectedExportForms.end();) {
-            if (!existingEditorIds.contains(*it)) {
+
+        std::set<std::string> availablePackages;
+        for (const auto& package : previewPackages) {
+            const auto sourceDir = PackageSourceDirectory(package);
+            if (std::filesystem::exists(sourceDir / "manifest.json") &&
+                std::filesystem::exists(sourceDir / "package.db"))
+            {
+                availablePackages.insert(package);
+            }
+        }
+
+        std::set<std::string> validSelectionKeys;
+        for (const auto& package : availablePackages) {
+            for (const auto& form : forms) {
+                if (FormHasDatabaseRowInPackage(form, package)) {
+                    validSelectionKeys.insert(
+                        ExportSelectionKey(package, form));
+                }
+            }
+        }
+        for (auto it = selectedExportForms.begin();
+             it != selectedExportForms.end();)
+        {
+            if (!validSelectionKeys.contains(*it)) {
                 it = selectedExportForms.erase(it);
             } else {
                 ++it;
             }
         }
 
-        ImGui::Text("%s", Configuration::GetLoc("menu.export_package", "Export Package"));
+        ImGui::Text(
+            "%s",
+            Configuration::GetLoc(
+                "menu.export_bundle",
+                "Export bundle"));
         ImGui::TextDisabled("%s", Configuration::GetLoc("menu.export_zip_hint", "ZIP files are saved to Data/Viny Mods/Dynamic Forms Generator/Export."));
 
         ImGui::SetNextItemWidth(320.0F);
-        ImGui::InputText(Configuration::GetLoc("menu.package_name", "Package name"), exportPackageName.data(), exportPackageName.size());
+        ImGui::InputText(
+            Configuration::GetLoc(
+                "menu.archive_name",
+                "Archive name"),
+            exportArchiveName.data(),
+            exportArchiveName.size());
 
-        if (ImGui::Button(Configuration::GetLoc("menu.select_all", "Select all"))) {
-            selectedExportForms.clear();
-            for (const auto& form : forms) {
-                if (MatchesExportFilters(form)) {
-                    selectedExportForms.insert(form.editorId);
+        ImGui::SetNextItemWidth(280.0F);
+        ImGui::InputText(
+            Configuration::GetLoc(
+                "menu.filter_package_name",
+                "Package name"),
+            exportPackageFilter.data(),
+            exportPackageFilter.size());
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(300.0F);
+        ImGui::InputText(
+            Configuration::GetLoc(
+                "menu.filter_editor_id",
+                "EditorID"),
+            exportEditorIdFilter.data(),
+            exportEditorIdFilter.size());
+        DrawSearchableCombo(
+            Configuration::GetLoc(
+                "menu.filter_by_type",
+                "Filter by type"),
+            "export_type_filter",
+            exportKindFilter,
+            FILTER_KIND_ITEMS.data(),
+            static_cast<int>(FILTER_KIND_ITEMS.size()),
+            260.0F,
+            320.0F);
+
+        const auto packageVisible = [](const std::string_view package) {
+            const auto filter = ToLower(std::string(exportPackageFilter.data()));
+            return filter.empty() ||
+                ToLower(std::string(package)).find(filter) != std::string::npos;
+        };
+        const auto formVisible = [](const DynamicForms::DynamicForm& form) {
+            const auto kind = FormKindFromFilterIndex(exportKindFilter);
+            if (kind && form.kind != *kind) {
+                return false;
+            }
+            const auto filter =
+                ToLower(std::string(exportEditorIdFilter.data()));
+            return filter.empty() ||
+                ToLower(form.editorId).find(filter) != std::string::npos;
+        };
+
+        if (ImGui::Button(
+                Configuration::GetLoc(
+                    "menu.select_visible",
+                    "Select visible")))
+        {
+            for (const auto& package : availablePackages) {
+                if (!packageVisible(package)) {
+                    continue;
+                }
+                for (const auto& form : forms) {
+                    if (FormHasDatabaseRowInPackage(form, package) &&
+                        formVisible(form))
+                    {
+                        selectedExportForms.insert(
+                            ExportSelectionKey(package, form));
+                    }
                 }
             }
         }
@@ -6560,13 +7940,33 @@ namespace Configuration {
         if (selectedExportForms.empty()) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::Button(std::format("{} ({})", Configuration::GetLoc("menu.export_selected", "Export selected"), selectedExportForms.size()).c_str())) {
-            if (const auto zipPath = ExportSelectedFormsAsZip(exportPackageName.data(), selectedExportForms)) {
-                lastExportSucceeded = true;
-                exportMessage = std::format("{} {}", Configuration::GetLoc("menu.exported_to", "Exported to"), zipPath->string());
+        if (ImGui::Button(
+                std::format(
+                    "{} ({})",
+                    Configuration::GetLoc(
+                        "menu.export_selected",
+                        "Export selected"),
+                    selectedExportForms.size()).c_str()))
+        {
+            const auto result = ExportSelectedPackages(
+                exportArchiveName.data(),
+                selectedExportForms);
+            lastExportSucceeded =
+                !result.files.empty() && result.failures.empty();
+            if (lastExportSucceeded) {
+                exportMessage = std::format(
+                    "{} {}",
+                    Configuration::GetLoc(
+                        "menu.exported_to",
+                        "Exported to"),
+                    result.files.front().string());
             } else {
-                lastExportSucceeded = false;
-                exportMessage = Configuration::GetLoc("menu.export_selected_failed", "Could not export selected forms. Check the log.");
+                exportMessage = Configuration::GetLoc(
+                    "menu.export_selected_failed",
+                    "Could not export selected forms. Check the log.");
+            }
+            for (const auto& failure : result.failures) {
+                logger::error("Export: {}.", failure);
             }
         }
         if (selectedExportForms.empty()) {
@@ -6578,46 +7978,166 @@ namespace Configuration {
         }
 
         ImGui::Separator();
-        DrawSearchableCombo(
-            Configuration::GetLoc("menu.filter_by_type", "Filter by type"),
-            "export_type_filter",
-            selectedExportFilterKind,
-            FILTER_KIND_ITEMS.data(),
-            static_cast<int>(FILTER_KIND_ITEMS.size()),
-            220.0F,
-            300.0F);
-        ImGui::SetNextItemWidth(280.0F);
-        ImGui::InputText(Configuration::GetLoc("menu.filter_editor_id", "Filter EditorID"), exportFilterEditorIdBuffer.data(), exportFilterEditorIdBuffer.size());
-
-        std::size_t visibleCount = 0;
-        for (const auto& form : forms) {
-            if (MatchesExportFilters(form)) {
-                ++visibleCount;
-            }
-        }
-        ImGui::TextDisabled(Configuration::GetLoc("menu.visible_total", "Visible: %zu / Total: %zu"), visibleCount, forms.size());
-
-        ImGui::BeginChild("##exportFormsList", { 0.0F, 560.0F }, true);
-        for (const auto& form : forms) {
-            if (!MatchesExportFilters(form)) {
+        ImGui::BeginChild("##exportPackageList", { 0.0F, 600.0F }, true);
+        for (const auto& package : availablePackages) {
+            if (!packageVisible(package)) {
                 continue;
             }
-            ImGui::PushID(form.editorId.c_str());
-            bool selected = selectedExportForms.contains(form.editorId);
-            if (ImGui::Checkbox("##exportSelect", &selected)) {
-                if (selected) {
-                    selectedExportForms.insert(form.editorId);
+
+            std::map<
+                DynamicForms::FormKind,
+                std::vector<const DynamicForms::DynamicForm*>>
+                rowsByKind;
+            std::vector<const DynamicForms::DynamicForm*> allRows;
+            for (const auto& form : forms) {
+                if (!FormHasDatabaseRowInPackage(form, package)) {
+                    continue;
+                }
+                allRows.push_back(std::addressof(form));
+                if (formVisible(form)) {
+                    rowsByKind[form.kind].push_back(
+                        std::addressof(form));
+                }
+            }
+            if (allRows.empty() ||
+                (rowsByKind.empty() &&
+                 (exportKindFilter != 0 ||
+                  exportEditorIdFilter[0] != '\0')))
+            {
+                continue;
+            }
+
+            ImGui::PushID(package.c_str());
+            const auto selectedCount =
+                static_cast<std::size_t>(std::ranges::count_if(
+                    allRows,
+                    [&package](
+                        const DynamicForms::DynamicForm* form) {
+                        return selectedExportForms.contains(
+                            ExportSelectionKey(package, *form));
+                    }));
+            bool packageSelected =
+                selectedCount == allRows.size();
+            if (ImGui::Checkbox(
+                    "##exportPackageSelect",
+                    &packageSelected))
+            {
+                if (packageSelected) {
+                    for (const auto* form : allRows) {
+                        selectedExportForms.insert(
+                            ExportSelectionKey(package, *form));
+                    }
                 } else {
-                    selectedExportForms.erase(form.editorId);
+                    for (const auto* form : allRows) {
+                        selectedExportForms.erase(
+                            ExportSelectionKey(package, *form));
+                    }
                 }
             }
             ImGui::SameLine();
-            ImGui::Text("%s", form.editorId.c_str());
-            ImGui::SameLine(360.0F);
-            ImGui::TextColored({ 0.7F, 0.8F, 1.0F, 1.0F }, "%s", FormKindLabel(form.kind));
-            if (form.dirty) {
-                ImGui::SameLine();
-                ImGui::TextColored(DIRTY_COLOR, "%s", Configuration::GetLoc("menu.need_save", "Need save"));
+            const auto header = std::format(
+                "{} ({}/{})###export_package_{}",
+                package,
+                selectedCount,
+                allRows.size(),
+                package);
+            const bool open = ImGui::CollapsingHeader(header.c_str());
+
+            if (open) {
+                ImGui::Indent();
+                auto& options = GetExportPackageOptions(package);
+                ImGui::SetNextItemWidth(120.0F);
+                ImGui::InputText(
+                    Configuration::GetLoc("menu.package_version", "Version"),
+                    options.version.data(),
+                    options.version.size());
+
+                for (const auto& [kind, rows] : rowsByKind) {
+                    std::size_t selectedKindCount = 0;
+                    for (const auto* form : rows) {
+                        if (selectedExportForms.contains(
+                                ExportSelectionKey(
+                                    package,
+                                    *form)))
+                        {
+                            ++selectedKindCount;
+                        }
+                    }
+                    const auto kindHeader = std::format(
+                        "{} ({}/{})###export_kind_{}",
+                        FormKindLabel(kind),
+                        selectedKindCount,
+                        rows.size(),
+                        static_cast<int>(kind));
+                    ImGui::PushID(
+                        static_cast<int>(kind));
+                    bool kindSelected =
+                        selectedKindCount == rows.size();
+                    if (ImGui::Checkbox(
+                            "##exportKindSelect",
+                            &kindSelected))
+                    {
+                        for (const auto* form : rows) {
+                            const auto key =
+                                ExportSelectionKey(
+                                    package,
+                                    *form);
+                            if (kindSelected) {
+                                selectedExportForms.insert(key);
+                            } else {
+                                selectedExportForms.erase(key);
+                            }
+                        }
+                    }
+                    ImGui::SameLine();
+                    const bool kindOpen =
+                        ImGui::CollapsingHeader(
+                            kindHeader.c_str());
+                    if (!kindOpen)
+                    {
+                        ImGui::PopID();
+                        continue;
+                    }
+                    ImGui::Indent();
+                    for (const auto* form : rows) {
+                        ImGui::PushID(
+                            ExportFormIdentity(*form).c_str());
+                        bool selected =
+                            selectedExportForms.contains(
+                                ExportSelectionKey(
+                                    package,
+                                    *form));
+                        if (ImGui::Checkbox(
+                                "##exportFormSelect",
+                                &selected))
+                        {
+                            const auto key =
+                                ExportSelectionKey(
+                                    package,
+                                    *form);
+                            if (selected) {
+                                selectedExportForms.insert(key);
+                            } else {
+                                selectedExportForms.erase(key);
+                            }
+                        }
+                        ImGui::SameLine();
+                        if (form->externalPatch) {
+                            ImGui::Text(
+                                "%s [%s|%X]",
+                                form->editorId.c_str(),
+                                form->externalSourcePlugin.c_str(),
+                                form->externalLocalId);
+                        } else {
+                            ImGui::TextUnformatted(
+                                form->editorId.c_str());
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::Unindent();
+                    ImGui::PopID();
+                }
+                ImGui::Unindent();
             }
             ImGui::PopID();
         }
@@ -6721,7 +8241,7 @@ namespace Configuration {
         auto& forms = Manager::GetForms();
         std::set<std::string> existingEditorIds;
         for (const auto& form : forms) {
-            existingEditorIds.insert(form.editorId);
+            existingEditorIds.insert(FormSelectionKey(form));
         }
         for (auto it = selectedDeleteForms.begin(); it != selectedDeleteForms.end();) {
             if (!existingEditorIds.contains(*it)) {

@@ -7,6 +7,10 @@ var
   ExportedCount: Integer;
   SkippedCount: Integer;
   ExportedRecords: TStringList;
+  PendingRecords: TList;
+  PendingRecordKeys: TStringList;
+  ExportedFormMap: TStringList;
+  ExportedEditorIDs: TStringList;
 
   // NPC flag diagnostics.
   // Leave DebugNpcEditorID empty to log every selected NPC.
@@ -104,16 +108,9 @@ begin
 end;
 
 function SafeInt(const s: string; fallback: string): string;
-begin
-  Result := Trim(s);
-  if Result = '' then
-    Result := fallback;
-end;
-
-function JsonInt(const s: string; fallback: string): string;
 var
   i: Integer;
-  c: string;
+  c, sign: string;
 begin
   Result := Trim(s);
   if Result = '' then begin
@@ -130,6 +127,30 @@ begin
       Exit;
     end;
   end;
+
+  if Result = '-' then begin
+    Result := fallback;
+    Exit;
+  end;
+
+  sign := '';
+  if Copy(Result, 1, 1) = '-' then begin
+    sign := '-';
+    Result := Copy(Result, 2, Length(Result) - 1);
+  end;
+
+  while (Length(Result) > 1) and (Copy(Result, 1, 1) = '0') do
+    Result := Copy(Result, 2, Length(Result) - 1);
+
+  if Result = '0' then
+    sign := '';
+  Result := sign + Result;
+end;
+
+function JsonInt(const s: string; fallback: string): string;
+begin
+  // Kept as the explicit JSON helper for readability at call sites.
+  Result := SafeInt(s, fallback);
 end;
 
 function IsSafeFileChar(const c: string): Boolean;
@@ -242,6 +263,36 @@ begin
     Exit;
   end;
   Result := GetFileName(GetFile(e)) + '|' + IntToHex(FixedFormID(e), 1);
+end;
+
+function RecordKeyOf(e: IInterface): string;
+begin
+  if not Assigned(e) then begin
+    Result := '';
+    Exit;
+  end;
+  Result := UpperCase(Signature(e)) + ':' + IntToHex(GetLoadOrderFormID(e), 8);
+end;
+
+function ExportEditorIDForRecord(e: IInterface): string;
+var
+  recordKey: string;
+  mapIndex: Integer;
+begin
+  Result := '';
+  if not Assigned(e) then
+    Exit;
+
+  recordKey := RecordKeyOf(e);
+  if Assigned(ExportedFormMap) then begin
+    mapIndex := ExportedFormMap.IndexOfName(recordKey);
+    if mapIndex >= 0 then begin
+      Result := ExportedFormMap.ValueFromIndex[mapIndex];
+      Exit;
+    end;
+  end;
+
+  Result := SafeFileName(EditorIDOf(e));
 end;
 
 function LinkedByPath(e: IInterface; path: string): IInterface;
@@ -690,13 +741,48 @@ begin
     NpcFlagEnabled(e, secondName);
 end;
 
+function FormRefText(r: IInterface): string;
+var
+  recordKey: string;
+  mapIndex: Integer;
+begin
+  if not Assigned(r) then begin
+    Result := '';
+    Exit;
+  end;
+
+  recordKey := RecordKeyOf(r);
+  if Assigned(ExportedFormMap) then begin
+    mapIndex := ExportedFormMap.IndexOfName(recordKey);
+    if mapIndex >= 0 then begin
+      Result := ExportedFormMap.ValueFromIndex[mapIndex];
+      Exit;
+    end;
+  end;
+
+  Result := PluginLocalID(r);
+end;
+
 function FormRefJson(r: IInterface): string;
 var
-  edid, fid: string;
+  edid, fid, recordKey: string;
+  mapIndex: Integer;
 begin
   if not Assigned(r) then begin
     Result := '{}';
     Exit;
+  end;
+
+  recordKey := RecordKeyOf(r);
+  if Assigned(ExportedFormMap) then begin
+    mapIndex := ExportedFormMap.IndexOfName(recordKey);
+    if mapIndex >= 0 then begin
+      // Editor ID only is intentional: do not fall back to the source plugin when
+      // the referenced record is part of this DFG export batch.
+      edid := ExportedFormMap.ValueFromIndex[mapIndex];
+      Result := '{ "editorID": ' + JStr(edid) + ' }';
+      Exit;
+    end;
   end;
 
   edid := EditorIDOf(r);
@@ -731,7 +817,7 @@ end;
 
 function ColorChannel(e: IInterface; path: string; fallback: string): string;
 begin
-  Result := SafeInt(GetText(e, path), fallback);
+  Result := JsonInt(GetText(e, path), fallback);
 end;
 
 function FormKindForSignature(sig: string): string;
@@ -1281,7 +1367,7 @@ begin
 
   linked := FirstLinkedInElement(parameterElement);
   if Assigned(linked) then begin
-    Result := PluginLocalID(linked);
+    Result := FormRefText(linked);
     Exit;
   end;
 
@@ -1351,7 +1437,7 @@ begin
   comparisonValue := '0.0';
 
   if useGlobalComparison and Assigned(comparisonLinked) then
-    comparisonGlobal := PluginLocalID(comparisonLinked)
+    comparisonGlobal := FormRefText(comparisonLinked)
   else if Assigned(comparisonElement) then
     comparisonValue := JsonFloat(GetEditValue(comparisonElement), '0.0');
 
@@ -1366,7 +1452,7 @@ begin
   if Assigned(referenceElement) then
     referenceLinked := FirstLinkedInElement(referenceElement);
   if Assigned(referenceLinked) then
-    runOnRef := PluginLocalID(referenceLinked);
+    runOnRef := FormRefText(referenceLinked);
 
   dataId := NativeIntOfElement(param3Element, -1);
   if dataId < 0 then
@@ -2406,39 +2492,43 @@ procedure AddLightFields(sl: TStringList; e: IInterface);
 begin
   AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name'));
   AddStringKV(sl, '  ', 'modelPath', GetText(e, 'Model\MODL - Model FileName'));
-  AddKV(sl, '  ', 'lightTime', SafeInt(GetText(e, 'DATA - DATA\Time'), '-1'));
-  AddKV(sl, '  ', 'lightRadius', SafeInt(GetText(e, 'DATA - DATA\Radius'), '0'));
-  AddKV(sl, '  ', 'red', ColorChannel(e, 'DATA - DATA\Color\Red', '255'));
-  AddKV(sl, '  ', 'green', ColorChannel(e, 'DATA - DATA\Color\Green', '255'));
-  AddKV(sl, '  ', 'blue', ColorChannel(e, 'DATA - DATA\Color\Blue', '255'));
-  AddKV(sl, '  ', 'alpha', '0');
-  AddKV(sl, '  ', 'flags', '0');
-  AddKV(sl, '  ', 'falloffExponent', SafeFloat(GetText(e, 'DATA - DATA\Falloff Exponent'), '1.0'));
-  AddKV(sl, '  ', 'fov', SafeFloat(GetText(e, 'DATA - DATA\FOV'), '90.0'));
-  AddKV(sl, '  ', 'nearClip', SafeFloat(GetText(e, 'DATA - DATA\Near Clip'), '0.0'));
-  AddKV(sl, '  ', 'fade', SafeFloat(GetText(e, 'FNAM - Fade value'), '1.0'));
+  AddKV(sl, '  ', 'lightTime', JsonInt(StructFieldText(e, 'DATA - Data', 'Time', '-1'), '-1'));
+  AddKV(sl, '  ', 'lightRadius', JsonInt(StructFieldText(e, 'DATA - Data', 'Radius', '16'), '16'));
+  AddKV(sl, '  ', 'red', ColorChannel(e, 'DATA - Data\Color\Red', '255'));
+  AddKV(sl, '  ', 'green', ColorChannel(e, 'DATA - Data\Color\Green', '255'));
+  AddKV(sl, '  ', 'blue', ColorChannel(e, 'DATA - Data\Color\Blue', '255'));
+  AddKV(sl, '  ', 'alpha', ElementIntegerText(FirstElementByPath(e, 'DATA - Data\Color\Unused', 'DATA - Data\Color\Alpha', '', ''), '0'));
+  AddKV(sl, '  ', 'flags', ElementIntegerText(StructFieldElement(e, 'DATA - Data', 'Flags'), '0'));
+  AddKV(sl, '  ', 'falloffExponent', JsonFloat(StructFieldText(e, 'DATA - Data', 'Falloff Exponent', '1.0'), '1.0'));
+  AddKV(sl, '  ', 'fov', JsonFloat(StructFieldText(e, 'DATA - Data', 'FOV', '90.0'), '90.0'));
+  AddKV(sl, '  ', 'nearClip', JsonFloat(StructFieldText(e, 'DATA - Data', 'Near Clip', '1.0'), '1.0'));
+  AddKV(sl, '  ', 'flickerPeriod', JsonFloat(StructFieldText(e, 'DATA - Data', 'Period', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'flickerIntensityAmplitude', JsonFloat(StructFieldText(e, 'DATA - Data', 'Intensity Amplitude', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'flickerMovementAmplitude', JsonFloat(StructFieldText(e, 'DATA - Data', 'Movement Amplitude', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'fade', JsonFloat(FirstText(e, 'FNAM - Fade Value', 'FNAM - Fade value', 'FNAM'), '1.0'));
   AddFormRefKV(sl, 'sound', LinkedByPath(e, 'SNAM - Sound'));
-  AddFormRefKV(sl, 'lensFlare', LinkedByPath(e, 'LNAM - Lens'));
+  AddFormRefKV(sl, 'lensFlare', LinkedByPath(e, 'LNAM - Lens Flare'));
 end;
 
 procedure AddExplosionFields(sl: TStringList; e: IInterface);
 begin
   AddStringKV(sl, '  ', 'fullName', GetText(e, 'FULL - Name'));
   AddStringKV(sl, '  ', 'modelPath', GetText(e, 'Model\MODL - Model FileName'));
-  AddFormRefKV(sl, 'light', LinkedByPath(e, 'DATA - Data\Light'));
-  AddFormRefKV(sl, 'sound1', LinkedByPath(e, 'DATA - Data\Sound 1'));
-  AddFormRefKV(sl, 'sound2', LinkedByPath(e, 'DATA - Data\Sound 2'));
-  AddFormRefKV(sl, 'impactDataSet', LinkedByPath(e, 'DATA - Data\Impact Data Set'));
-  AddFormRefKV(sl, 'spawnProjectile', LinkedByPath(e, 'DATA - Data\Spawn Projectile'));
+  AddFormRefKV(sl, 'light', StructFieldLinked(e, 'DATA - Data', 'Light'));
+  AddFormRefKV(sl, 'sound1', StructFieldLinked(e, 'DATA - Data', 'Sound 1'));
+  AddFormRefKV(sl, 'sound2', StructFieldLinked(e, 'DATA - Data', 'Sound 2'));
+  AddFormRefKV(sl, 'impactDataSet', StructFieldLinked(e, 'DATA - Data', 'Impact Data Set'));
+  AddFormRefKV(sl, 'placedObject', StructFieldLinked(e, 'DATA - Data', 'Placed Object'));
+  AddFormRefKV(sl, 'spawnProjectile', StructFieldLinked(e, 'DATA - Data', 'Spawn Projectile'));
   AddFormRefKV(sl, 'objectEffect', LinkedByPath(e, 'EITM - Object Effect'));
   AddFormRefKV(sl, 'imageSpaceModifier', LinkedByPath(e, 'MNAM - Image Space Modifier'));
-  AddKV(sl, '  ', 'force', SafeFloat(GetText(e, 'DATA - Data\Force'), '0.0'));
-  AddKV(sl, '  ', 'damage', SafeFloat(GetText(e, 'DATA - Data\Damage'), '0.0'));
-  AddKV(sl, '  ', 'radius', SafeFloat(GetText(e, 'DATA - Data\Radius'), '0.0'));
-  AddKV(sl, '  ', 'imageSpaceRadius', SafeFloat(GetText(e, 'DATA - Data\IS Radius'), '0.0'));
-  AddKV(sl, '  ', 'verticalOffsetMult', SafeFloat(GetText(e, 'DATA - Data\Vertical Offset Mult'), '0.0'));
-  AddKV(sl, '  ', 'flags', '0');
-  AddKV(sl, '  ', 'soundLevel', '0');
+  AddKV(sl, '  ', 'force', JsonFloat(StructFieldText(e, 'DATA - Data', 'Force', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'damage', JsonFloat(StructFieldText(e, 'DATA - Data', 'Damage', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'radius', JsonFloat(StructFieldText(e, 'DATA - Data', 'Radius', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'imageSpaceRadius', JsonFloat(StructFieldText(e, 'DATA - Data', 'IS Radius', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'verticalOffsetMult', JsonFloat(StructFieldText(e, 'DATA - Data', 'Vertical Offset Mult', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'flags', ElementIntegerText(StructFieldElement(e, 'DATA - Data', 'Flags'), '0'));
+  AddKV(sl, '  ', 'soundLevel', ElementIntegerText(StructFieldElement(e, 'DATA - Data', 'Sound Level'), '0'));
 end;
 
 procedure AddActivatorFields(sl: TStringList; e: IInterface);
@@ -2448,7 +2538,7 @@ begin
   AddFormRefKV(sl, 'soundLoop', LinkedByPath(e, 'SNAM - Sound - Looping'));
   AddFormRefKV(sl, 'soundActivate', LinkedByPath(e, 'VNAM - Sound - Activation'));
   AddFormRefKV(sl, 'waterType', LinkedByPath(e, 'WNAM - Water Type'));
-  AddKV(sl, '  ', 'flags', '0');
+  AddKV(sl, '  ', 'flags', ElementIntegerText(FirstElementByPath(e, 'FNAM - Flags', 'FNAM', 'Flags', ''), '0'));
 end;
 
 procedure AddEffectShaderColor(sl: TStringList; prefix: string; e: IInterface; path: string);
@@ -2466,8 +2556,8 @@ begin
   AddStringKV(sl, '  ', 'holesTexture', GetText(e, 'NAM7 - Holes Texture'));
   AddStringKV(sl, '  ', 'membranePaletteTexture', GetText(e, 'NAM8 - Membrane Palette Texture'));
   AddStringKV(sl, '  ', 'particlePaletteTexture', GetText(e, 'NAM9 - Particle Palette Texture'));
-  AddFormRefKV(sl, 'ambientSound', LinkedByPath(e, 'DATA - Data\Ambient Sound'));
-  AddKV(sl, '  ', 'flags', '0');
+  AddFormRefKV(sl, 'ambientSound', StructFieldLinked(e, 'DATA', 'Ambient Sound'));
+  AddKV(sl, '  ', 'flags', ElementIntegerText(StructFieldElement(e, 'DATA', 'Flags'), '0'));
   AddEffectShaderColor(sl, 'fillColor1', e, 'DATA - Data\Fill Texture Effect Color Key 1');
   AddEffectShaderColor(sl, 'fillColor2', e, 'DATA - Data\Fill Texture Effect Color Key 2');
   AddEffectShaderColor(sl, 'fillColor3', e, 'DATA - Data\Fill Texture Effect Color Key 3');
@@ -4040,21 +4130,43 @@ begin
 end;
 
 procedure AddSoundDescriptorFields(sl: TStringList; e: IInterface);
+var
+  sounds, row: IInterface;
+  i: Integer;
+  soundPath: string;
 begin
-  sl.Add('  "soundFiles": [],');
-  AddKV(sl, '  ', 'frequencyShift', SafeInt(GetText(e, 'BNAM - Values\% Frequency Shift'), '0'));
-  AddKV(sl, '  ', 'frequencyVariance', SafeInt(GetText(e, 'BNAM - Values\% Frequency Variance'), '0'));
-  AddKV(sl, '  ', 'priority', SafeInt(GetText(e, 'BNAM - Values\Priority'), '128'));
-  AddKV(sl, '  ', 'dbVariance', SafeInt(GetText(e, 'BNAM - Values\db Variance'), '0'));
-  AddKV(sl, '  ', 'staticAttenuation', SafeFloat(GetText(e, 'BNAM - Values\Static Attenuation (db)'), '0.0'));
-  AddKV(sl, '  ', 'looping', '0');
-  AddKV(sl, '  ', 'rumbleSendValue', SafeInt(GetText(e, 'LNAM - Values\Rumble Send Value'), '0'));
-  sl.Add('  "conditions": [],');
+  AddFormRefKV(sl, 'category', LinkedByPath(e, 'GNAM - Category'));
+  AddFormRefKV(sl, 'alternateSound', LinkedByPath(e, 'SNAM - Alternate Sound For'));
+  AddFormRefKV(sl, 'outputModel', LinkedByPath(e, 'ONAM - Output Model'));
+
+  sl.Add('  "soundFiles": [');
+  sounds := ElementByPath(e, 'Sounds');
+  if Assigned(sounds) then
+    for i := 0 to ElementCount(sounds) - 1 do begin
+      row := ElementByIndex(sounds, i);
+      soundPath := FirstText(row, 'ANAM - Sound', 'Sound', 'ANAM');
+      if soundPath = '' then
+        soundPath := GetEditValue(row);
+      if soundPath <> '' then
+        sl.Add('    ' + JStr(soundPath) + ',');
+    end;
+  RemoveTrailingComma(sl);
+  sl.Add('  ],');
+
+  AddKV(sl, '  ', 'frequencyShift', JsonInt(StructFieldText(e, 'BNAM - Values', '% Frequency Shift', '0'), '0'));
+  AddKV(sl, '  ', 'frequencyVariance', JsonInt(StructFieldText(e, 'BNAM - Values', '% Frequency Variance', '0'), '0'));
+  AddKV(sl, '  ', 'priority', JsonInt(StructFieldText(e, 'BNAM - Values', 'Priority', '128'), '128'));
+  AddKV(sl, '  ', 'dbVariance', JsonInt(StructFieldText(e, 'BNAM - Values', 'db Variance', '0'), '0'));
+  AddKV(sl, '  ', 'staticAttenuation', JsonFloat(StructFieldText(e, 'BNAM - Values', 'Static Attenuation (db)', '0.0'), '0.0'));
+  AddKV(sl, '  ', 'looping', ElementIntegerText(StructFieldElement(e, 'LNAM - Values', 'Looping'), '0'));
+  AddKV(sl, '  ', 'rumbleSendValue', ElementIntegerText(StructFieldElement(e, 'LNAM - Values', 'Rumble Send Value'), '0'));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
 end;
 
 function ExportRecord(e: IInterface): Boolean;
 var
   sl: TStringList;
+  parsedJson: TJsonBaseObject;
   sig, kind, edid, fn, recordKey: string;
 begin
   Result := False;
@@ -4066,7 +4178,7 @@ begin
     Exit;
   end;
 
-  recordKey := sig + ':' + IntToHex(GetLoadOrderFormID(e), 8);
+  recordKey := RecordKeyOf(e);
   if Assigned(ExportedRecords) and (ExportedRecords.IndexOf(recordKey) >= 0) then begin
     Result := True;
     Exit;
@@ -4074,7 +4186,7 @@ begin
   if Assigned(ExportedRecords) then
     ExportedRecords.Add(recordKey);
 
-  edid := SafeFileName(EditorIDOf(e));
+  edid := ExportEditorIDForRecord(e);
   fn := OutputDir + edid + '.json';
 
   sl := TStringList.Create;
@@ -4198,6 +4310,20 @@ begin
 
     RemoveTrailingComma(sl);
     sl.Add('}');
+
+    parsedJson := nil;
+    try
+      parsedJson := TJsonBaseObject.Parse(sl.Text);
+    except
+      parsedJson := nil;
+    end;
+    if not Assigned(parsedJson) then begin
+      AddMessage('[DFG] Invalid generated JSON for ' + sig + ' ' + Name(e) + '. File was not written.');
+      Inc(SkippedCount);
+      Exit;
+    end;
+    parsedJson.Free;
+
     sl.SaveToFile(fn);
     AddMessage('[DFG] Exported ' + sig + ' ' + Name(e) + ' -> ' + fn);
     Inc(ExportedCount);
@@ -4205,6 +4331,55 @@ begin
   finally
     sl.Free;
   end;
+end;
+
+function QueueRecord(e: IInterface): Boolean;
+var
+  sig, kind, recordKey, baseEditorID, exportEditorID: string;
+  duplicateIndex: Integer;
+begin
+  Result := False;
+  if not Assigned(e) then
+    Exit;
+
+  sig := Signature(e);
+  kind := FormKindForSignature(sig);
+  if kind = '' then begin
+    AddMessage('[DFG] Unsupported signature ' + sig + ': ' + Name(e));
+    Inc(SkippedCount);
+    Exit;
+  end;
+
+  recordKey := RecordKeyOf(e);
+  if Assigned(PendingRecordKeys) and (PendingRecordKeys.IndexOf(recordKey) >= 0) then begin
+    Result := True;
+    Exit;
+  end;
+
+  baseEditorID := SafeFileName(EditorIDOf(e));
+  exportEditorID := baseEditorID;
+  if Assigned(ExportedEditorIDs) and
+     (ExportedEditorIDs.IndexOf(UpperCase(exportEditorID)) >= 0) then begin
+    exportEditorID := baseEditorID + '_' + sig;
+    duplicateIndex := 2;
+    while ExportedEditorIDs.IndexOf(UpperCase(exportEditorID)) >= 0 do begin
+      exportEditorID := baseEditorID + '_' + sig + '_' + IntToStr(duplicateIndex);
+      Inc(duplicateIndex);
+    end;
+    AddMessage('[DFG] Duplicate export editor ID "' + baseEditorID +
+      '"; using "' + exportEditorID + '" for ' + Name(e));
+  end;
+
+  if Assigned(PendingRecordKeys) then
+    PendingRecordKeys.Add(recordKey);
+  if Assigned(ExportedEditorIDs) then
+    ExportedEditorIDs.Add(UpperCase(exportEditorID));
+  if Assigned(ExportedFormMap) then
+    ExportedFormMap.Add(recordKey + '=' + exportEditorID);
+  if Assigned(PendingRecords) then
+    PendingRecords.Add(e);
+
+  Result := True;
 end;
 
 function Initialize: Integer;
@@ -4235,6 +4410,17 @@ begin
   ExportedRecords.Sorted := True;
   ExportedRecords.Duplicates := dupIgnore;
 
+  PendingRecords := TList.Create;
+  PendingRecordKeys := TStringList.Create;
+  PendingRecordKeys.Sorted := True;
+  PendingRecordKeys.Duplicates := dupIgnore;
+  ExportedFormMap := TStringList.Create;
+  ExportedFormMap.Sorted := True;
+  ExportedFormMap.Duplicates := dupIgnore;
+  ExportedEditorIDs := TStringList.Create;
+  ExportedEditorIDs.Sorted := True;
+  ExportedEditorIDs.Duplicates := dupIgnore;
+
   packageFolder := SafePackageFolder(PackageName);
   PackageDir := wbDataPath + 'Viny Mods\Dynamic Forms Generator\Packages\' + packageFolder + '\';
   OutputDir := PackageDir + 'imports\';
@@ -4260,23 +4446,34 @@ begin
     Exit;
   end;
 
-  if ExportRecord(e) and (Signature(e) = 'DIAL') then begin
+  if QueueRecord(e) and (Signature(e) = 'DIAL') then begin
     groupNode := ChildGroup(e);
     if Assigned(groupNode) then
       for i := 0 to ElementCount(groupNode) - 1 do begin
         child := ElementByIndex(groupNode, i);
         if Signature(child) = 'INFO' then
-          ExportRecord(child);
+          QueueRecord(child);
       end;
   end;
   Result := 0;
 end;
 
 function Finalize: Integer;
+var
+  i: Integer;
 begin
+  // Process only collects records. Serializing here guarantees that every
+  // selected form is registered in ExportedFormMap before references are written.
+  if Assigned(PendingRecords) then
+    for i := 0 to PendingRecords.Count - 1 do
+      ExportRecord(ObjectToElement(PendingRecords[i]));
+
   AddMessage('[DFG] Done. Exported: ' + IntToStr(ExportedCount) + ', skipped: ' + IntToStr(SkippedCount));
-  if Assigned(ExportedRecords) then
-    ExportedRecords.Free;
+  if Assigned(ExportedRecords) then ExportedRecords.Free;
+  if Assigned(PendingRecords) then PendingRecords.Free;
+  if Assigned(PendingRecordKeys) then PendingRecordKeys.Free;
+  if Assigned(ExportedFormMap) then ExportedFormMap.Free;
+  if Assigned(ExportedEditorIDs) then ExportedEditorIDs.Free;
   Result := 0;
 end;
 

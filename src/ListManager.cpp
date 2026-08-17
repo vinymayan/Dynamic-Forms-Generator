@@ -4,6 +4,56 @@
 #include "logger.h"
 
 namespace FormUtil {
+    std::string GetEditorIDSafe(const RE::TESForm* form) {
+        if (!form) {
+            return {};
+        }
+
+        const char* editorID = nullptr;
+        switch (form->GetFormType()) {
+        case RE::FormType::Keyword:
+        case RE::FormType::LocationRefType:
+        case RE::FormType::Action:
+        case RE::FormType::MenuIcon:
+        case RE::FormType::Global:
+        case RE::FormType::HeadPart:
+        case RE::FormType::Race:
+        case RE::FormType::Sound:
+        case RE::FormType::Script:
+        case RE::FormType::Navigation:
+        case RE::FormType::Cell:
+        case RE::FormType::WorldSpace:
+        case RE::FormType::Land:
+        case RE::FormType::NavMesh:
+        case RE::FormType::Dialogue:
+        case RE::FormType::Quest:
+        case RE::FormType::Idle:
+        case RE::FormType::AnimatedObject:
+        case RE::FormType::ImageAdapter:
+        case RE::FormType::VoiceType:
+        case RE::FormType::Ragdoll:
+        case RE::FormType::DefaultObject:
+        case RE::FormType::MusicType:
+        case RE::FormType::StoryManagerBranchNode:
+        case RE::FormType::StoryManagerQuestNode:
+        case RE::FormType::StoryManagerEventNode:
+            editorID = form->GetFormEditorID();
+            break;
+        default: {
+            using GetFormEditorID = const char* (*)(std::uint32_t);
+            static const auto tweaks = GetModuleHandleW(L"po3_Tweaks");
+            static const auto getFormEditorID = tweaks ?
+                reinterpret_cast<GetFormEditorID>(GetProcAddress(tweaks, "GetFormEditorID")) : nullptr;
+            if (getFormEditorID) {
+                editorID = getFormEditorID(form->GetFormID());
+            }
+            break;
+        }
+        }
+
+        return editorID && *editorID != '\0' ? std::string(editorID) : std::string{};
+    }
+
     const RE::TESFile* GetMasterFile(RE::TESForm* ref) {
         if (!ref) return nullptr;
 
@@ -137,7 +187,7 @@ namespace {
             return;
         }
 
-        const auto editorID = clib_util::editorID::get_editorID(perk);
+        const auto editorID = FormUtil::GetEditorIDSafe(perk);
         logger::info("[NPC Senses perk FE000809] Found perk. EditorID='{}' FormID={:08X} entries={}",
             editorID,
             perk->GetFormID(),
@@ -627,7 +677,7 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
             info.pluginName = ToUTF8(currentPlugin);
             info.normalizedFormID = FormUtil::NormalizeFormID(rawForm);
 
-            std::string rawEditorID = clib_util::editorID::get_editorID(rawForm);
+            std::string rawEditorID = FormUtil::GetEditorIDSafe(rawForm);
             info.editorID = ToUTF8(rawEditorID);
 
             std::string rawName = "";

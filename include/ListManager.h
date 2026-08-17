@@ -5,12 +5,12 @@
 #include <vector>
 #include <map>
 #include <functional>
-#include "ClibUtil/editorID.hpp"
 #include <mutex>
 #include <unordered_set>
 
 namespace FormUtil {
     const RE::TESFile* GetMasterFile(RE::TESForm* ref);
+    std::string GetEditorIDSafe(const RE::TESForm* form);
     std::string NormalizeFormID(RE::TESForm* form);
     RE::FormID FormIDFromString(const std::string& str);
 }
