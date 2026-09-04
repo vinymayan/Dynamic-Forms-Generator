@@ -157,6 +157,22 @@ namespace {
     const ImGui::ImVec4 LOCAL_COLOR{ 0.55F, 0.9F, 0.65F, 1.0F };
     constexpr std::array FORM_KIND_ITEMS{ "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node", "Faction", "Idle Animation", "Material Object", "Message", "Land Texture", "Sound Output Model", "Lens Flare", "Debris", "Image Space Modifier", "Camera Shot", "Camera Path", "Talking Activator", "Furniture", "Weather", "Climate", "Location", "Music Type", "Music Track", "Body Part Data", "Volumetric Lighting", "Sound", "Actor Value Information", "Dialogue Branch", "Dialogue Topic", "Dialogue Info", "Quest", "Scene", "Story Manager Branch", "Story Manager Quest", "Story Manager Event", "Package", "Race" };
     constexpr std::array FILTER_KIND_ITEMS{ "All", "Global", "Keyword", "Form List", "Equip Slot", "Voice Type", "Outfit", "Armor Type", "Armor", "Book", "Misc Item", "Key", "Soul Gem", "Material Type", "Ammo", "Weapon", "Alchemy Item", "Ingredient", "Spell", "Color", "Art Object", "Perk", "Head Part", "Sound Description", "Light", "Explosion", "Activator", "Effect Shader", "NPC", "Magic Effect", "Enchantment", "Scroll", "Projectile", "Texture Set", "Hazard", "Impact Data", "Reference Effect", "Dual Cast Data", "Static", "Movable Static", "Door", "Combat Style", "Sound Category", "Class", "Flora", "Tree", "Constructible Object", "Container", "Impact Data Set", "Collision Layer", "Footstep", "Footstep Set", "Reverb Parameters", "Acoustic Space", "Apparatus", "Static Collection", "Grass", "Idle Marker", "Encounter Zone", "Relationship", "Association Type", "Movement Type", "Word of Power", "Water", "Image Space", "Lighting Template", "Shout", "Leveled Item", "Leveled NPC", "Leveled Spell", "Location Ref Type", "Action", "Menu Icon", "Eyes", "Note", "Animated Object", "Load Screen", "Shader Particle Geometry", "Addon Node", "Faction", "Idle Animation", "Material Object", "Message", "Land Texture", "Sound Output Model", "Lens Flare", "Debris", "Image Space Modifier", "Camera Shot", "Camera Path", "Talking Activator", "Furniture", "Weather", "Climate", "Location", "Music Type", "Music Track", "Body Part Data", "Volumetric Lighting", "Sound", "Actor Value Information", "Dialogue Branch", "Dialogue Topic", "Dialogue Info", "Quest", "Scene", "Story Manager Branch", "Story Manager Quest", "Story Manager Event", "Package", "Race" };
+
+    const char* LocalizedFormTypeLabel(const char* label) {
+        if (std::strcmp(label, "Armor Type") == 0) {
+            return Configuration::GetLoc("menu.form_kind_armor_type", "Armor Type (ARMA)");
+        }
+        return label;
+    }
+
+    template <std::size_t Size>
+    std::array<const char*, Size> LocalizedFormTypeItems(const std::array<const char*, Size>& items) {
+        auto localized = items;
+        for (auto& item : localized) {
+            item = LocalizedFormTypeLabel(item);
+        }
+        return localized;
+    }
     constexpr std::array FORM_KIND_TREE_ORDER{
         DynamicForms::FormKind::Global,
         DynamicForms::FormKind::Keyword,
@@ -655,7 +671,7 @@ namespace {
         case DynamicForms::FormKind::Outfit:
             return "Outfit";
         case DynamicForms::FormKind::ArmorType:
-            return "Armor Type";
+            return Configuration::GetLoc("menu.form_kind_armor_type", "Armor Type (ARMA)");
         case DynamicForms::FormKind::Armor:
             return "Armor";
         case DynamicForms::FormKind::Book:
@@ -2622,6 +2638,20 @@ namespace {
     bool DrawFormRefListEditor(const char* label, const char* typeName, std::vector<DynamicForms::FormRef>& values);
     bool FlagCheckbox(const char* label, std::uint32_t& flags, std::uint32_t bit);
 
+    void DrawCopyContextMenu(const std::string& value, const char* popupId = nullptr) {
+        if (value.empty() || !ImGui::BeginPopupContextItem(popupId)) {
+            return;
+        }
+
+        ImGui::TextDisabled("%s", Configuration::GetLoc("menu.value_to_copy", "Value to copy"));
+        ImGui::TextWrapped("%s", value.c_str());
+        ImGui::Separator();
+        if (ImGui::MenuItem(Configuration::GetLoc("common.copy", "Copy"))) {
+            ImGui::SetClipboardText(value.c_str());
+        }
+        ImGui::EndPopup();
+    }
+
     void RenderFormTreeItem(const std::size_t index, DynamicForms::DynamicForm& form) {
         ImGui::PushID(static_cast<int>(index));
         const bool isDirty = Manager::IsDirty(index);
@@ -2662,7 +2692,9 @@ namespace {
             headerLabel += std::format("_{}_{}", form.externalSourcePlugin, form.externalLocalId);
         }
 
-        if (ImGui::CollapsingHeader(headerLabel.c_str())) {
+        const bool headerOpen = ImGui::CollapsingHeader(headerLabel.c_str());
+        DrawCopyContextMenu(form.editorId);
+        if (headerOpen) {
             if (form.externalPatch || isDirty || HasAnyPatchLayer(form)) {
                 ImGui::PopStyleColor();
             }
@@ -2872,10 +2904,11 @@ namespace {
 
     bool DrawCreateFormKindPicker() {
         bool changed = false;
+        const auto formKindItems = LocalizedFormTypeItems(FORM_KIND_ITEMS);
         const int safeIndex = std::clamp(selectedFormKind, 0, static_cast<int>(FORM_KIND_ITEMS.size()) - 1);
         SetAvailableComboWidth(300.0F);
         SetFixedComboPopupWidth(380.0F);
-        if (ImGui::BeginCombo("##formType", FORM_KIND_ITEMS[static_cast<std::size_t>(safeIndex)])) {
+        if (ImGui::BeginCombo("##formType", formKindItems[static_cast<std::size_t>(safeIndex)])) {
             std::array<char, 256> filterBuffer{};
             strcpy_s(filterBuffer.data(), filterBuffer.size(), createFormKindFilter.c_str());
             ImGui::SetNextItemWidth(-1.0F);
@@ -2888,7 +2921,7 @@ namespace {
             std::vector<int> rows;
             rows.reserve(FORM_KIND_ITEMS.size());
             for (std::size_t i = 0; i < FORM_KIND_ITEMS.size(); ++i) {
-                if (search.empty() || ToLower(FORM_KIND_ITEMS[i]).find(search) != std::string::npos) {
+                if (search.empty() || ToLower(formKindItems[i]).find(search) != std::string::npos) {
                     rows.push_back(static_cast<int>(i));
                 }
             }
@@ -2898,7 +2931,7 @@ namespace {
             while (ImGui::ImGuiListClipperManager::Step(clipper)) {
                 for (int rowIndex = clipper->DisplayStart; rowIndex < clipper->DisplayEnd; ++rowIndex) {
                     const int kindIndex = rows[static_cast<std::size_t>(rowIndex)];
-                    if (ImGui::Selectable(FORM_KIND_ITEMS[static_cast<std::size_t>(kindIndex)], selectedFormKind == kindIndex)) {
+                    if (ImGui::Selectable(formKindItems[static_cast<std::size_t>(kindIndex)], selectedFormKind == kindIndex)) {
                         selectedFormKind = kindIndex;
                         createFormKindFilter.clear();
                         changed = true;
@@ -3196,12 +3229,13 @@ namespace {
             patchFilterPackageNameBuffer.data(),
             patchFilterPackageNameBuffer.size());
         ImGui::SameLine();
+        const auto patchKindItems = LocalizedFormTypeItems(FILTER_KIND_ITEMS);
         if (DrawSearchableCombo(
                 Configuration::GetLoc("menu.filter_type", "Type"),
                 "patch_type_filter",
                 selectedPatchFilterKind,
-                FILTER_KIND_ITEMS.data(),
-                static_cast<int>(FILTER_KIND_ITEMS.size()),
+                patchKindItems.data(),
+                static_cast<int>(patchKindItems.size()),
                 180.0F,
                 300.0F) &&
             patchSourceMode == 1)
@@ -3485,6 +3519,51 @@ namespace {
         return ref;
     }
 
+    std::string ResolvedReferenceDisplay(const DynamicForms::FormRef& ref) {
+        const auto originalDisplay = ref.Display();
+        if (ref.empty() || !ref.editorID.empty() || ref.formID.empty()) {
+            return originalDisplay;
+        }
+
+        // Older exports and some manually-authored packages store only the
+        // plugin-local FormID. Resolve the live form solely for presentation so
+        // the UI can show its EditorID without rewriting the package data.
+        auto* listManager = ListManager::GetSingleton();
+        const auto generation = listManager->GetGeneration();
+        static std::uint64_t cachedGeneration = std::numeric_limits<std::uint64_t>::max();
+        static std::unordered_map<std::string, std::string> displayCache;
+        if (cachedGeneration != generation) {
+            displayCache.clear();
+            cachedGeneration = generation;
+        }
+
+        if (const auto cached = displayCache.find(ref.formID); cached != displayCache.end()) {
+            return cached->second;
+        }
+
+        try {
+            const auto formID = FormUtil::FormIDFromString(ref.formID);
+            if (formID != 0) {
+                if (const auto* form = RE::TESForm::LookupByID(formID)) {
+                    const auto editorID = FormUtil::GetEditorIDSafe(form);
+                    if (!editorID.empty()) {
+                        auto resolved = ref;
+                        resolved.editorID = editorID;
+                        auto display = resolved.Display();
+                        displayCache.emplace(ref.formID, display);
+                        return display;
+                    }
+                }
+            }
+        }
+        catch (const std::exception&) {
+            // Keep malformed or currently unavailable references visible in
+            // their original representation instead of breaking the editor.
+        }
+
+        return originalDisplay;
+    }
+
     std::string ReferenceLabel(const InternalFormInfo& info) {
         const auto ref = MakeFormRef(info);
         auto label = ref.empty() ? PieceLabel(info) : ref.Display();
@@ -3587,6 +3666,7 @@ namespace {
                     edited.outfitPieces.push_back(row.ref);
                     changed = true;
                 }
+                DrawCopyContextMenu(row.ref.Display());
             }
         }
         ImGui::ImGuiListClipperManager::End(clipper);
@@ -3644,11 +3724,15 @@ namespace {
     bool DrawFormReferencePicker(const char* label, const char* typeName, DynamicForms::FormRef& value) {
         bool changed = false;
         auto& filter = formPickerFilters[std::string(label) + ":" + typeName];
-        auto previewText = value.empty() ? std::string(Configuration::GetLoc("common.select", "Select")) : value.Display();
+        auto previewText = value.empty() ? std::string(Configuration::GetLoc("common.select", "Select")) : ResolvedReferenceDisplay(value);
 
         SetAvailableComboWidth(360.0F);
         SetFixedComboPopupWidth(360.0F);
-        if (ImGui::BeginCombo(label, previewText.c_str())) {
+        const bool pickerOpen = ImGui::BeginCombo(label, previewText.c_str());
+        if (!pickerOpen && !value.empty()) {
+            DrawCopyContextMenu(previewText);
+        }
+        if (pickerOpen) {
             const bool listsReady = ListManager::GetSingleton()->IsPopulated();
             char searchBuf[256]{};
             strcpy_s(searchBuf, filter.c_str());
@@ -3680,6 +3764,7 @@ namespace {
                             filter.clear();
                             changed = true;
                         }
+                        DrawCopyContextMenu(row.ref.Display());
                     }
                 }
                 ImGui::ImGuiListClipperManager::End(clipper);
@@ -3703,11 +3788,15 @@ namespace {
     bool DrawAnyFormReferencePicker(const char* label, DynamicForms::FormRef& value) {
         bool changed = false;
         auto& filter = formPickerFilters[std::string(label) + ":Any"];
-        auto previewText = value.empty() ? std::string(Configuration::GetLoc("common.select", "Select")) : value.Display();
+        auto previewText = value.empty() ? std::string(Configuration::GetLoc("common.select", "Select")) : ResolvedReferenceDisplay(value);
 
         SetAvailableComboWidth(360.0F);
         SetFixedComboPopupWidth(520.0F);
-        if (ImGui::BeginCombo(label, previewText.c_str())) {
+        const bool pickerOpen = ImGui::BeginCombo(label, previewText.c_str());
+        if (!pickerOpen && !value.empty()) {
+            DrawCopyContextMenu(previewText);
+        }
+        if (pickerOpen) {
             const bool listsReady = ListManager::GetSingleton()->IsPopulated();
             char searchBuf[256]{};
             strcpy_s(searchBuf, filter.c_str());
@@ -3719,7 +3808,7 @@ namespace {
             typeIndex = std::clamp(typeIndex, 0, static_cast<int>(FORM_REFERENCE_PICKER_TYPES.size()) - 1);
             std::array<const char*, FORM_REFERENCE_PICKER_TYPES.size()> typeLabels{};
             for (std::size_t i = 0; i < FORM_REFERENCE_PICKER_TYPES.size(); ++i) {
-                typeLabels[i] = FORM_REFERENCE_PICKER_TYPES[i].label;
+                typeLabels[i] = LocalizedFormTypeLabel(FORM_REFERENCE_PICKER_TYPES[i].label);
             }
             DrawSearchableCombo(
                 Configuration::GetLoc("menu.filter_type", "Type"),
@@ -3756,6 +3845,7 @@ namespace {
                             filter.clear();
                             changed = true;
                         }
+                        DrawCopyContextMenu(row.ref.Display());
                     }
                 }
                 ImGui::ImGuiListClipperManager::End(clipper);
@@ -3773,7 +3863,9 @@ namespace {
         ImGui::Text("%s: %zu", label, refs.size());
         for (std::size_t i = 0; i < refs.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
-            ImGui::Text("%s", refs[i].Display().c_str());
+            const auto display = ResolvedReferenceDisplay(refs[i]);
+            ImGui::Text("%s", display.c_str());
+            DrawCopyContextMenu(display, "##copyReferenceContext");
             ImGui::SameLine();
             if (ImGui::SmallButton(Configuration::GetLoc("menu.remove", "Remove"))) {
                 refs.erase(refs.begin() + static_cast<std::ptrdiff_t>(i));
@@ -5751,8 +5843,9 @@ namespace {
         ImGui::Text("%s: %zu", Configuration::GetLoc("menu.outfit_piece_count", "Pieces"), edited.outfitPieces.size());
         for (std::size_t i = 0; i < edited.outfitPieces.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
-            const auto display = edited.outfitPieces[i].Display();
+            const auto display = ResolvedReferenceDisplay(edited.outfitPieces[i]);
             ImGui::Text("%s", display.c_str());
+            DrawCopyContextMenu(display, "##copyOutfitPieceContext");
             ImGui::SameLine();
             if (ImGui::SmallButton(Configuration::GetLoc("menu.remove", "Remove"))) {
                 edited.outfitPieces.erase(edited.outfitPieces.begin() + static_cast<std::ptrdiff_t>(i));
@@ -7086,7 +7179,10 @@ namespace {
                 changed |= DrawFormReferencePicker("Block bash impact data set", "ImpactDataSet", edited.blockBashImpactDataSet);
                 changed |= DrawFormReferencePicker("Alt block material type", "MaterialType", edited.altBlockMaterialType);
                 ImGui::Separator();
-                changed |= DrawFormRefListEditor("Armor type", "ArmorType", edited.armorAddons);
+                changed |= DrawFormRefListEditor(
+                    Configuration::GetLoc("menu.armor_type_arma", "Armor type (ARMA)"),
+                    "ArmorType",
+                    edited.armorAddons);
                 changed |= DrawFormRefListEditor("Keyword", "Keyword", edited.keywords);
                 ImGui::EndTabItem();
             }
@@ -7342,8 +7438,9 @@ namespace {
                 ImGui::Text(Configuration::GetLoc("menu.extra_parts_u", "Extra parts: %zu"), edited.extraParts.size());
                 for (std::size_t i = 0; i < edited.extraParts.size(); ++i) {
                     ImGui::PushID(static_cast<int>(i));
-                    const auto display = edited.extraParts[i].Display();
+                    const auto display = ResolvedReferenceDisplay(edited.extraParts[i]);
                     ImGui::Text("%s", display.c_str());
+                    DrawCopyContextMenu(display, "##copyExtraPartContext");
                     ImGui::SameLine();
                     if (ImGui::SmallButton(Configuration::GetLoc("menu.remove", "Remove"))) {
                         edited.extraParts.erase(edited.extraParts.begin() + static_cast<std::ptrdiff_t>(i));
@@ -7369,9 +7466,9 @@ namespace {
                 ImGui::Text(Configuration::GetLoc("menu.racemorph", "raceMorph=%s"), edited.raceMorphPath.c_str());
                 ImGui::Text(Configuration::GetLoc("menu.defaultmorph", "defaultMorph=%s"), edited.defaultMorphPath.c_str());
                 ImGui::Text(Configuration::GetLoc("menu.chargenmorph", "chargenMorph=%s"), edited.chargenMorphPath.c_str());
-                ImGui::Text(Configuration::GetLoc("menu.textureset", "textureSet=%s"), edited.textureSet.Display().c_str());
-                ImGui::Text(Configuration::GetLoc("menu.color", "color=%s"), edited.colorForm.Display().c_str());
-                ImGui::Text(Configuration::GetLoc("menu.validraces", "validRaces=%s"), edited.validRaces.Display().c_str());
+                ImGui::Text(Configuration::GetLoc("menu.textureset", "textureSet=%s"), ResolvedReferenceDisplay(edited.textureSet).c_str());
+                ImGui::Text(Configuration::GetLoc("menu.color", "color=%s"), ResolvedReferenceDisplay(edited.colorForm).c_str());
+                ImGui::Text(Configuration::GetLoc("menu.validraces", "validRaces=%s"), ResolvedReferenceDisplay(edited.validRaces).c_str());
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -7596,7 +7693,7 @@ namespace {
             }
 
             if (ImGui::BeginTabItem(Configuration::GetLoc("menu.debug", "Debug"))) {
-                ImGui::Text(Configuration::GetLoc("menu.race", "race=%s"), edited.race.Display().c_str());
+                ImGui::Text(Configuration::GetLoc("menu.race", "race=%s"), ResolvedReferenceDisplay(edited.race).c_str());
                 ImGui::Text(Configuration::GetLoc("menu.headparts_u_tintlayers_u_factions_u_perks_u_spells_u", "headParts=%zu tintLayers=%zu factions=%zu perks=%zu spells=%zu"),
                     edited.headParts.size(),
                     edited.tintLayers.size(),
@@ -7886,14 +7983,15 @@ namespace Configuration {
                 "EditorID"),
             exportEditorIdFilter.data(),
             exportEditorIdFilter.size());
+        const auto exportKindItems = LocalizedFormTypeItems(FILTER_KIND_ITEMS);
         DrawSearchableCombo(
             Configuration::GetLoc(
                 "menu.filter_by_type",
                 "Filter by type"),
             "export_type_filter",
             exportKindFilter,
-            FILTER_KIND_ITEMS.data(),
-            static_cast<int>(FILTER_KIND_ITEMS.size()),
+            exportKindItems.data(),
+            static_cast<int>(exportKindItems.size()),
             260.0F,
             320.0F);
 
@@ -8211,6 +8309,7 @@ namespace Configuration {
         }
 
         auto filterItems = PackageComboItems(true);
+        const auto savedFormKindItems = LocalizedFormTypeItems(FILTER_KIND_ITEMS);
         DrawSearchableCombo(
             Configuration::GetLoc("menu.package_filter", "Package"),
             "saved_forms_package_filter",
@@ -8223,8 +8322,8 @@ namespace Configuration {
             Configuration::GetLoc("menu.filter_type", "Type"),
             "saved_forms_type_filter",
             selectedFilterKind,
-            FILTER_KIND_ITEMS.data(),
-            static_cast<int>(FILTER_KIND_ITEMS.size()),
+            savedFormKindItems.data(),
+            static_cast<int>(savedFormKindItems.size()),
             220.0F,
             320.0F);
 

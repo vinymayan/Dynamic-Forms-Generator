@@ -3469,7 +3469,7 @@ begin
   AddKV(sl, '  ', 'idleAnimationGroupSelection', SafeInt(StructFieldText(e, 'DATA', 'Animation Group Section', '0'), '0'));
   AddKV(sl, '  ', 'idleReplayDelay', SafeInt(StructFieldText(e, 'DATA', 'Replay Delay', '0'), '0'));
   AddFormRefKV(sl, 'idleParent', StructFieldLinked(e, 'ANAM', 'Parent'));
-  AddFormRefKV(sl, 'idlePrevious', StructFieldLinked(e, 'ANAM', 'Previous Sibling'));
+  AddFormRefKV(sl, 'idlePrevious', StructFieldLinked(e, 'ANAM', 'Previous'));
   AddStringKV(sl, '  ', 'idleAnimationFile', FirstText(e, 'DNAM - FileName', 'DNAM', ''));
   AddStringKV(sl, '  ', 'idleAnimationEvent', FirstText(e, 'ENAM - Animation Event', 'ENAM', ''));
   AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');

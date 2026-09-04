@@ -633,7 +633,32 @@ void ListManager::PopulateList(const std::string& a_typeName, std::function<bool
     // unsafe for forms whose TESForm base is not at offset zero (for example,
     // BGSMovableStatic). Keep the original TESForm pointer and let As<T>() apply
     // the required multiple-inheritance adjustment.
-    const auto& forms = dataHandler->GetFormArray(T::FORMTYPE);
+    std::vector<RE::TESForm*> forms;
+
+    if constexpr (std::is_same_v<T, RE::TESIdleForm>) {
+        // TESDataHandler's typed IDLE array is empty on supported Skyrim
+        // runtimes even though the records are present in the global form map.
+        // Dynamic IDLEs created by DPF do get added to that array, which made
+        // the picker misleadingly show only DPF-created records. Snapshot all
+        // loaded IDLE forms while holding the map's read lock, then build the
+        // UI entries after releasing it.
+        const auto& [allForms, allFormsLock] = RE::TESForm::GetAllForms();
+        [[maybe_unused]] const RE::BSReadLockGuard lock{ allFormsLock };
+        if (allForms) {
+            forms.reserve(allForms->size());
+            for (const auto& entry : *allForms) {
+                auto* rawForm = entry.second;
+                if (rawForm && rawForm->GetFormType() == T::FORMTYPE) {
+                    forms.push_back(rawForm);
+                }
+            }
+        }
+    }
+    else {
+        const auto& typedForms = dataHandler->GetFormArray(T::FORMTYPE);
+        forms.assign(typedForms.begin(), typedForms.end());
+    }
+
     list.reserve(forms.size());
 
     for (auto* rawForm : forms) {

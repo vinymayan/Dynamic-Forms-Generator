@@ -1,7 +1,8 @@
 {
   "common": {
     "none": "None",
-    "select": "Select"
+    "select": "Select",
+    "copy": "Copy"
   },
   "menu": {
     "activator_fnam_flags": "Activator FNAM flags",
@@ -266,6 +267,10 @@
     "visual": "Visual",
     "water_type": "Water Type",
     "winning_plugin": "Winning plugin",
-    "weight": "Weight"
+    "weight": "Weight",
+    "armor_type": "Armor type",
+    "armor_type_arma": "Armor type (ARMA)",
+    "form_kind_armor_type": "Armor Type (ARMA)",
+    "value_to_copy": "Value to copy"
   }
 }
