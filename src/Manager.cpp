@@ -54,6 +54,7 @@ namespace {
     GetResponseListFn originalGetResponseList{ nullptr };
     constexpr const char* UPDATED_EVENT = "DynamicFormsGeneratorUpdated";
     constexpr const char* LOADED_EVENT = "DynamicFormsGeneratorLoaded";
+    constexpr std::uint8_t ARMA_WEIGHT_SLIDER_ENABLED = 0x02u;
     constexpr std::array CONDITION_KIND_NAMES{
         "Raw",
         "GetGlobalValue",
@@ -71,6 +72,36 @@ namespace {
             normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
         }
         return normalized;
+    }
+
+    void SetArmaWeightSlider(std::int8_t& value, const bool enabled) {
+        auto flags = static_cast<std::uint8_t>(value);
+        if (enabled) {
+            flags |= ARMA_WEIGHT_SLIDER_ENABLED;
+        } else {
+            flags &= static_cast<std::uint8_t>(~ARMA_WEIGHT_SLIDER_ENABLED);
+        }
+        value = static_cast<std::int8_t>(flags);
+    }
+
+    bool HasArmaWeightSlider(const std::int8_t value) {
+        return (static_cast<std::uint8_t>(value) & ARMA_WEIGHT_SLIDER_ENABLED) != 0;
+    }
+
+    template <class T>
+    void SetContainerAllowStolenItemsIfSupported(T& container, const bool allowStolenItems) {
+        if constexpr (requires(T& value) { value.allowStolenItems = allowStolenItems; }) {
+            container.allowStolenItems = allowStolenItems;
+        }
+    }
+
+    template <class T>
+    bool GetContainerAllowStolenItemsIfSupported(const T& container) {
+        if constexpr (requires(const T& value) { value.allowStolenItems; }) {
+            return static_cast<bool>(container.allowStolenItems);
+        } else {
+            return false;
+        }
     }
 
     void DispatchEvent(const char* eventName, const std::string_view strArg = {}, const float numArg = 0.0F) {
@@ -2442,7 +2473,7 @@ namespace {
         container->openSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.containerOpenSound);
         container->closeSound = ResolveAs<RE::BGSSoundDescriptorForm>(form.containerCloseSound);
         ApplyContainerEntries(static_cast<RE::TESContainer&>(*container), form.containerItems, form.editorId, true);
-        container->allowStolenItems = form.containerAllowStolenItems;
+        SetContainerAllowStolenItemsIfSupported(*container, form.containerAllowStolenItems);
         ApplyRecordFlags(*container, form.recordFlags, (1u << 15) | (1u << 16) | (1u << 25) | (1u << 26) | (1u << 27) | (1u << 30));
         logger::info("Configured container '{}' items={} flags={:02X}.", form.editorId, container->numContainerObjects, form.containerFlags);
         return true;
@@ -2544,6 +2575,8 @@ namespace {
         armorType->SetFormEditorID(form.editorId.c_str());
         armorType->race = ResolveAs<RE::TESRace>(form.race);
         ConfigureBipedObject(*armorType, form);
+        SetArmaWeightSlider(armorType->data.modelRange[RE::SEX::kMale], form.maleWeightSlider);
+        SetArmaWeightSlider(armorType->data.modelRange[RE::SEX::kFemale], form.femaleWeightSlider);
         SetModelIfPresent(armorType->bipedModels[RE::SEX::kMale], form.maleWorldModel);
         SetModelIfPresent(armorType->bipedModels[RE::SEX::kFemale], form.femaleWorldModel);
         SetModelIfPresent(armorType->bipedModel1stPersons[RE::SEX::kMale], form.maleFirstPersonModel);
@@ -4184,6 +4217,8 @@ namespace {
         target.race = RuntimeFormRef(source.race);
         target.bipedSlots = source.bipedModelData.bipedObjectSlots.underlying();
         target.armorType = source.bipedModelData.armorType.underlying();
+        target.maleWeightSlider = HasArmaWeightSlider(source.data.modelRange[RE::SEX::kMale]);
+        target.femaleWeightSlider = HasArmaWeightSlider(source.data.modelRange[RE::SEX::kFemale]);
         target.maleWorldModel = source.bipedModels[RE::SEX::kMale].GetModel();
         target.femaleWorldModel = source.bipedModels[RE::SEX::kFemale].GetModel();
         target.maleFirstPersonModel = source.bipedModel1stPersons[RE::SEX::kMale].GetModel();
@@ -4717,7 +4752,7 @@ namespace {
         case FK::Flora: { auto* value=source.As<RE::TESFlora>(); if(!value)return false; target.fullName=value->fullName.c_str(); target.modelPath=value->GetModel(); target.floraSoundLoop=RuntimeFormRef(value->soundLoop); target.floraSoundActivate=RuntimeFormRef(value->soundActivate); target.floraWaterType=RuntimeFormRef(value->waterForm); target.floraFlags=value->flags.underlying(); CaptureKeywords(*value,target.keywords); target.harvestSound=RuntimeFormRef(value->harvestSound); target.produceItem=RuntimeFormRef(value->produceItem); std::copy_n(value->produceChance,target.produceChance.size(),target.produceChance.begin()); return true; }
         case FK::Tree: { auto* value=source.As<RE::TESObjectTREE>(); if(!value)return false; target.fullName=value->fullName.c_str(); target.modelPath=value->GetModel(); std::copy_n(reinterpret_cast<const float*>(std::addressof(value->data)),target.treeAnimation.size(),target.treeAnimation.begin()); target.treeType=value->type.underlying(); target.harvestSound=RuntimeFormRef(value->harvestSound); target.produceItem=RuntimeFormRef(value->produceItem); std::copy_n(value->produceChance,target.produceChance.size(),target.produceChance.begin()); target.recordFlags=value->formFlags; return true; }
         case FK::ConstructibleObject: { auto* value=source.As<RE::BGSConstructibleObject>(); if(!value)return false; target.createdItem=RuntimeFormRef(value->createdItem); target.benchKeyword=RuntimeFormRef(value->benchKeyword); target.numConstructed=value->data.numConstructed; target.requiredItems.clear(); for(std::uint32_t i=0;i<value->requiredItems.numContainerObjects;++i){auto* item=value->requiredItems.containerObjects[i];if(item&&item->obj)target.requiredItems.push_back({RuntimeFormRef(item->obj),item->count});} CaptureConditions(value->conditions,target.conditions); return true; }
-        case FK::Container: { auto* value=source.As<RE::TESObjectCONT>(); if(!value)return false; target.fullName=value->fullName.c_str(); target.modelPath=value->GetModel(); target.itemWeight=value->weight; target.containerFlags=value->data.flags.underlying(); target.containerOpenSound=RuntimeFormRef(value->openSound); target.containerCloseSound=RuntimeFormRef(value->closeSound); target.containerAllowStolenItems=value->allowStolenItems; target.recordFlags=value->formFlags; target.containerItems.clear(); for(std::uint32_t i=0;i<value->numContainerObjects;++i){auto* item=value->containerObjects[i];if(!item||!item->obj)continue;DynamicForms::ContainerEntry e;e.item=RuntimeFormRef(item->obj);e.count=item->count;if(item->itemExtra){e.owner=RuntimeFormRef(item->itemExtra->owner);e.healthMult=item->itemExtra->healthMult;const auto bits=reinterpret_cast<std::uintptr_t>(item->itemExtra->conditional.global);if(bits>std::numeric_limits<std::uint32_t>::max())e.conditionGlobal=RuntimeFormRef(item->itemExtra->conditional.global);else e.requiredRank=item->itemExtra->conditional.rank;}target.containerItems.push_back(std::move(e));} return true; }
+        case FK::Container: { auto* value=source.As<RE::TESObjectCONT>(); if(!value)return false; target.fullName=value->fullName.c_str(); target.modelPath=value->GetModel(); target.itemWeight=value->weight; target.containerFlags=value->data.flags.underlying(); target.containerOpenSound=RuntimeFormRef(value->openSound); target.containerCloseSound=RuntimeFormRef(value->closeSound); target.containerAllowStolenItems=GetContainerAllowStolenItemsIfSupported(*value); target.recordFlags=value->formFlags; target.containerItems.clear(); for(std::uint32_t i=0;i<value->numContainerObjects;++i){auto* item=value->containerObjects[i];if(!item||!item->obj)continue;DynamicForms::ContainerEntry e;e.item=RuntimeFormRef(item->obj);e.count=item->count;if(item->itemExtra){e.owner=RuntimeFormRef(item->itemExtra->owner);e.healthMult=item->itemExtra->healthMult;const auto bits=reinterpret_cast<std::uintptr_t>(item->itemExtra->conditional.global);if(bits>std::numeric_limits<std::uint32_t>::max())e.conditionGlobal=RuntimeFormRef(item->itemExtra->conditional.global);else e.requiredRank=item->itemExtra->conditional.rank;}target.containerItems.push_back(std::move(e));} return true; }
         case FK::IdleMarker: { auto* value=source.As<RE::BGSIdleMarker>(); if(!value)return false; target.modelPath=value->GetModel(); auto& c=static_cast<RE::BGSIdleCollection&>(*value); target.idleFlags=c.idleFlags.underlying(); target.idleTimer=c.timerCheckForIdle; target.idleAnimations.clear(); for(std::uint32_t i=0;i<c.idleCount;++i)if(c.idles[i])target.idleAnimations.push_back(RuntimeFormRef(c.idles[i])); target.recordFlags=value->formFlags; return true; }
         case FK::EncounterZone: { auto* value = source.As<RE::BGSEncounterZone>(); if (!value) return false; target.encounterOwner = RuntimeFormRef(value->data.zoneOwner); target.encounterLocation = RuntimeFormRef(value->data.location); target.encounterOwnerRank = value->data.ownerRank; target.encounterMinLevel = value->data.minLevel; target.encounterMaxLevel = value->data.maxLevel; target.encounterFlags = value->data.flags.underlying(); return true; }
         case FK::Relationship: { auto* value = source.As<RE::BGSRelationship>(); if (!value) return false; target.relationshipNpc1 = RuntimeFormRef(value->npc1); target.relationshipNpc2 = RuntimeFormRef(value->npc2); target.relationshipAssociation = RuntimeFormRef(value->assocType); target.relationshipLevel = value->level.underlying(); target.relationshipFlags = value->flags.underlying(); return true; }
@@ -7177,6 +7212,12 @@ namespace {
         }
         out.bipedSlots = ReadUInt32(doc, "bipedSlots", out.bipedSlots);
         out.armorType = ReadUInt32(doc, "armorType", out.armorType);
+        if (doc.HasMember("maleWeightSlider") && doc["maleWeightSlider"].IsBool()) {
+            out.maleWeightSlider = doc["maleWeightSlider"].GetBool();
+        }
+        if (doc.HasMember("femaleWeightSlider") && doc["femaleWeightSlider"].IsBool()) {
+            out.femaleWeightSlider = doc["femaleWeightSlider"].GetBool();
+        }
         if (doc.HasMember("armorValue") && doc["armorValue"].IsInt()) {
             out.armorValue = doc["armorValue"].GetInt();
         }
@@ -10274,6 +10315,8 @@ namespace Manager {
             AddFormRef(doc, allocator, "race", form.race);
         }
         if (form.kind == DynamicForms::FormKind::ArmorType) {
+            doc.AddMember("maleWeightSlider", form.maleWeightSlider, allocator);
+            doc.AddMember("femaleWeightSlider", form.femaleWeightSlider, allocator);
             AddFormRef(doc, allocator, "maleSkinTexture", form.maleSkinTexture);
             AddFormRef(doc, allocator, "femaleSkinTexture", form.femaleSkinTexture);
             AddFormRef(doc, allocator, "maleSkinTextureSwapList", form.maleSkinTextureSwapList);

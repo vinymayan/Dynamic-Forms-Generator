@@ -271,6 +271,8 @@
     "armor_type": "Armor type",
     "armor_type_arma": "Armor type (ARMA)",
     "form_kind_armor_type": "Armor Type (ARMA)",
-    "value_to_copy": "Value to copy"
+    "value_to_copy": "Value to copy",
+    "weight_slider_male": "Weight Slider - Male",
+    "weight_slider_female": "Weight Slider - Female"
   }
 }

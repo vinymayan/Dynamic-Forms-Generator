@@ -7107,6 +7107,12 @@ namespace {
         if (ImGui::BeginTabBar("##armorTypeTabs")) {
             if (ImGui::BeginTabItem(Configuration::GetLoc("menu.data", "Data"))) {
                 changed |= DrawBipedDataEditor(edited);
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.weight_slider_male", "Weight Slider - Male"), &edited.maleWeightSlider)) {
+                    changed = true;
+                }
+                if (ImGui::Checkbox(Configuration::GetLoc("menu.weight_slider_female", "Weight Slider - Female"), &edited.femaleWeightSlider)) {
+                    changed = true;
+                }
                 changed |= DrawFormReferencePicker("Race", "Race", edited.race);
                 ImGui::EndTabItem();
             }

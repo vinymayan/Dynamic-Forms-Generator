@@ -468,6 +468,8 @@ namespace DynamicForms {
         std::vector<FormRef> outfitPieces;
         std::uint32_t bipedSlots{ 0 };
         std::uint32_t armorType{ 2 };
+        bool maleWeightSlider{ false };
+        bool femaleWeightSlider{ false };
         std::int32_t itemValue{ 0 };
         float itemWeight{ 0.0F };
         std::int32_t armorValue{ 0 };
