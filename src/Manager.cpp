@@ -22,6 +22,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -32,6 +33,7 @@
 #include <rapidjson/writer.h>
 #include <ranges>
 #include <set>
+#include <shared_mutex>
 #include <sqlite3.h>
 #include <stdexcept>
 #include <unordered_map>
@@ -45,6 +47,15 @@ namespace {
     std::atomic_bool apiReady{ false };
     std::atomic_bool responseListHookInstallationAttempted{ false };
     std::atomic_bool responseListHookInstalled{ false };
+    std::atomic_bool descriptionHookInstallationAttempted{ false };
+    std::atomic_bool descriptionHookInstalled{ false };
+    struct DescriptionOverride {
+        std::uint32_t chunkID;
+        std::string text;
+    };
+    std::shared_mutex descriptionOverridesMutex;
+    std::unordered_map<RE::FormID, DescriptionOverride> ownedDescriptions;
+    std::unordered_map<RE::FormID, DescriptionOverride> externalDescriptions;
     bool questPerkEntryLayoutValid{ true };
     std::unordered_map<RE::TESTopicInfo*, RE::TESTopicInfo::TESResponse*> dynamicDialogueResponses;
     std::unordered_map<std::string, std::vector<RE::TESForm*>> externalFormsByEditorId;
@@ -52,9 +63,89 @@ namespace {
     std::string soundPreviewEditorId;
     using GetResponseListFn = RE::TESTopicInfo::TESResponseList* (*)(RE::TESTopicInfo*, RE::TESTopicInfo::TESResponseList*);
     GetResponseListFn originalGetResponseList{ nullptr };
+    using GetDescriptionFn = void (*)(RE::TESDescription*, RE::BSString&, RE::TESForm*, std::uint32_t);
+    GetDescriptionFn originalGetDescription{ nullptr };
+    constexpr std::uint32_t DESC_CHUNK = 'CSED';
+    constexpr std::uint32_t CNAM_CHUNK = 'MANC';
     constexpr const char* UPDATED_EVENT = "DynamicFormsGeneratorUpdated";
     constexpr const char* LOADED_EVENT = "DynamicFormsGeneratorLoaded";
     constexpr std::uint8_t ARMA_WEIGHT_SLIDER_ENABLED = 0x02u;
+
+    std::uint32_t DescriptionChunkForKind(const DynamicForms::FormKind kind) {
+        using FK = DynamicForms::FormKind;
+        switch (kind) {
+        case FK::Book:
+            return CNAM_CHUNK;
+        case FK::Spell:
+        case FK::Scroll:
+        case FK::Perk:
+        case FK::Class:
+        case FK::Shout:
+        case FK::Message:
+        case FK::ActorValueInfo:
+            return DESC_CHUNK;
+        default:
+            return 0;
+        }
+    }
+
+    void SetDescriptionOverride(
+        std::unordered_map<RE::FormID, DescriptionOverride>& overrides,
+        RE::TESForm* target,
+        const DynamicForms::DynamicForm& form,
+        const bool active)
+    {
+        if (!target) {
+            return;
+        }
+        const auto chunkID = DescriptionChunkForKind(form.kind);
+        if (!chunkID) {
+            return;
+        }
+        std::unique_lock lock(descriptionOverridesMutex);
+        // External patches may intentionally replace a description with empty text.
+        if (active) {
+            overrides.insert_or_assign(target->GetFormID(), DescriptionOverride{ chunkID, form.description });
+        } else {
+            overrides.erase(target->GetFormID());
+        }
+    }
+
+    void EraseDescriptionOverrides(const RE::FormID formID) {
+        std::unique_lock lock(descriptionOverridesMutex);
+        ownedDescriptions.erase(formID);
+        externalDescriptions.erase(formID);
+    }
+
+    void GetDynamicDescription(
+        RE::TESDescription* description,
+        RE::BSString& out,
+        RE::TESForm* parent,
+        const std::uint32_t chunkID)
+    {
+        auto* form = parent ? parent : skyrim_cast<RE::TESForm*>(description);
+        if (form && (chunkID == DESC_CHUNK || chunkID == CNAM_CHUNK)) {
+            std::optional<std::string> replacement;
+            {
+                std::shared_lock lock(descriptionOverridesMutex);
+                const auto findMatching = [form, chunkID](const auto& overrides) -> const std::string* {
+                    const auto found = overrides.find(form->GetFormID());
+                    return found != overrides.end() && found->second.chunkID == chunkID ?
+                        &found->second.text : nullptr;
+                };
+                if (const auto* text = findMatching(externalDescriptions)) {
+                    replacement = *text;
+                } else if (const auto* text = findMatching(ownedDescriptions)) {
+                    replacement = *text;
+                }
+            }
+            if (replacement) {
+                out = replacement->c_str();
+                return;
+            }
+        }
+        originalGetDescription(description, out, form, chunkID);
+    }
     constexpr std::array CONDITION_KIND_NAMES{
         "Raw",
         "GetGlobalValue",
@@ -2038,9 +2129,6 @@ namespace {
         spell->menuDispObject = ResolveAs<RE::TESBoundObject>(form.menuDisplayObject);
         ApplyKeywords(static_cast<RE::BGSKeywordForm&>(*spell), form.keywords);
         ApplyMagicEffects(static_cast<RE::MagicItem&>(*spell), form);
-        if (!form.description.empty()) {
-            logger::debug("Spell '{}' description is saved in JSON but cannot be assigned directly with this CommonLib TESDescription layout.", form.editorId);
-        }
         logger::info("Configured spell '{}' FormID={:08X} type={} casting={} delivery={} range={} cost={} effects={}.",
             form.editorId,
             spell->GetFormID(),
@@ -2361,7 +2449,6 @@ namespace {
         npcClass->data.voicePoints = form.classVoicePoints;
         std::copy(form.classAttributeWeights.begin(), form.classAttributeWeights.end(), std::addressof(npcClass->data.attributeWeights.health));
         static_cast<RE::TESTexture&>(*npcClass).textureName = form.classIconPath.c_str();
-        if (!form.description.empty()) logger::debug("Class '{}' description persisted but not assigned to TESDescription.", form.editorId);
         return true;
     }
 
@@ -3725,9 +3812,6 @@ namespace {
 
         perk->SetFormEditorID(form.editorId.c_str());
         perk->fullName = form.fullName.c_str();
-        if (!form.description.empty()) {
-            logger::debug("Perk '{}' description is saved in JSON but cannot be assigned directly with this CommonLib TESDescription layout.", form.editorId);
-        }
         perk->data.trait = form.trait;
         perk->data.level = form.level;
         perk->data.numRanks = form.numRanks;
@@ -5658,7 +5742,6 @@ namespace {
                 value->variations[i].spell = ResolveAs<RE::SpellItem>(form.shoutSpells[i]); value->variations[i].recoveryTime = form.shoutRecoveryTimes[i];
             }
             ApplyRecordFlags(*value, form.recordFlags, 1u << 7);
-            if (!form.description.empty()) logger::debug("Shout '{}' description persisted but not assigned to TESDescription.", form.editorId);
             return true;
         }
         case FK::LeveledItem: { auto* value = tesForm->As<RE::TESLevItem>(); if (!value) return false; ApplyLeveledList(static_cast<RE::TESLeveledList&>(*value), form); return true; }
@@ -5749,7 +5832,7 @@ namespace {
         case FK::Message: {
             auto* value = tesForm->As<RE::BGSMessage>(); if (!value) return false; value->fullName = form.fullName.c_str(); value->icon = ResolveAs<RE::BGSMenuIcon>(form.messageMenuIcon); value->ownerQuest = ResolveAs<RE::TESQuest>(form.messageOwnerQuest); value->flags = static_cast<RE::BGSMessage::MessageFlag>(form.messageFlags); value->displayTime = form.messageDisplayTime; value->menuButtons.clear();
             for (const auto& source : form.messageButtons) { auto* button = new RE::BGSMessage::MESSAGEBOX_BUTTON(); button->text = source.text.c_str(); ApplyConditions(button->conditions, source.conditions); value->menuButtons.insert_at(value->menuButtons.size(), button); }
-            if (!form.description.empty()) logger::debug("Message '{}' description persisted but not assigned to TESDescription.", form.editorId); return true;
+            return true;
         }
         case FK::LandTexture: {
             auto* value = tesForm->As<RE::TESLandTexture>(); if (!value) return false; value->textureSet = ResolveAs<RE::BGSTextureSet>(form.landTextureSet); value->havokData.friction = form.landFriction; value->havokData.restitution = form.landRestitution; value->materialType = ResolveAs<RE::BGSMaterialType>(form.landMaterialType); value->specularExponent = form.landSpecularExponent; value->shaderTextureIndex = form.landShaderTextureIndex; value->textureGrassList.clear(); for (const auto& ref : form.landGrasses) if (auto* grass = ResolveAs<RE::TESGrass>(ref)) value->textureGrassList.insert_at(value->textureGrassList.size(), grass); return true;
@@ -5834,7 +5917,7 @@ namespace {
             value->fullName = form.fullName.c_str(); static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str(); value->abbreviation = form.actorValueAbbreviation.c_str(); value->enumName = copyString(form.actorValueEnumName); value->flags = static_cast<RE::ActorValueInfo::ActorValueFlag>(form.actorValueFlags); value->type = static_cast<RE::ActorValueInfo::ActorValueType>(std::min(form.actorValueType, 6u));
             value->enumValueCount = std::min<std::size_t>(form.actorValueEnumValues.size(), 10); for (std::size_t i = 0; i < value->enumValueCount; ++i) value->enumValues[i] = copyString(form.actorValueEnumValues[i]);
             if (form.actorValueHasSkillData) { if (!value->skill) value->skill = RE::calloc<RE::ActorValueInfo::Skill>(1); std::copy(form.actorValueSkillData.begin(), form.actorValueSkillData.end(), std::addressof(value->skill->useMult)); }
-            if (!form.description.empty()) logger::debug("Actor value info '{}' description persisted but not assigned to TESDescription.", form.editorId); return true;
+            return true;
         }
         case FK::DialogueBranch: {
             auto* value = tesForm->As<RE::BGSDialogueBranch>(); if (!value) return false;
@@ -5995,7 +6078,7 @@ namespace {
         }
     }
 
-    bool ConfigureForm(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+    bool ConfigureFormFields(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
         if (!tesForm) {
             return false;
         }
@@ -6111,6 +6194,16 @@ namespace {
             return ConfigureNPC(tesForm, form);
         }
 
+        return true;
+    }
+
+    bool ConfigureForm(RE::TESForm* tesForm, const DynamicForms::DynamicForm& form) {
+        if (!ConfigureFormFields(tesForm, form)) {
+            return false;
+        }
+        if (!form.externalPatch) {
+            SetDescriptionOverride(ownedDescriptions, tesForm, form, !form.description.empty());
+        }
         return true;
     }
 
@@ -7733,6 +7826,55 @@ namespace {
         return names;
     }
 
+    bool IsStoryManagerPatchKind(const DynamicForms::FormKind kind) {
+        using FK = DynamicForms::FormKind;
+        return kind == FK::StoryManagerBranchNode ||
+            kind == FK::StoryManagerQuestNode ||
+            kind == FK::StoryManagerEventNode;
+    }
+
+    bool ValidateExternalPatchFields(
+        const DynamicForms::FormKind kind,
+        const std::vector<std::string>& fields,
+        const std::string_view context)
+    {
+        if (!IsStoryManagerPatchKind(kind) && kind != DynamicForms::FormKind::ActorValueInfo) {
+            return true;
+        }
+        for (const auto& field : fields) {
+            if (kind == DynamicForms::FormKind::ActorValueInfo) {
+                if (field == "fullName" || field == "description" ||
+                    field == "inventoryIcon" || field == "actorValueAbbreviation") {
+                    continue;
+                }
+                logger::warn("External Actor Value Info patch '{}' cannot change field '{}'.", context, field);
+                return false;
+            }
+            const bool safeScalar = field == "storyMaxQuests" ||
+                field == "storyNodeFlags" || field == "storyQuestFlags";
+            const bool questCount = kind == DynamicForms::FormKind::StoryManagerQuestNode &&
+                field == "storyNumQuestsToStart";
+            if (!safeScalar && !questCount) {
+                logger::warn("External Story Manager patch '{}' cannot change field '{}'.", context, field);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool ValidateExternalPatchValues(
+        const DynamicForms::DynamicForm& form,
+        const std::vector<std::string>& fields)
+    {
+        if (form.kind == DynamicForms::FormKind::StoryManagerQuestNode &&
+            std::ranges::find(fields, "storyNumQuestsToStart") != fields.end() &&
+            form.storyNumQuestsToStart > form.storyQuests.size()) {
+            logger::warn("External Story Manager quest patch '{}' requests more quests than the node contains.", form.editorId);
+            return false;
+        }
+        return true;
+    }
+
     void ApplyExternalArrayOperationChoices(
         const DynamicForms::DynamicForm& form,
         const rapidjson::Document& baseline,
@@ -7814,6 +7956,10 @@ namespace {
         }
 
         const auto layerFields = ExternalChangeFieldNames(changes);
+        if (!ValidateExternalPatchFields(form.kind, layerFields, form.editorId) ||
+            !ValidateExternalPatchValues(form, layerFields)) {
+            return false;
+        }
         form.externalChangedFields = form.externalInheritedChangedFields;
         AppendUniqueFields(form.externalChangedFields, layerFields);
         form.externalConflictingFields = form.externalInheritedConflictingFields;
@@ -8041,6 +8187,10 @@ namespace {
         case FK::BodyPartData:
         case FK::VolumetricLighting:
         case FK::Sound:
+        case FK::ActorValueInfo:
+        case FK::StoryManagerBranchNode:
+        case FK::StoryManagerQuestNode:
+        case FK::StoryManagerEventNode:
             return true;
         default:
             return false;
@@ -8140,6 +8290,62 @@ namespace {
             "Applied {} sparse external PERK field(s) to '{}'.",
             fields.size(),
             form.editorId);
+        return true;
+    }
+
+    bool ConfigureExternalStoryManager(
+        RE::TESForm* tesForm,
+        const DynamicForms::DynamicForm& form,
+        const std::vector<std::string>& fields)
+    {
+        RE::BGSStoryManagerNodeBase* node = nullptr;
+        using FK = DynamicForms::FormKind;
+        switch (form.kind) {
+        case FK::StoryManagerBranchNode:
+            node = tesForm ? tesForm->As<RE::BGSStoryManagerBranchNode>() : nullptr;
+            break;
+        case FK::StoryManagerQuestNode:
+            node = tesForm ? tesForm->As<RE::BGSStoryManagerQuestNode>() : nullptr;
+            break;
+        case FK::StoryManagerEventNode:
+            node = tesForm ? tesForm->As<RE::BGSStoryManagerEventNode>() : nullptr;
+            break;
+        default:
+            return false;
+        }
+        if (!node || !ValidateExternalPatchFields(form.kind, fields, form.editorId)) {
+            return false;
+        }
+        if (form.kind == FK::StoryManagerQuestNode && HasExternalField(fields, "storyNumQuestsToStart") &&
+            form.storyNumQuestsToStart > static_cast<RE::BGSStoryManagerQuestNode*>(node)->quests.size()) {
+            logger::warn("External Story Manager quest patch '{}' requests more quests than the node contains.", form.editorId);
+            return false;
+        }
+
+        if (HasExternalField(fields, "storyMaxQuests")) node->maxQuests = form.storyMaxQuests;
+        if (HasExternalField(fields, "storyNodeFlags"))
+            node->flags.nodeFlags = static_cast<RE::BGSStoryManagerNodeBase::Flags::NodeFlag>(form.storyNodeFlags);
+        if (HasExternalField(fields, "storyQuestFlags"))
+            node->flags.questFags = static_cast<RE::BGSStoryManagerNodeBase::Flags::QuestFlag>(form.storyQuestFlags);
+        if (form.kind == FK::StoryManagerQuestNode && HasExternalField(fields, "storyNumQuestsToStart"))
+            static_cast<RE::BGSStoryManagerQuestNode*>(node)->numQuestsToStart = form.storyNumQuestsToStart;
+        return true;
+    }
+
+    bool ConfigureExternalActorValueInfo(
+        RE::TESForm* tesForm,
+        const DynamicForms::DynamicForm& form,
+        const std::vector<std::string>& fields)
+    {
+        auto* value = tesForm ? tesForm->As<RE::ActorValueInfo>() : nullptr;
+        if (!value || !ValidateExternalPatchFields(form.kind, fields, form.editorId)) {
+            return false;
+        }
+        if (HasExternalField(fields, "fullName")) value->fullName = form.fullName.c_str();
+        if (HasExternalField(fields, "inventoryIcon"))
+            static_cast<RE::TESIcon&>(*value).textureName = form.inventoryIcon.c_str();
+        if (HasExternalField(fields, "actorValueAbbreviation"))
+            value->abbreviation = form.actorValueAbbreviation.c_str();
         return true;
     }
 
@@ -8570,6 +8776,10 @@ namespace {
         const auto& fieldsToApply = form.externalPendingApplyFields.empty() ?
             form.externalChangedFields :
             form.externalPendingApplyFields;
+        if (!ValidateExternalPatchFields(form.kind, fieldsToApply, form.editorId) ||
+            !ValidateExternalPatchValues(form, fieldsToApply)) {
+            return false;
+        }
         if (fieldsToApply.empty()) {
             logger::debug(
                 "External patch '{}|{:X}' has no field changes to apply.",
@@ -8631,9 +8841,14 @@ namespace {
             return false;
         }
         runtimeValues.editorId = originalEditorId;
+        runtimeValues.externalPatch = true;
         bool configured = false;
         if (runtimeValues.kind == DynamicForms::FormKind::Perk) {
             configured = ConfigureExternalPerk(target, runtimeValues, fieldsToApply);
+        } else if (IsStoryManagerPatchKind(runtimeValues.kind)) {
+            configured = ConfigureExternalStoryManager(target, runtimeValues, fieldsToApply);
+        } else if (runtimeValues.kind == DynamicForms::FormKind::ActorValueInfo) {
+            configured = ConfigureExternalActorValueInfo(target, runtimeValues, fieldsToApply);
         } else if (runtimeValues.kind == DynamicForms::FormKind::NPC) {
             configured = ConfigureExternalNPC(target, runtimeValues, fieldsToApply);
         } else if (runtimeValues.kind == DynamicForms::FormKind::SoundDescriptor) {
@@ -8650,6 +8865,9 @@ namespace {
                 form.externalLocalId);
             return false;
         }
+        const bool overridesDescription =
+            std::ranges::find(form.externalChangedFields, "description") != form.externalChangedFields.end();
+        SetDescriptionOverride(externalDescriptions, target, runtimeValues, overridesDescription);
         form.externalPendingApplyFields.clear();
 
         std::string layers;
@@ -9119,6 +9337,11 @@ namespace {
         if (!BuildExternalChangesDocument(baseline, resolved, changes)) {
             return false;
         }
+        const auto changedFields = ExternalChangeFieldNames(changes);
+        if (!ValidateExternalPatchFields(form.kind, changedFields, form.editorId) ||
+            !ValidateExternalPatchValues(form, changedFields)) {
+            return false;
+        }
         ApplyExternalArrayOperationChoices(form, baseline, resolved, changes);
 
         SqliteDb db;
@@ -9458,6 +9681,7 @@ namespace {
             changesDocument.Parse(changesText);
             const auto context = std::format("{}:{}|{:X}", packageName, pluginText, localFormId);
             if (resolvedDocument.HasParseError() || changesDocument.HasParseError() ||
+                !ValidateExternalPatchFields(*parsedKind, ExternalChangeFieldNames(changesDocument), context) ||
                 !ApplyExternalChangesDocument(resolvedDocument, changesDocument, context))
             {
                 continue;
@@ -9509,7 +9733,10 @@ namespace {
             resolved.localId = 0;
             resolved.externalPersisted = true;
             resolved.dirty = false;
-            RefreshExternalFieldProvenance(resolved);
+            if (!RefreshExternalFieldProvenance(resolved)) {
+                logger::warn("External patch '{}' was skipped because its field values are invalid.", context);
+                continue;
+            }
 
             if (existing == forms.end()) {
                 forms.push_back(std::move(resolved));
@@ -9611,6 +9838,38 @@ namespace {
 
 namespace Manager {
     void InstallHooks() {
+        bool descriptionExpected = false;
+        if (descriptionHookInstallationAttempted.compare_exchange_strong(
+                descriptionExpected, true, std::memory_order_acq_rel)) {
+
+            REL::Relocation<std::uintptr_t> descriptionTarget{
+                REL::VariantID(14401, 14552, 0x1A0300) };
+            originalGetDescription = reinterpret_cast<GetDescriptionFn>(descriptionTarget.address());
+            if (const auto error = DetourTransactionBegin(); error != NO_ERROR) {
+                logger::error("Could not begin TESDescription detour: {}.", error);
+                originalGetDescription = nullptr;
+            } else if (const auto error = DetourUpdateThread(GetCurrentThread()); error != NO_ERROR) {
+                logger::error("Could not enlist the current thread for TESDescription detour: {}.", error);
+                DetourTransactionAbort();
+                originalGetDescription = nullptr;
+            } else if (const auto error = DetourAttach(
+                    reinterpret_cast<PVOID*>(&originalGetDescription),
+                    reinterpret_cast<PVOID>(GetDynamicDescription));
+                error != NO_ERROR) {
+                logger::error("Could not attach TESDescription detour: {}.", error);
+                DetourTransactionAbort();
+                originalGetDescription = nullptr;
+            } else if (const auto error = DetourTransactionCommit(); error != NO_ERROR) {
+                logger::error("Could not commit TESDescription detour: {}.", error);
+                originalGetDescription = nullptr;
+            } else {
+                descriptionHookInstalled.store(true, std::memory_order_release);
+                logger::info("Installed late TESDescription detour: target={}, chained entry={}.",
+                    fmt::ptr(reinterpret_cast<const void*>(descriptionTarget.address())),
+                    fmt::ptr(reinterpret_cast<void*>(originalGetDescription)));
+            }
+        }
+
         bool expected = false;
         if (!responseListHookInstallationAttempted.compare_exchange_strong(
                 expected,
@@ -9694,6 +9953,11 @@ namespace Manager {
 
     void LoadForms() {
         apiReady.store(false, std::memory_order_release);
+        {
+            std::unique_lock lock(descriptionOverridesMutex);
+            ownedDescriptions.clear();
+            externalDescriptions.clear();
+        }
         forms.clear();
         dynamicDialogueResponses.clear();
         BuildExternalEditorIdIndex();
@@ -11156,14 +11420,21 @@ namespace Manager {
             std::erase(previous.patchPackageNames, removed.externalEditPackage);
             previous.externalEditPackage.clear();
             previous.externalBaselinePayload.clear();
-            previous.externalChangedFields = removed.externalChangedFields;
+            previous.externalChangedFields = removed.externalInheritedChangedFields;
+            previous.externalPendingApplyFields = removed.externalChangedFields;
             previous.externalConflictingFields = removed.externalInheritedConflictingFields;
             previous.dirty = false;
 
             if (removed.externalPersisted && !ApplyExternalResolvedForm(previous)) {
+                if (auto* target = LookupExternalPatchTarget(
+                        previous.externalSourcePlugin, previous.externalLocalId)) {
+                    const bool inheritedDescription =
+                        std::ranges::find(previous.externalChangedFields, "description") !=
+                        previous.externalChangedFields.end();
+                    SetDescriptionOverride(externalDescriptions, target, previous, inheritedDescription);
+                }
                 logger::warn("External patch was deleted but its previous runtime state could not be reapplied.");
             }
-            previous.externalChangedFields = removed.externalInheritedChangedFields;
             previous.externalPersisted = true;
 
             const auto signature = ToSignature(removed.kind);
@@ -11188,6 +11459,7 @@ namespace Manager {
         bool recoveredExistingSlot = false;
         auto* runtimeForm =
             ResolveDPFFormObject(runtimeSnapshot, false, &recoveredExistingSlot);
+        const auto runtimeFormID = runtimeForm ? runtimeForm->GetFormID() : 0;
         const auto& releasedForm = runtimeForm ? runtimeSnapshot : form;
         auto* runtimePerk = runtimeForm ? runtimeForm->As<RE::BGSPerk>() : nullptr;
         const auto actorSnapshots = runtimePerk ?
@@ -11214,6 +11486,10 @@ namespace Manager {
                 releasedForm.pluginNumber,
                 releasedForm.localId);
             return false;
+        }
+
+        if (runtimeFormID) {
+            EraseDescriptionOverrides(runtimeFormID);
         }
 
         if (!DeleteStoredForm(form)) {
@@ -11842,6 +12118,9 @@ namespace
             return;
         }
 
+        if (attemptedRuntime) {
+            EraseDescriptionOverrides(attemptedRuntime->GetFormID());
+        }
         ReleaseNewSlot(attemptedForm);
         auto restored = oldForm;
         restored.pluginNumber = 0;
@@ -11950,6 +12229,7 @@ namespace
         }
 
         if (!Manager::SaveForm(form)) {
+            EraseDescriptionOverrides(runtimeForm->GetFormID());
             if (!recoveredExistingSlot) {
                 ReleaseNewSlot(form);
             }
@@ -12154,6 +12434,10 @@ namespace
             return Fail(result,
                 DFG::Status::DPFReleaseFailed,
                 std::format("DPF could not release slot {}:{:06X}.", releasedForm.pluginNumber, releasedForm.localId));
+        }
+
+        if (deletedFormID) {
+            EraseDescriptionOverrides(deletedFormID);
         }
 
         if (!DeleteStoredForm(form)) {

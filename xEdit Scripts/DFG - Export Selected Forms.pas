@@ -1769,7 +1769,7 @@ begin
     if Assigned(soundRefs[i]) then
       AddFormRefKV(sl, 'magicEffectSound' + IntToStr(i), soundRefs[i]);
 
-  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''));
+  AddPerkConditionsArray(sl, 'conditions', FirstElementByPath(e, 'Conditions', 'Conditions (sorted)', 'CTDA - Conditions', ''), '  ');
 end;
 
 function ArmorTypeFromRecord(e: IInterface): string;

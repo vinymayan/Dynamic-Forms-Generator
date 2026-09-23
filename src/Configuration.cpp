@@ -4761,7 +4761,15 @@ namespace {
             DrawSoundPreviewControls(index, form);
             changed |= DrawFormReferencePicker("Sound descriptor", "SoundDescriptor", edited.legacySoundDescriptor);
         } else if (form.kind == FK::ActorValueInfo) {
+            if (form.externalPatch) {
+                changed |= InputString("Name", edited.fullName);
+                changed |= InputString("Description", edited.description, 520.0F);
+                changed |= InputString("Icon path", edited.inventoryIcon, 520.0F);
+                changed |= InputString("Abbreviation", edited.actorValueAbbreviation);
+                ImGui::TextDisabled("Other Actor Value fields cannot be patched on an existing plugin form.");
+            } else {
             changed |= InputString("Name", edited.fullName); changed |= InputString("Description", edited.description, 520.0F); changed |= InputString("Icon path", edited.inventoryIcon, 520.0F); changed |= InputString("Abbreviation", edited.actorValueAbbreviation); constexpr std::array types{ "Attribute", "Skill", "AI Temperament", "Damage Resistance", "Limb Condition", "Status", "Miscellaneous" }; int type = static_cast<int>(std::min(edited.actorValueType, 6u)); SetStableComboWidth(types, 240.0F); if (ImGui::Combo("Actor value type", &type, types.data(), static_cast<int>(types.size()))) { edited.actorValueType = type; changed = true; } constexpr std::array avFlags{ "Hostile Effects Scale With Difficulty", "Special Stat Clamps Nonzero", "Clamp As Special Stat", "Clamp As Skill", "Can Have Modifiers", "Dynamic Base Plus Current", "Base Computed From Actor", "Enumeration", "Inverted", "Base Computed From Race", "Cannot Be Altered By Scripts", "Base Always Zero", "Base Always One", "Base Always One Hundred", "Cache Current Value", "Cache Maximum Value", "Protected By God Mode", "Display Effect Magnitude x100" }; constexpr std::array<std::uint32_t, avFlags.size()> avBits{ 1u << 1, 1u << 2, 1u << 3, 1u << 4, 1u << 5, 1u << 6, 1u << 7, 1u << 8, 1u << 9, 1u << 11, 1u << 14, 1u << 15, 1u << 16, 1u << 17, 1u << 18, 1u << 19, 1u << 20, 1u << 21 }; for (std::size_t i = 0; i < avFlags.size(); ++i) changed |= FlagCheckbox(avFlags[i], edited.actorValueFlags, avBits[i]); if ((edited.actorValueFlags & (1u << 8)) != 0) { changed |= InputString("Enum name", edited.actorValueEnumName); for (std::size_t i = 0; i < edited.actorValueEnumValues.size(); ++i) { ImGui::PushID(static_cast<int>(i)); changed |= InputString("Enum value", edited.actorValueEnumValues[i]); if (ImGui::SmallButton("Remove enum value")) { edited.actorValueEnumValues.erase(edited.actorValueEnumValues.begin() + static_cast<std::ptrdiff_t>(i)); changed = true; ImGui::PopID(); break; } ImGui::PopID(); } if (edited.actorValueEnumValues.size() < 10 && ImGui::Button("Add enum value")) { edited.actorValueEnumValues.emplace_back(); changed = true; } } changed |= ImGui::Checkbox("Has skill data", &edited.actorValueHasSkillData); if (edited.actorValueHasSkillData) { constexpr std::array skillLabels{ "Use multiplier", "Offset multiplier", "Improve multiplier", "Improve offset" }; changed |= inputFloatArray("av-skill", edited.actorValueSkillData, skillLabels); }
+            }
         } else if (form.kind == FK::DialogueBranch) {
             int type = static_cast<int>(std::min(edited.dialogueBranchType, 7u)); SetStableComboWidth(DIALOGUE_TYPE_ITEMS, 240.0F); if (ImGui::Combo("Dialogue type", &type, DIALOGUE_TYPE_ITEMS.data(), static_cast<int>(DIALOGUE_TYPE_ITEMS.size()))) { edited.dialogueBranchType = type; changed = true; }
             changed |= FlagCheckbox("Top Level", edited.dialogueBranchFlags, 1u << 0); changed |= FlagCheckbox("Blocking", edited.dialogueBranchFlags, 1u << 1); changed |= FlagCheckbox("Exclusive", edited.dialogueBranchFlags, 1u << 2); changed |= DrawFormReferencePicker("Quest", "Quest", edited.dialogueBranchQuest); changed |= DrawFormReferencePicker("Starting topic", "DialogueTopic", edited.dialogueBranchStartingTopic);
@@ -4919,22 +4927,28 @@ namespace {
             for(std::size_t i=0;i<edited.scenePhases.size();++i){auto& phase=edited.scenePhases[i];ImGui::PushID(static_cast<int>(i)+1000);ImGui::Separator();ImGui::Text("Phase %zu",i);ImGui::Text("Start conditions");changed|=DrawPerkConditions(phase.startConditions);ImGui::Text("Completion conditions");changed|=DrawPerkConditions(phase.completionConditions);changed|=DrawFormReferencePicker("Quest node","StoryManagerQuestNode",phase.questNode);if(ImGui::SmallButton("Remove phase")){edited.scenePhases.erase(edited.scenePhases.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::Button("Add phase")){edited.scenePhases.emplace_back();changed=true;}
             for(std::size_t i=0;i<edited.sceneActions.size();++i){auto& action=edited.sceneActions[i];ImGui::PushID(static_cast<int>(i)+2000);ImGui::Separator();constexpr std::array actionTypes{"Dialogue","Package","Timer"};int actionType=static_cast<int>(std::min(action.type,2u));if(ImGui::Combo("Action type",&actionType,actionTypes.data(),static_cast<int>(actionTypes.size()))){action.type=actionType;changed=true;}changed|=inputInt("Actor alias",action.actorId,0,65535);changed|=inputInt("Start phase",action.startPhase,0,65535);changed|=inputInt("End phase",action.endPhase,0,65535);changed|=inputInt("Action index",action.index,0,65535);changed|=FlagCheckbox("Face Target",action.flags,1u<<15);changed|=FlagCheckbox("Looping",action.flags,1u<<16);changed|=FlagCheckbox("Head Track Player",action.flags,1u<<17);if(action.type==0){changed|=DrawFormReferencePicker("Topic","DialogueTopic",action.topic);changed|=inputInt("Headtrack alias",action.headtrackActorId,-1,65535);changed|=inputFloat("Loop minimum",action.loopingMin);changed|=inputFloat("Loop maximum",action.loopingMax);int emotion=static_cast<int>(std::min(action.emotionType,7u));if(ImGui::Combo("Emotion",&emotion,DIALOGUE_EMOTION_ITEMS.data(),static_cast<int>(DIALOGUE_EMOTION_ITEMS.size()))){action.emotionType=emotion;changed=true;}changed|=inputInt("Emotion value",action.emotionValue,0,100);}else if(action.type==1)changed|=DrawFormRefListEditor("Package","Package",action.packages);else changed|=inputFloat("Timer seconds",action.timerSeconds);if(ImGui::SmallButton("Remove action")){edited.sceneActions.erase(edited.sceneActions.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::Button("Add action")){edited.sceneActions.emplace_back();changed=true;}
         } else if (form.kind == FK::StoryManagerBranchNode || form.kind == FK::StoryManagerQuestNode || form.kind == FK::StoryManagerEventNode) {
+            if (form.externalPatch) {
+                ImGui::TextDisabled("External patches currently support only Story Manager scalar settings.");
+                ImGui::BeginDisabled();
+            }
             changed |= DrawFormReferencePicker("Parent", "StoryManagerBranchNode", edited.storyParent);
             changed |= DrawAnyFormReferencePicker("Previous sibling", edited.storyPreviousSibling);
+            if (form.externalPatch) ImGui::EndDisabled();
             changed |= inputInt("Maximum quests", edited.storyMaxQuests, 0, std::numeric_limits<int>::max());
             changed |= FlagCheckbox("Random", edited.storyNodeFlags, 1u << 0);
             changed |= FlagCheckbox("Warn If No Child Quest Started", edited.storyNodeFlags, 1u << 1);
             changed |= FlagCheckbox("Do All Before Repeating", edited.storyQuestFlags, 1u << 0);
             changed |= FlagCheckbox("Shares Event", edited.storyQuestFlags, 1u << 1);
             changed |= FlagCheckbox("Use Number Of Quests", edited.storyQuestFlags, 1u << 2);
+            if (form.kind == FK::StoryManagerQuestNode)
+                changed |= inputInt("Quests to start", edited.storyNumQuestsToStart, 0, std::numeric_limits<int>::max());
+            if (form.externalPatch) ImGui::BeginDisabled();
             changed |= DrawPerkConditions(edited.conditions);
             if (form.kind == FK::StoryManagerBranchNode || form.kind == FK::StoryManagerEventNode)
                 changed |= DrawReferenceArrayEditor("Child node", nullptr, edited.storyChildren);
             if (form.kind == FK::StoryManagerEventNode)
                 changed |= InputString("Registered event ID", edited.storyEventId);
             if (form.kind == FK::StoryManagerQuestNode) {
-                changed |=
-                    inputInt("Quests to start", edited.storyNumQuestsToStart, 0, std::numeric_limits<int>::max());
                 for (std::size_t i = 0; i < edited.storyQuests.size(); ++i) {
                     auto& entry = edited.storyQuests[i];
                     ImGui::PushID(static_cast<int>(i));
@@ -4955,6 +4969,7 @@ namespace {
                     changed = true;
                 }
             }
+            if (form.externalPatch) ImGui::EndDisabled();
         } else if (form.kind == FK::Package) {
             constexpr std::array packageTypes{"Explore",
                                               "Follow",
