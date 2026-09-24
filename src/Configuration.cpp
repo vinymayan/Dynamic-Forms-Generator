@@ -4928,7 +4928,8 @@ namespace {
             for(std::size_t i=0;i<edited.sceneActions.size();++i){auto& action=edited.sceneActions[i];ImGui::PushID(static_cast<int>(i)+2000);ImGui::Separator();constexpr std::array actionTypes{"Dialogue","Package","Timer"};int actionType=static_cast<int>(std::min(action.type,2u));if(ImGui::Combo("Action type",&actionType,actionTypes.data(),static_cast<int>(actionTypes.size()))){action.type=actionType;changed=true;}changed|=inputInt("Actor alias",action.actorId,0,65535);changed|=inputInt("Start phase",action.startPhase,0,65535);changed|=inputInt("End phase",action.endPhase,0,65535);changed|=inputInt("Action index",action.index,0,65535);changed|=FlagCheckbox("Face Target",action.flags,1u<<15);changed|=FlagCheckbox("Looping",action.flags,1u<<16);changed|=FlagCheckbox("Head Track Player",action.flags,1u<<17);if(action.type==0){changed|=DrawFormReferencePicker("Topic","DialogueTopic",action.topic);changed|=inputInt("Headtrack alias",action.headtrackActorId,-1,65535);changed|=inputFloat("Loop minimum",action.loopingMin);changed|=inputFloat("Loop maximum",action.loopingMax);int emotion=static_cast<int>(std::min(action.emotionType,7u));if(ImGui::Combo("Emotion",&emotion,DIALOGUE_EMOTION_ITEMS.data(),static_cast<int>(DIALOGUE_EMOTION_ITEMS.size()))){action.emotionType=emotion;changed=true;}changed|=inputInt("Emotion value",action.emotionValue,0,100);}else if(action.type==1)changed|=DrawFormRefListEditor("Package","Package",action.packages);else changed|=inputFloat("Timer seconds",action.timerSeconds);if(ImGui::SmallButton("Remove action")){edited.sceneActions.erase(edited.sceneActions.begin()+i);changed=true;ImGui::PopID();break;}ImGui::PopID();}if(ImGui::Button("Add action")){edited.sceneActions.emplace_back();changed=true;}
         } else if (form.kind == FK::StoryManagerBranchNode || form.kind == FK::StoryManagerQuestNode || form.kind == FK::StoryManagerEventNode) {
             if (form.externalPatch) {
-                ImGui::TextDisabled("External patches currently support only Story Manager scalar settings.");
+                ImGui::TextDisabled("Conditions and tree/quest changes apply after restarting the game.");
+                ImGui::TextDisabled("Parent and previous sibling follow the parent's child list.");
                 ImGui::BeginDisabled();
             }
             changed |= DrawFormReferencePicker("Parent", "StoryManagerBranchNode", edited.storyParent);
@@ -4942,12 +4943,13 @@ namespace {
             changed |= FlagCheckbox("Use Number Of Quests", edited.storyQuestFlags, 1u << 2);
             if (form.kind == FK::StoryManagerQuestNode)
                 changed |= inputInt("Quests to start", edited.storyNumQuestsToStart, 0, std::numeric_limits<int>::max());
-            if (form.externalPatch) ImGui::BeginDisabled();
             changed |= DrawPerkConditions(edited.conditions);
             if (form.kind == FK::StoryManagerBranchNode || form.kind == FK::StoryManagerEventNode)
                 changed |= DrawReferenceArrayEditor("Child node", nullptr, edited.storyChildren);
+            if (form.externalPatch) ImGui::BeginDisabled();
             if (form.kind == FK::StoryManagerEventNode)
                 changed |= InputString("Registered event ID", edited.storyEventId);
+            if (form.externalPatch) ImGui::EndDisabled();
             if (form.kind == FK::StoryManagerQuestNode) {
                 for (std::size_t i = 0; i < edited.storyQuests.size(); ++i) {
                     auto& entry = edited.storyQuests[i];
@@ -4969,7 +4971,6 @@ namespace {
                     changed = true;
                 }
             }
-            if (form.externalPatch) ImGui::EndDisabled();
         } else if (form.kind == FK::Package) {
             constexpr std::array packageTypes{"Explore",
                                               "Follow",

@@ -56,6 +56,8 @@ namespace {
     std::shared_mutex descriptionOverridesMutex;
     std::unordered_map<RE::FormID, DescriptionOverride> ownedDescriptions;
     std::unordered_map<RE::FormID, DescriptionOverride> externalDescriptions;
+    bool applyingStartupForms{ false };
+    bool startupStoryApplicationFinished{ false };
     bool questPerkEntryLayoutValid{ true };
     std::unordered_map<RE::TESTopicInfo*, RE::TESTopicInfo::TESResponse*> dynamicDialogueResponses;
     std::unordered_map<std::string, std::vector<RE::TESForm*>> externalFormsByEditorId;
@@ -7833,6 +7835,12 @@ namespace {
             kind == FK::StoryManagerEventNode;
     }
 
+    bool HasStoryStructureField(const std::vector<std::string>& fields) {
+        return std::ranges::any_of(fields, [](const std::string& field) {
+            return field == "conditions" || field == "storyChildren" || field == "storyQuests";
+        });
+    }
+
     bool ValidateExternalPatchFields(
         const DynamicForms::FormKind kind,
         const std::vector<std::string>& fields,
@@ -7854,7 +7862,10 @@ namespace {
                 field == "storyNodeFlags" || field == "storyQuestFlags";
             const bool questCount = kind == DynamicForms::FormKind::StoryManagerQuestNode &&
                 field == "storyNumQuestsToStart";
-            if (!safeScalar && !questCount) {
+            const bool structure = field == "conditions" ||
+                (field == "storyChildren" && kind != DynamicForms::FormKind::StoryManagerQuestNode) ||
+                (field == "storyQuests" && kind == DynamicForms::FormKind::StoryManagerQuestNode);
+            if (!safeScalar && !questCount && !structure) {
                 logger::warn("External Story Manager patch '{}' cannot change field '{}'.", context, field);
                 return false;
             }
@@ -7867,7 +7878,8 @@ namespace {
         const std::vector<std::string>& fields)
     {
         if (form.kind == DynamicForms::FormKind::StoryManagerQuestNode &&
-            std::ranges::find(fields, "storyNumQuestsToStart") != fields.end() &&
+            (std::ranges::find(fields, "storyNumQuestsToStart") != fields.end() ||
+             std::ranges::find(fields, "storyQuests") != fields.end()) &&
             form.storyNumQuestsToStart > form.storyQuests.size()) {
             logger::warn("External Story Manager quest patch '{}' requests more quests than the node contains.", form.editorId);
             return false;
@@ -8316,10 +8328,128 @@ namespace {
         if (!node || !ValidateExternalPatchFields(form.kind, fields, form.editorId)) {
             return false;
         }
-        if (form.kind == FK::StoryManagerQuestNode && HasExternalField(fields, "storyNumQuestsToStart") &&
-            form.storyNumQuestsToStart > static_cast<RE::BGSStoryManagerQuestNode*>(node)->quests.size()) {
+        const bool patchConditions = HasExternalField(fields, "conditions");
+        const bool patchChildren = HasExternalField(fields, "storyChildren");
+        const bool patchQuests = HasExternalField(fields, "storyQuests");
+        if ((patchConditions || patchChildren || patchQuests) && !applyingStartupForms) {
+            logger::info("Story Manager structural patch '{}' is stored and will apply after restarting the game.", form.editorId);
+            return true;
+        }
+
+        auto* questNode = form.kind == FK::StoryManagerQuestNode ?
+            static_cast<RE::BGSStoryManagerQuestNode*>(node) : nullptr;
+        auto* branch = patchChildren ? tesForm->As<RE::BGSStoryManagerBranchNode>() : nullptr;
+        std::vector<RE::BGSStoryManagerNodeBase*> children;
+        std::vector<RE::TESQuest*> quests;
+        std::vector<std::unique_ptr<RE::TESConditionItem>> conditions;
+
+        // Validate and allocate everything before changing a plugin-owned node.
+        if (patchChildren) {
+            if (!branch) return false;
+            for (const auto& ref : form.storyChildren) {
+                auto* child = ResolveAs<RE::BGSStoryManagerNodeBase>(ref);
+                if (!child || child == node || child->As<RE::BGSStoryManagerEventNode>() ||
+                    std::ranges::find(children, child) != children.end()) {
+                    logger::warn("Story Manager patch '{}' has an invalid or duplicate child.", form.editorId);
+                    return false;
+                }
+                std::set<RE::BGSStoryManagerNodeBase*> ancestry;
+                for (auto* ancestor = node; ancestor; ancestor = ancestor->parent) {
+                    if (ancestor == child || !ancestry.insert(ancestor).second) {
+                        logger::warn("Story Manager patch '{}' would create or retain a tree cycle.", form.editorId);
+                        return false;
+                    }
+                }
+                children.push_back(child);
+            }
+        }
+        if (patchQuests) {
+            if (!questNode) return false;
+            for (const auto& entry : form.storyQuests) {
+                auto* quest = ResolveAs<RE::TESQuest>(entry.quest);
+                if (!quest || std::ranges::find(quests, quest) != quests.end()) {
+                    logger::warn("Story Manager patch '{}' has an invalid or duplicate quest.", form.editorId);
+                    return false;
+                }
+                quests.push_back(quest);
+            }
+            // Save-game child state is indexed by quest position: never remove or reorder ESP entries.
+            if (quests.size() < questNode->quests.size()) {
+                logger::warn("Story Manager patch '{}' cannot remove original quest entries.", form.editorId);
+                return false;
+            }
+            for (std::size_t i = 0; i < questNode->quests.size(); ++i)
+                if (quests[i] != questNode->quests[i]) {
+                    logger::warn("Story Manager patch '{}' cannot reorder original quest entries.", form.editorId);
+                    return false;
+                }
+        }
+        if (questNode && (patchQuests || HasExternalField(fields, "storyNumQuestsToStart")) &&
+            form.storyNumQuestsToStart > (patchQuests ? quests.size() : questNode->quests.size())) {
             logger::warn("External Story Manager quest patch '{}' requests more quests than the node contains.", form.editorId);
             return false;
+        }
+        if (patchConditions) {
+            conditions.reserve(form.conditions.size());
+            for (const auto& source : form.conditions)
+                conditions.emplace_back(CreateConditionItem(source));
+            for (std::size_t i = 1; i < conditions.size(); ++i)
+                conditions[i - 1]->next = conditions[i].get();
+        }
+
+        if (patchChildren) {
+            for (auto* oldChild : branch->children)
+                if (!oldChild) return false;
+            for (auto* child : children)
+                if (auto* oldParent = child->parent; oldParent && oldParent != branch)
+                    for (auto* sibling : oldParent->children)
+                        if (!sibling) return false;
+        }
+
+        if (patchConditions) {
+            // ponytail: Keep the ESP chain alive until process exit; hot structural edits need owned-chain tracking.
+            node->conditions.head = conditions.empty() ? nullptr : conditions.front().get();
+            for (auto& condition : conditions) condition.release();
+        }
+        if (patchChildren) {
+            for (auto* oldChild : branch->children)
+                if (oldChild->parent == branch && std::ranges::find(children, oldChild) == children.end()) {
+                    oldChild->parent = nullptr;
+                    oldChild->previousSibling = nullptr;
+                }
+            for (auto* child : children) {
+                auto* oldParent = child->parent;
+                if (oldParent && oldParent != branch) {
+                    auto it = std::ranges::find(oldParent->children, child);
+                    if (it != oldParent->children.end()) {
+                        oldParent->children.erase(it);
+                        RE::BGSStoryManagerNodeBase* previous = nullptr;
+                        for (auto* sibling : oldParent->children) {
+                            sibling->previousSibling = previous;
+                            previous = sibling;
+                        }
+                    }
+                }
+            }
+            branch->children.clear();
+            RE::BGSStoryManagerNodeBase* previous = nullptr;
+            for (auto* child : children) {
+                branch->children.push_back(child);
+                child->parent = branch;
+                child->previousSibling = previous;
+                previous = child;
+            }
+        }
+        if (patchQuests) {
+            questNode->quests.clear();
+            questNode->perQuestFlags.clear();
+            questNode->perQuestHoursUntilReset.clear();
+            for (std::size_t i = 0; i < quests.size(); ++i) {
+                questNode->quests.push_back(quests[i]);
+                questNode->perQuestFlags.emplace(quests[i], form.storyQuests[i].flags);
+                questNode->perQuestHoursUntilReset.emplace(quests[i], form.storyQuests[i].hoursUntilReset);
+            }
+            questNode->childrenLastRun.resize(quests.size());
         }
 
         if (HasExternalField(fields, "storyMaxQuests")) node->maxQuests = form.storyMaxQuests;
@@ -8327,8 +8457,8 @@ namespace {
             node->flags.nodeFlags = static_cast<RE::BGSStoryManagerNodeBase::Flags::NodeFlag>(form.storyNodeFlags);
         if (HasExternalField(fields, "storyQuestFlags"))
             node->flags.questFags = static_cast<RE::BGSStoryManagerNodeBase::Flags::QuestFlag>(form.storyQuestFlags);
-        if (form.kind == FK::StoryManagerQuestNode && HasExternalField(fields, "storyNumQuestsToStart"))
-            static_cast<RE::BGSStoryManagerQuestNode*>(node)->numQuestsToStart = form.storyNumQuestsToStart;
+        if (questNode && HasExternalField(fields, "storyNumQuestsToStart"))
+            questNode->numQuestsToStart = form.storyNumQuestsToStart;
         return true;
     }
 
@@ -8779,6 +8909,12 @@ namespace {
         if (!ValidateExternalPatchFields(form.kind, fieldsToApply, form.editorId) ||
             !ValidateExternalPatchValues(form, fieldsToApply)) {
             return false;
+        }
+        if (IsStoryManagerPatchKind(form.kind) && HasStoryStructureField(fieldsToApply) &&
+            !applyingStartupForms) {
+            logger::info("Story Manager structural patch '{}' was saved; restart the game to apply it.", form.editorId);
+            form.externalPendingApplyFields.clear();
+            return true;
         }
         if (fieldsToApply.empty()) {
             logger::debug(
@@ -11875,19 +12011,24 @@ namespace Manager {
 
         if (allApplied) {
             for (auto& form : forms) {
-                if (form.externalPatch) {
-                    if (!ApplyExternalResolvedForm(form)) {
+                if (form.externalPatch) continue;
+                auto* runtimeForm = ResolveDPFFormObject(form, false);
+                if (!runtimeForm || !ConfigureForm(runtimeForm, form)) {
+                    allApplied = false;
+                }
+            }
+            if (allApplied) {
+                applyingStartupForms = !startupStoryApplicationFinished;
+                for (auto& form : forms) {
+                    if (form.externalPatch && !ApplyExternalResolvedForm(form)) {
                         logger::warn(
                             "External patch '{}|{:X}' was skipped; DFG-owned forms will continue loading.",
                             form.externalSourcePlugin,
                             form.externalLocalId);
                     }
-                    continue;
                 }
-                auto* runtimeForm = ResolveDPFFormObject(form, false);
-                if (!runtimeForm || !ConfigureForm(runtimeForm, form)) {
-                    allApplied = false;
-                }
+                applyingStartupForms = false;
+                startupStoryApplicationFinished = true;
             }
         }
 
