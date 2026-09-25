@@ -6429,6 +6429,7 @@ namespace {
             return "Weather";
         }
         if (
+            rawType == "ptEventData" ||
             rawType == "ptInventoryObject" ||
             rawType == "ptMagicItem" ||
             rawType == "ptKnowable" ||

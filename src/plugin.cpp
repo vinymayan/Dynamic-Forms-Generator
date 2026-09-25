@@ -7,8 +7,6 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         Configuration::Register();
     }
     if (message->type == SKSE::MessagingInterface::kDataLoaded) {
-        // Install after kPostPostLoad so prologue hooks from plugins such as
-        // Dynamic String Distributor are already complete and can be chained.
         Manager::InstallHooks();
         Manager::LoadForms();
         Manager::ApplyAllForms();

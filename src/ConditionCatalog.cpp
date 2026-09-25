@@ -441,7 +441,7 @@ namespace ConditionCatalog {
     {
         return IsOneOf(rawType, {
             "ptActorValue", "ptAdvanceAction", "ptAlignment", "ptAxis", "ptCastingSource",
-            "ptCrimeType", "ptCriticalStage", "ptEvent", "ptEventData", "ptFormType",
+            "ptCrimeType", "ptCriticalStage", "ptEvent", "ptFormType",
             "ptFurnitureAnim", "ptFurnitureEntry", "ptInteger", "ptMiscStat", "ptQuestStage",
             "ptSex", "ptVATSValueFunction", "ptVATSValueParam", "ptWardState"
         });

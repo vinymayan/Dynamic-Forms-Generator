@@ -2875,8 +2875,10 @@ namespace {
         item->data.comparisonValue.f = condition.comparisonValue;
 
         if (!condition.runOnRef.empty()) {
-            if (auto* runOnForm = ResolveConfigForm(condition.runOnRef); runOnForm && runOnForm->Is(RE::FormType::Reference)) {
-                item->data.runOnRef = runOnForm->As<RE::TESObjectREFR>()->CreateRefHandle();
+            if (auto* runOnForm = ResolveConfigForm(condition.runOnRef)) {
+                if (auto* runOnRef = runOnForm->As<RE::TESObjectREFR>()) {
+                    item->data.runOnRef = runOnRef->CreateRefHandle();
+                }
             }
         }
 
@@ -3102,7 +3104,8 @@ namespace {
         std::vector<std::string>& errors)
     {
         const auto functionId = FunctionIdForCondition(condition);
-        if (functionId >= static_cast<std::uint32_t>(RE::FUNCTION_DATA::FunctionID::kTotal)) {
+        if (functionId >= static_cast<std::uint32_t>(RE::FUNCTION_DATA::FunctionID::kTotal) &&
+            !ConditionCatalog::FindFunction(functionId)) {
             errors.push_back(std::format("{} uses invalid condition function ID {}.", path, functionId));
         }
         if (condition.opCode > 5U) {
@@ -3124,7 +3127,7 @@ namespace {
         }
         if (condition.runOn == 2U) {
             const auto* runOnForm = ResolveConfigForm(condition.runOnRef);
-            if (!runOnForm || !runOnForm->Is(RE::FormType::Reference)) {
+            if (!runOnForm || !runOnForm->As<RE::TESObjectREFR>()) {
                 errors.push_back(std::format(
                     "{} requires a valid placed reference when Run On is Reference.",
                     path));
@@ -7828,6 +7831,22 @@ namespace {
         return names;
     }
 
+    bool ValidateExternalStoryConditions(const DynamicForms::DynamicForm& form) {
+        std::vector<std::string> errors;
+        for (std::size_t i = 0; i < form.conditions.size(); ++i) {
+            const auto& condition = form.conditions[i];
+            if (!ConditionCatalog::FindFunction(FunctionIdForCondition(condition))) {
+                errors.push_back(std::format("Story Manager condition {} has an unsupported function.", i));
+                continue;
+            }
+            ValidateCondition(condition, std::format("Story Manager condition {}", i), errors);
+        }
+        for (const auto& error : errors) {
+            logger::warn("Cannot patch '{}': {}", form.editorId, error);
+        }
+        return errors.empty();
+    }
+
     bool IsStoryManagerPatchKind(const DynamicForms::FormKind kind) {
         using FK = DynamicForms::FormKind;
         return kind == FK::StoryManagerBranchNode ||
@@ -8390,9 +8409,26 @@ namespace {
             return false;
         }
         if (patchConditions) {
+            if (!ValidateExternalStoryConditions(form)) return false;
             conditions.reserve(form.conditions.size());
-            for (const auto& source : form.conditions)
-                conditions.emplace_back(CreateConditionItem(source));
+            for (const auto& source : form.conditions) {
+                std::unique_ptr<RE::TESConditionItem> item(CreateConditionItem(source));
+                if (source.runOn == 2U && !item->data.runOnRef.get()) {
+                    logger::warn("Story Manager patch '{}' could not create a Run On reference handle.", form.editorId);
+                    return false;
+                }
+                const auto* info = ConditionCatalog::FindFunction(FunctionIdForCondition(source));
+                const std::array params{ std::pair{ info->rawParam1, std::string_view(source.param1) },
+                    std::pair{ info->rawParam2, std::string_view(source.param2) } };
+                for (std::size_t i = 0; i < params.size(); ++i) {
+                    if (!params[i].second.empty() && ConditionCatalog::IsFormParam(params[i].first) &&
+                        !item->data.functionData.params[i]) {
+                        logger::warn("Story Manager patch '{}' could not resolve condition form parameter {}.", form.editorId, i + 1);
+                        return false;
+                    }
+                }
+                conditions.push_back(std::move(item));
+            }
             for (std::size_t i = 1; i < conditions.size(); ++i)
                 conditions[i - 1]->next = conditions[i].get();
         }
@@ -9476,6 +9512,10 @@ namespace {
         const auto changedFields = ExternalChangeFieldNames(changes);
         if (!ValidateExternalPatchFields(form.kind, changedFields, form.editorId) ||
             !ValidateExternalPatchValues(form, changedFields)) {
+            return false;
+        }
+        if (IsStoryManagerPatchKind(form.kind) && HasExternalField(changedFields, "conditions") &&
+            !ValidateExternalStoryConditions(form)) {
             return false;
         }
         ApplyExternalArrayOperationChoices(form, baseline, resolved, changes);
